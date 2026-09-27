@@ -181,8 +181,8 @@ Current addon-affecting retest commit: 4df6d0b9c1c3682e5077eaaab6b191f445aa3c16.
 - No obvious later-Lua syntax/API blacklist hit is present in the current source.
 - Canonical Lua 5.0.3 compiler check remains not run against 0.1.17-dev: the connected GitHub source is not mounted in the executable environment, and direct network cloning from the executable environment is unavailable.
 - The 0.1.16 reverse-completion delta is not yet user-tested. The 0.1.14 partial broad-matrix results remain the last runtime baseline and must not be rewritten as tests of protocol v2.
-- Performance A/B result: with PFQG enabled, moving the mouse anywhere on screen drops from about 120 FPS to below 100 with poor frametime; with PFQG disabled but pfQuest still enabled, mouse movement still drops FPS (about 120 -> 80) but frametime feels substantially smoother. This demonstrates that PFQG is exacerbating an underlying mouse/input-sensitive client cost even though PFQG has no global mouse-movement hook.
-- 0.1.17-dev performance isolation: the always-installed main quest-scan OnUpdate was replaced by a hidden worker frame that is shown only while a quest scan is actually pending and hides itself immediately when idle. This removes PFQG's steady-state quest-scan per-frame Lua callback without changing quest-scan behavior. The Guide/Tourist window's completion OnUpdate remains unchanged for this A/B so the effect can be isolated.
+- Initial performance A/B on 0.1.16: with PFQG enabled, moving the mouse anywhere on screen dropped from about 120 FPS to below 100 with poor frametime; with PFQG disabled but pfQuest still enabled, mouse movement still dropped FPS (about 120 -> 80) but frametime felt substantially smoother.
+- 0.1.17-dev performance fix: the always-installed main quest-scan OnUpdate was replaced by a hidden worker frame that is shown only while a quest scan is actually pending and hides itself immediately when idle. Follow-up user A/B after updating and re-enabling PFQG reports that enabled frametime now feels no worse than disabled. Treat the idle quest-scan OnUpdate as a confirmed PFQG performance contributor and the 0.1.17 delta as user-verified for this symptom.
 - Separate from the mouse-specific symptom, the current Vanilla PARTY transport still has a known fan-out inefficiency: logically targeted recovery packets are PARTY broadcasts without an encoded recipient, so non-target PFQG peers can process them. This is a concrete optimization candidate, but it has not yet been changed because it does not explain a stutter that occurs only while the mouse moves.
 
 ## Testing
@@ -198,10 +198,10 @@ Current addon-affecting retest commit: 4df6d0b9c1c3682e5077eaaab6b191f445aa3c16.
 - Deferred polish: exact remote-member binary presentation/spacing will be fine-tuned later and is not a current functional blocker.
 
 ### Next Runtime Test
-First A/B 0.1.17-dev / 4df6d0b9c1c3682e5077eaaab6b191f445aa3c16 against the same mouse-movement scenario: stationary at the FPS cap, then continuous mouse movement anywhere on screen, noting FPS and especially frametime feel. Compare PFQG enabled vs disabled with pfQuest left enabled. Also compare PFQG enabled in Off mode versus Guide/Tourist mode if practical. If 0.1.17 materially improves enabled frametime, continue reverse-completion and broad-matrix testing on 0.1.17. If not, next inspect/disable the Guide/Tourist completion OnUpdate and then address the separate PARTY targeted-traffic fan-out inefficiency.
+Continue runtime validation on 0.1.17-dev / 4df6d0b9c1c3682e5077eaaab6b191f445aa3c16. First test the protocol-v2 reverse-completion feature: one Tourist completion should strike/fade/remove the Guide row; with two Tourists the Guide row must remain until both eligible Tourists complete; a Tourist joining after an older step must not block it; reload/rejoin recovery should preserve acknowledgement where practical. Then continue the remaining broad-matrix gaps. Keep remote-member tracker presentation polish deferred.
 
 ## Planned / Next Work
-1. User first A/B tests 0.1.17-dev for the mouse-movement frametime regression with pfQuest left enabled.
+1. User tests the protocol-v2 reverse-completion feature on the now performance-verified 0.1.17-dev build.
 2. Fix only defects demonstrated by that runtime test, with normal version discipline.
 3. Continue the remaining broad-matrix gaps on the resulting known-good build; keep remote-member tracker presentation polish deferred.
 4. After a known-good runtime state exists, review release/promotion readiness separately; do not treat development checks as a runtime test.
@@ -218,4 +218,4 @@ First A/B 0.1.17-dev / 4df6d0b9c1c3682e5077eaaab6b191f445aa3c16 against the same
 - External/runtime prerequisite: pfQuest.
 
 ## Exact Next Step
-Update the test client(s) to 0.1.17-dev / 4df6d0b9c1c3682e5077eaaab6b191f445aa3c16 and repeat the same stationary-vs-moving-mouse frametime A/B with PFQG enabled and disabled while keeping pfQuest enabled. If possible, also compare PFQG Off mode against Guide/Tourist mode. Report the qualitative frametime difference and approximate FPS ranges before further optimization or promotion.
+Keep all PFQG test clients on 0.1.17-dev / 4df6d0b9c1c3682e5077eaaab6b191f445aa3c16 and test reverse Tourist-completion feedback first, then resume the untested broad-matrix cases. The mouse-movement frametime regression is considered resolved on this build unless it recurs.
