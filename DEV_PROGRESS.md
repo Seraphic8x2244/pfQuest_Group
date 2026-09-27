@@ -122,7 +122,8 @@
 - Follow-up runtime feedback on 0.1.10-dev: the binary tick/cross overlay was present but pfQuest's native `0/1` or `1/1` count text remained visible on the same objective row.
 - Follow-up runtime feedback after the text fix: the expected binary tick/cross mark itself was not visible. Inspection showed the mark was a literal Unicode `✓` / `✗` in `GameFontNormal`, which is not reliable on the Vanilla client font set.
 - 0.1.12-dev screenshot result: remote PFQG class icon plus red incomplete/cross texture is visibly rendering on quests the peer has. Local `1/1` and `0/1` text remained unchanged on other binary objectives, demonstrating that local conversion was wrongly gated on `questPeers` being non-empty.
-- 0.1.13-dev screenshot result: local binary replacement now works and remote class/status still renders correctly. The remaining visible defect is layout: status markers are right-anchored to the tracker edge, leaving an excessive gap after short objective labels.
+- 0.1.13-dev screenshot result: local binary replacement works and remote class/status renders correctly; the remaining visible defect was right-edge justification.
+- Follow-up after the 0.1.14-dev inline-layout handoff: the user reports their own local binary symbols are now in the correct place. Remote-member presentation still needs subjective fine-tuning, but that polish is explicitly deferred until after broad functional validation.
 
 ### Implemented / Awaiting Runtime Test
 - 0.1.9+ delta: all addon transport uses the Vanilla-supported PARTY addon channel; no four-argument addon-WHISPER send remains.
@@ -167,26 +168,25 @@ Current addon-affecting retest commit: fb3f8f3bcf46b0372303db590d4f68694aba97af.
 - The binary objective text collision is fixed in 0.1.11+ by removing only the terminal numeric fraction in the binary overlay branch; the underlying captured pfQuest text is not destroyed. Focused in-game retest is still required.
 - The invisible binary mark defect is fixed in 0.1.12+ by replacing literal Unicode marks with Vanilla-era Blizzard textures; the screenshot confirms the remote red incomplete/cross texture is visible.
 - The 0.1.12 local binary replacement gating defect is fixed and user-verified in 0.1.13-dev: local binary status no longer depends on any peer having the quest.
-- The 0.1.13 binary-row justification defect is fixed in 0.1.14-dev by placing status inline after the objective label rather than against the tracker edge. Focused in-game retest is still required.
-- Static triage excludes the Lua 5.0.3 200-local cap as the reported error source; current top-level pressure remains 144.
+- The 0.1.13 binary-row justification defect is fixed and locally user-verified in 0.1.14-dev by placing the local status inline after the objective label. Remote-member presentation polish is deferred.
+- Static triage excludes the Lua 5.0.3 200-local cap as the reported error source; current top-level pressure is 145.
 - No obvious later-Lua syntax/API blacklist hit is present in the current source.
-- Canonical Lua 5.0.3 compiler check remains not run against 0.1.10-dev: the connected GitHub source is not mounted in the executable environment, and direct network cloning from the executable environment is unavailable.
-- No release/promotion decision should be made until the 0.1.10-dev runtime retest confirms these fixes and the remaining broad-test points are reconciled.
+- Canonical Lua 5.0.3 compiler check remains not run against 0.1.14-dev: the connected GitHub source is not mounted in the executable environment, and direct network cloning from the executable environment is unavailable.
+- No release/promotion decision should be made until the 0.1.14-dev broad runtime matrix is reconciled.
 
 ## Testing
 
 ### Last Runtime Test
-- Version/commit: 0.1.8-dev / bfe9b578802bf87ed418cb3c329684acfe787825.
-- Passed/appears good: basic Guide/Tourist behavior appeared to work during the run.
-- Failed: addon communications hit `Interface\\AddOns\\aux-addon\\libs\\ChatThrottleLib.lua:261: unknown addon chat type`, localized to pfQuest_Group using addon-message WHISPER, which is unsupported in WoW 1.12.
-- Failed/behavior correction: Group Progress must not render a PFQG peer's class icon/status when that peer does not have the tracked quest.
-- Not yet reconciled: exhaustive instruction/recovery paths, disparities, reload/restart recovery, party churn, window persistence, Off cleanup, and the remainder of Group Progress.
+- Version/commit: 0.1.14-dev / fb3f8f3bcf46b0372303db590d4f68694aba97af (follow-up report against the current addon build context).
+- Passed/appears good: local binary `0/1` / `1/1` replacement works and the user's own complete/incomplete symbols are now positioned correctly; earlier testing also showed basic Guide/Tourist behavior working and remote class/status rendering functioning.
+- Deferred polish: exact remote-member binary presentation/spacing will be fine-tuned later and is not a current functional blocker.
+- Not yet reconciled: full communications/reload recovery, exhaustive quest-state synchronization, count objectives, multi-peer behavior, instruction baseline/consumption/recovery, disparities, party churn, persistence, Off cleanup, and the remaining broad-test matrix.
 
 ### Next Runtime Test
-Run 0.1.14-dev / fb3f8f3bcf46b0372303db590d4f68694aba97af. Verify: (1) binary rows read naturally as objective label -> local complete/incomplete status -> remote class/status pairs, with no large right-edge gap; (2) local `0/1` / `1/1` replacement remains correct; (3) remote class/status still appears only for PFQG peers who have the quest; (4) multi-count objectives such as `3/10` remain unchanged; (5) party discovery/sync and reload/recovery produce no ChatThrottleLib `unknown addon chat type` error; (6) Guide/Tourist basic behavior still works.
+Run the full broad runtime matrix on 0.1.14-dev / fb3f8f3bcf46b0372303db590d4f68694aba97af. Cover startup/error monitoring, party discovery and PARTY transport, local/remote quest-state synchronization, binary and count Group Progress behavior, Guide/Tourist pairing and instruction lifecycle, disparity controls, reload/restart and leave/rejoin recovery, UI persistence, Off cleanup, and multi-peer behavior where available. Record PASS / FAIL / SKIP plus concise notes for every numbered case.
 
 ## Planned / Next Work
-1. User performs the focused 0.1.14-dev retest for inline binary-row layout, while rechecking peer-scoped remote status, communications, and basic Guide/Tourist behavior.
+1. User performs the full numbered 0.1.14-dev broad runtime matrix.
 2. Fix only defects demonstrated by that retest, with normal version discipline.
 3. Reconcile the remaining broad-test results point by point.
 4. After a known-good runtime state exists, review release/promotion readiness separately; do not treat development checks as a runtime test.
@@ -203,4 +203,4 @@ Run 0.1.14-dev / fb3f8f3bcf46b0372303db590d4f68694aba97af. Verify: (1) binary ro
 - External/runtime prerequisite: pfQuest.
 
 ## Exact Next Step
-Test 0.1.14-dev / fb3f8f3bcf46b0372303db590d4f68694aba97af in game. First verify that binary rows are visually inline rather than right-justified, while local replacement and peer-scoped remote class/status remain correct. Then recheck communications/reload and basic Guide/Tourist behavior. Do not begin unrelated feature work or promote to main before this retest is reconciled.
+Run the supplied numbered broad runtime matrix on 0.1.14-dev / fb3f8f3bcf46b0372303db590d4f68694aba97af and report PASS / FAIL / SKIP with notes per case. Keep remote-member presentation fine-tuning deferred. Do not begin unrelated feature work or promote to main before the matrix is reconciled.
