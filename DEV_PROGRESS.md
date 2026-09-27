@@ -2,12 +2,12 @@
 
 ## Current
 - Branch: dev.
-- Version: 0.1.14-dev from pfQuest_Group.toc.
-- Latest addon-affecting development commit: fb3f8f3bcf46b0372303db590d4f68694aba97af — align local and remote binary Group Progress status inline with the objective label.
+- Version: 0.1.16-dev from pfQuest_Group.toc.
+- Latest addon-affecting development commit: c74a0da565d412ad118466faaff1640e21d8096c — reverse Tourist instruction completion acknowledgement hardening on top of the Guide-side completion feedback feature.
 - Handoff checkpoint: the current dev head carrying this status file; always verify the actual remote branch head before resuming.
 - Stable baseline: None. main remains exactly bootstrap commit 4c5c63f074923266566c36c51ce2718d0060166f and is not a runtime release.
-- Goal: complete and reconcile the broad in-game validation of the integrated Phase 1–6 test build, diagnose and fix only demonstrated defects, then decide release/promotion readiness.
-- Scope boundary: Phase 6 code hardening is complete. Broad runtime testing found the Vanilla addon-WHISPER transport defect plus Group Progress presentation defects around peer filtering and binary status rendering. 0.1.13-dev runtime confirms local binary replacement and remote class/status rendering now work; the remaining demonstrated defect was awkward right-edge justification. 0.1.14-dev changes only binary status positioning to inline flow and awaits focused retest; no unrelated feature work or architecture changes are authorized.
+- Goal: validate the new reverse Tourist-completion feedback on top of the partially user-verified 0.1.14 baseline, then continue the remaining broad matrix and decide release/promotion readiness.
+- Scope boundary: the user explicitly requested one post-Phase-6 feature addition: when every Tourist eligible for a Guide instruction has completed it, the Guide should receive the same strike/fade/removal feedback. That feature is implemented in 0.1.16-dev through the existing Phase 4b instructions owner and Phase 5 window; remote-member tracker visual fine-tuning remains deferred.
 
 ## Current Design / Development Contract
 
@@ -31,7 +31,7 @@
 - Group Progress is independent of Guide/Tourist mode.
 
 ### Protocol / Peer State
-- Protocol prefix: PFQGROUP; protocol version: 1; SavedVariables schema: 1.
+- Protocol prefix: PFQGROUP; protocol version: 2; SavedVariables schema: 1. Protocol v2 is deliberate because Tourist -> Guide instruction-completion acknowledgements extend the instructions-component wire semantics; v1 peers are rejected rather than silently behaving as non-acknowledging Tourists.
 - Only actual current party members participate; discovery scans party1 through party4.
 - Transport remains native Vanilla SendAddonMessage over PARTY. WoW 1.12 SendAddonMessage does not support WHISPER; logical directed recovery validates the requested party peer but uses the PARTY addon channel.
 - Wire types remain HELLO (H), full-state request (R), full snapshot (F), and component delta (D).
@@ -73,6 +73,8 @@
 - Remote instruction full snapshots are accepted only when coherent with the currently known remote Guide session. Same-session stale cursors cannot roll backward.
 - Tourist pending instructions are selected-Guide/session scoped and include only seq > joinBaseline. Consumed instruction sequence numbers persist so reload/full resync does not replay completed work.
 - Matching local Tourist ACCEPT/TURNIN consumes the earliest matching pending instruction; numeric questID is authoritative when both sides have one and title is fallback.
+- Tourist consumed sequence state remains persisted in the Phase 4b instruction store. Under protocol v2 a Tourist sends an idempotent completion delta when consuming a step and includes the consumed set in its instructions full snapshot, so missed acknowledgements can recover through the existing full-state path without a new scheduler or component.
+- Guide completion is derived only for Tourists paired to the same Guide session whose fixed joinBaseline is below that instruction sequence; Tourists who joined after the step do not block it. When all currently eligible paired Tourists have acknowledged the step, the Guide row uses the existing strike/fade/removal presentation. Acknowledgements seen by unrelated PARTY peers are ignored.
 
 ### Guide / Tourist Window and Disparities
 - The existing compact movable Phase 5 window is the only Guide/Tourist presentation window and is shown only in Guide/Tourist mode.
@@ -110,6 +112,8 @@
 - 6419463902225f4672eb1a398bd34a79ae8406a3 — replace Unicode `✓` / `✗` font glyphs with Blizzard `UI-CheckBox-Check` / `UI-GroupLoot-Pass-Up` textures; version 0.1.12-dev.
 - a840dfa7b45918e202ed10038ca5a9cc77d56ab9 — always render local binary complete/incomplete status, independent of whether any peer has the quest; version 0.1.13-dev.
 - fb3f8f3bcf46b0372303db590d4f68694aba97af — move binary local/remote status from right-edge justification to inline placement after the objective label; version 0.1.14-dev.
+- 07f509361926fa05dcdab748a40c08b5e77d5933 — add protocol-v2 Tourist completion acknowledgements and Guide-side all-Tourists strike/fade/removal; version 0.1.15-dev.
+- c74a0da565d412ad118466faaff1640e21d8096c — make unrelated PARTY recipients ignore Tourist completion acknowledgements instead of requesting unnecessary full sync; version 0.1.16-dev.
 
 ## Validation State
 
@@ -129,6 +133,8 @@
 - Guide ACCEPT/TURNIN instruction creation passed, but NPC-name presentation remains unverified. The current instruction row renderer shows only quest title; `npcName` is still carried in instruction state when resolvable.
 
 ### Implemented / Awaiting Runtime Test
+- 0.1.16-dev reverse-completion delta: protocol v2 extends only the existing instructions component. Tourist completion deltas/full snapshots carry consumed instruction sequences; Guide completion waits for all currently eligible same-session Tourists, then uses the existing strike/fade/removal UI.
+- 0.1.16-dev recovery/transport hardening: consumed state is recoverable through full snapshots; acknowledgements are idempotent; unrelated PARTY recipients ignore them; no new component, session owner, scheduler, or Guide/Tourist window was introduced.
 - 0.1.9+ delta: all addon transport uses the Vanilla-supported PARTY addon channel; no four-argument addon-WHISPER send remains.
 - 0.1.10+ delta: Group Progress filters compatible peers per tracked quest before creating binary/count status regions, so peers without that quest are omitted while the overlay remains mode-independent.
 - 0.1.11+ delta: in the binary branch only, Group Progress strips a terminal numeric fraction from the saved pfQuest objective text before rendering peer status. Multi-count objectives remain on the existing count-row path and the untouched base text is restored whenever the overlay is not applicable.
@@ -145,19 +151,18 @@
 
 ### Static / Automated Checks — Exact Phase 6 Addon State
 Exact original Phase 6 test commit: bfe9b578802bf87ed418cb3c329684acfe787825.
-Current addon-affecting retest commit: fb3f8f3bcf46b0372303db590d4f68694aba97af.
-- pfQuest_Group.lua blob: 2aeb9ed756936f27d3c69f341fa8acf437782182.
-- locales/enUS.lua blob: 0122994a3bd10ef5d0202dc6794d0c7bd32c7655 (unchanged from Phase 5b).
-- pfQuest_Group.toc blob: 0a19ef766fb6453a2967bb8ed91a7ec574f563e7.
+Current addon-affecting retest commit: c74a0da565d412ad118466faaff1640e21d8096c.
+- pfQuest_Group.lua blob: 5e03d3a1d3b7c7a15d7ef2e643f4ec82f385e747.
+- locales/enUS.lua blob: 0122994a3bd10ef5d0202dc6794d0c7bd32c7655 (unchanged from the tested 0.1.14 baseline).
+- pfQuest_Group.toc blob: 70433a2bcdae8d69a991fbc7b5529012425a8dba.
 - dev_rulebook.md blob: 1e054bc02930ece70445abd9ef910750193a9461 (unchanged).
-- Version discipline: passed; 0.1.7-dev -> 0.1.8-dev.
-- Scope check: passed. Relative to the Phase 5b handoff, the addon-affecting commit changes only pfQuest_Group.lua and pfQuest_Group.toc.
-- main remains exactly 4c5c63f074923266566c36c51ce2718d0060166f.
-- Protocol check: PFQGROUP protocol version remains 1.
-- Ownership check: exactly one session component registration, one quests component registration, one instructions component registration, one Addon.SetMode definition, and one Guide/Tourist window initializer.
-- Current UI structural count after the local binary marker addition: 5 CreateFrame, 4 CreateFontString, and 5 CreateTexture call sites. The added texture is a reusable per-objective local binary status marker; no new window architecture is introduced.
-- Static later-Lua/API scan passed for the exact committed source: no string.match, string.gmatch, table.unpack, select(, RegisterAddonMessagePrefix, C_QuestLog, C_ChatInfo, or C_Timer tokens.
-- Token-level local scan of the original 0.1.8 source found 144 actual top-level locals. Changes through 0.1.12 did not alter that top-level count. 0.1.13 adds one top-level helper (`EnsureLocalBinaryStatus`), bringing current top-level pressure to 145, leaving 55 below Lua 5.0.3's 200-local top-level chunk limit. The affected tracker function remains far below 200 locals.
+- Version discipline: passed for the new delta; 0.1.14-dev -> 0.1.15-dev for the feature, then -> 0.1.16-dev for the PARTY-recipient robustness correction.
+- Protocol check: PFQGROUP is deliberately protocol version 2; prefix remains PFQGROUP and SavedVariables schema remains 1.
+- Ownership check: exactly one session component registration, one quests component registration, one instructions component registration, one Addon.SetMode definition, and one Guide/Tourist window initializer. Reverse completion remains inside the existing instructions component/window.
+- Transport check: exactly one SendAddonMessage call remains and it uses the Vanilla three-argument PARTY form.
+- UI structural call-site count remains 5 CreateFrame, 4 CreateFontString, and 5 CreateTexture; the reverse feedback reuses the existing strike/fade row presentation.
+- Static later-Lua/API scan passed for the exact 0.1.16 source: no string.match, string.gmatch, table.unpack, select(, RegisterAddonMessagePrefix, C_QuestLog, C_ChatInfo, C_Timer, goto, or label syntax.
+- Token-level local scan of the exact 0.1.16 source found 151 top-level locals, leaving 49 below Lua 5.0.3's 200-local top-level chunk limit. The largest scanned inner function remains far below 200 locals.
 - Focused Phase 6 mocked integration harness passed texluac -p and runtime assertions under the available Lua 5.3.6 texluac/texlua environment. Coverage: session-first full snapshots; first-known/restarted boot invalidation and recovery; quest readiness/revision handling; numeric-ID-authoritative matching; cross-session instruction-full rejection; missed-instruction cursor resync; instruction validation before cursor mutation; instruction-delta-before-session-delta ordering.
 
 ### Checks Not Actually Runnable
@@ -174,8 +179,8 @@ Current addon-affecting retest commit: fb3f8f3bcf46b0372303db590d4f68694aba97af.
 - The 0.1.13 binary-row justification defect is fixed and locally user-verified in 0.1.14-dev by placing the local status inline after the objective label. Remote-member presentation polish is deferred.
 - Static triage excludes the Lua 5.0.3 200-local cap as the reported error source; current top-level pressure is 145.
 - No obvious later-Lua syntax/API blacklist hit is present in the current source.
-- Canonical Lua 5.0.3 compiler check remains not run against 0.1.14-dev: the connected GitHub source is not mounted in the executable environment, and direct network cloning from the executable environment is unavailable.
-- No release/promotion decision should be made until the 0.1.14-dev broad runtime matrix is reconciled.
+- Canonical Lua 5.0.3 compiler check remains not run against 0.1.16-dev: the connected GitHub source is not mounted in the executable environment, and direct network cloning from the executable environment is unavailable.
+- The 0.1.16 reverse-completion delta is not yet user-tested. The 0.1.14 partial broad-matrix results remain the last runtime baseline and must not be rewritten as tests of protocol v2.
 
 ## Testing
 
@@ -190,12 +195,12 @@ Current addon-affecting retest commit: fb3f8f3bcf46b0372303db590d4f68694aba97af.
 - Deferred polish: exact remote-member binary presentation/spacing will be fine-tuned later and is not a current functional blocker.
 
 ### Next Runtime Test
-Continue the same numbered matrix on 0.1.14-dev / fb3f8f3bcf46b0372303db590d4f68694aba97af, prioritizing currently untested functional coverage rather than repeating existing passes. Highest-value next cases: 21, 23-26 (remote live quest/count updates); 36-38, 40-41 (session edge/Off behavior); 42, 46-51 (instruction baseline and consumption); 53-62 (Guide/Tourist reload/rejoin persistence); 63-74 (disparities); 77-80 (remaining window/mode cleanup); 81-88 (recovery/stress). Optional protocol cases 89-91 may remain SKIP if impractical. Keep remote-member tracker visual fine-tuning deferred.
+First run a focused protocol-v2/reverse-completion test on 0.1.16-dev / c74a0da565d412ad118466faaff1640e21d8096c with every participating PFQG client updated to 0.1.16: (1) 2-player discovery and basic Guide/Tourist pairing still work with no Lua/ChatThrottleLib errors; (2) Guide creates a step, one Tourist consumes it, Tourist still gets its local strike/fade and Guide now gets strike/fade/removal; (3) with two Tourists, one completion leaves the Guide row visible and the second completion triggers Guide removal; (4) a Tourist joining after an existing step does not block that old step; (5) reload/rejoin/full-sync recovery preserves completion acknowledgement where practical; (6) unrelated Tourist PARTY recipients do not cause sync churn/errors. After that passes, continue the remaining 0.1.14 broad-matrix gaps on the 0.1.16 build. Keep remote-member tracker visual fine-tuning deferred.
 
 ## Planned / Next Work
-1. User continues the untested portions of the numbered 0.1.14-dev broad runtime matrix.
-2. Fix only defects demonstrated by runtime results, with normal version discipline.
-3. Reconcile remaining untested/qualified cases point by point; do not turn presentation preferences into blocking defects unless the user chooses to address them.
+1. User runs the focused 0.1.16 protocol-v2/reverse-completion test on all-updated clients.
+2. Fix only defects demonstrated by that runtime test, with normal version discipline.
+3. Continue the remaining broad-matrix gaps on the resulting known-good build; keep remote-member tracker presentation polish deferred.
 4. After a known-good runtime state exists, review release/promotion readiness separately; do not treat development checks as a runtime test.
 
 ## Deferred / Out of Scope
@@ -210,4 +215,4 @@ Continue the same numbered matrix on 0.1.14-dev / fb3f8f3bcf46b0372303db590d4f68
 - External/runtime prerequisite: pfQuest.
 
 ## Exact Next Step
-Continue the untested numbered cases on 0.1.14-dev / fb3f8f3bcf46b0372303db590d4f68694aba97af, especially remote live updates, instruction baseline/consumption, Guide/Tourist reload/rejoin persistence, disparities, and recovery stress. Report PASS / FAIL / SKIP with notes. Keep remote-member presentation fine-tuning deferred and do not promote to main before the broad matrix is sufficiently reconciled.
+Update every PFQG test client to 0.1.16-dev / c74a0da565d412ad118466faaff1640e21d8096c and test the reverse completion path first: one Tourist completion, then the two-Tourist all-complete gate, plus a reload/recovery pass. Protocol v1 builds are intentionally incompatible with this test. Report PASS / FAIL / SKIP with notes before continuing the remaining broad matrix or considering promotion.
