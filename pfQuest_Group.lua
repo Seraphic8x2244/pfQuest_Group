@@ -1918,6 +1918,7 @@ end
 local function ApplyGroupProgressToButton(button, captureBase)
   local trackerFrame = pfQuest and pfQuest.tracker
   local peersInOrder
+  local questPeers = {}
   local localQuest
   local fontSize
   local entryHeight
@@ -1955,6 +1956,19 @@ local function ApplyGroupProgressToButton(button, captureBase)
     return
   end
 
+  for peerIndex = 1, table.getn(peersInOrder) do
+    peerInfo = peersInOrder[peerIndex]
+    if FindRemoteTrackerQuest(peerInfo.questState, localQuest) then
+      table.insert(questPeers, peerInfo)
+    end
+  end
+
+  if table.getn(questPeers) == 0 then
+    RestoreGroupTrackerButton(button)
+    return
+  end
+
+  peersInOrder = questPeers
   fontSize = GetGroupTrackerFontSize(button)
   entryHeight = math.ceil(fontSize * 1.6)
   iconSize = math.max(8, fontSize - 2)
