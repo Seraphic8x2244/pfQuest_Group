@@ -1740,8 +1740,7 @@ local function EnsureBinaryGroupStatus(button, objectiveIndex, peerIndex)
   if not entry then
     entry = {}
     entry.icon = button:CreateTexture(nil, "ARTWORK")
-    entry.mark = button:CreateFontString(nil, "HIGH", "GameFontNormal")
-    entry.mark:SetJustifyH("CENTER")
+    entry.mark = button:CreateTexture(nil, "OVERLAY")
     objectiveStatuses[peerIndex] = entry
   end
 
@@ -1972,7 +1971,7 @@ local function ApplyGroupProgressToButton(button, captureBase)
   fontSize = GetGroupTrackerFontSize(button)
   entryHeight = math.ceil(fontSize * 1.6)
   iconSize = math.max(8, fontSize - 2)
-  pairWidth = iconSize + 8
+  pairWidth = (iconSize * 2) + 2
 
   for objectiveIndex = 1, table.getn(localQuest.objectives or {}) do
     objective = button.objectives and button.objectives[objectiveIndex]
@@ -2011,11 +2010,15 @@ local function ApplyGroupProgressToButton(button, captureBase)
 
           entry.mark:ClearAllPoints()
           entry.mark:SetPoint("LEFT", entry.icon, "RIGHT", 1, 0)
-          entry.mark:SetWidth(7)
+          entry.mark:SetWidth(iconSize)
           entry.mark:SetHeight(iconSize)
-          CopyGroupTrackerFont(objective, entry.mark, fontSize)
-          entry.mark:SetText(RemoteObjectiveDone(remoteObjective) and "✓" or "✗")
-          entry.mark:SetTextColor(1, 1, 1)
+          if RemoteObjectiveDone(remoteObjective) then
+            entry.mark:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
+            entry.mark:SetVertexColor(0.25, 1, 0.25, 1)
+          else
+            entry.mark:SetTexture("Interface\\Buttons\\UI-GroupLoot-Pass-Up")
+            entry.mark:SetVertexColor(1, 0.25, 0.25, 1)
+          end
           entry.mark:Show()
         end
       else
