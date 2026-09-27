@@ -2875,6 +2875,7 @@ end
 local function SaveGuideTouristWindowPosition()
   local state
   local point
+  local relativeTo
   local relativePoint
   local x
   local y
@@ -2885,7 +2886,7 @@ local function SaveGuideTouristWindowPosition()
 
   Addon.db.ui = NormalizeUIState(Addon.db.ui)
   state = Addon.db.ui.guideWindow
-  point, _, relativePoint, x, y = guideTouristUI.frame:GetPoint()
+  point, relativeTo, relativePoint, x, y = guideTouristUI.frame:GetPoint()
   state.point = point or "CENTER"
   state.relativePoint = relativePoint or state.point
   state.x = tonumber(x) or 0
