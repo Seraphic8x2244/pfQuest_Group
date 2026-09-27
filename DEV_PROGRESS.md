@@ -6,8 +6,8 @@
 - Latest addon-affecting development commit: bfe9b578802bf87ed418cb3c329684acfe787825 — Phase 6 integration/state-recovery hardening.
 - Handoff checkpoint: the current dev head carrying this status file; always verify the actual remote branch head before resuming.
 - Stable baseline: None. main remains exactly bootstrap commit 4c5c63f074923266566c36c51ce2718d0060166f and is not a runtime release.
-- Goal: perform the first broad in-game validation of the integrated Phase 1–6 test build, fix any defects found, then decide release/promotion readiness.
-- Scope boundary: Phase 6 code hardening is complete. No additional feature work or architecture changes are planned before the broad runtime test. No in-game testing has been performed yet.
+- Goal: reconcile the first broad in-game validation of the integrated Phase 1–6 test build, diagnose and fix only demonstrated defects, then decide release/promotion readiness.
+- Scope boundary: Phase 6 code hardening is complete. The broad runtime test has begun and exposed at least one Lua error on the exact 0.1.8-dev test build; no unrelated feature work or architecture changes are authorized.
 
 ## Current Design / Development Contract
 
@@ -108,7 +108,8 @@
 
 ### Completed / User-Verified
 - Repository, product direction, and staged development plan were confirmed by the user.
-- No addon runtime behaviour has yet been user-tested in game.
+- Broad in-game testing has begun on 0.1.8-dev / bfe9b578802bf87ed418cb3c329684acfe787825.
+- The user reports a Lua error during that test. The exact error text/line/stack has not yet been supplied, so the defect is not yet localized and no runtime path is being marked passed on the basis of this report alone.
 
 ### Implemented / Awaiting Runtime Test
 - Integrated Phase 1 foundation/protocol.
@@ -132,7 +133,7 @@ Exact addon-affecting commit: bfe9b578802bf87ed418cb3c329684acfe787825.
 - Ownership check: exactly one session component registration, one quests component registration, one instructions component registration, one Addon.SetMode definition, and one Guide/Tourist window initializer.
 - UI structural count is unchanged from Phase 5b: 5 CreateFrame, 5 CreateFontString, and 3 CreateTexture call sites.
 - Static later-Lua/API scan passed for the exact committed source: no string.match, string.gmatch, table.unpack, select(, RegisterAddonMessagePrefix, C_QuestLog, C_ChatInfo, or C_Timer tokens.
-- Top-level local-declaration line count: 144, below Lua 5.0.3's 200-local top-level chunk limit. This is a structural count, not a compiler proof.
+- Token-level local scan of the exact committed source: 144 actual top-level locals, all uniquely named, leaving 56 below Lua 5.0.3's 200-local top-level chunk limit. The highest scanned inner-function local/parameter/loop-variable pressure is about 25. This excludes the 200-local cap as the likely cause of the reported runtime error, but remains a static scan rather than a canonical Lua 5.0.3 compiler proof.
 - Focused Phase 6 mocked integration harness passed texluac -p and runtime assertions under the available Lua 5.3.6 texluac/texlua environment. Coverage: session-first full snapshots; first-known/restarted boot invalidation and recovery; quest readiness/revision handling; numeric-ID-authoritative matching; cross-session instruction-full rejection; missed-instruction cursor resync; instruction validation before cursor mutation; instruction-delta-before-session-delta ordering.
 
 ### Checks Not Actually Runnable
@@ -141,26 +142,29 @@ Exact addon-affecting commit: bfe9b578802bf87ed418cb3c329684acfe787825.
 - No in-game testing has been performed.
 
 ### Current Issues / Validation Debt
-- No known Phase 6 implementation defect is recorded.
+- Runtime failure observed: the user reports a Lua error on 0.1.8-dev / bfe9b578802bf87ed418cb3c329684acfe787825 during the broad test. Exact error text/line/stack is still needed before changing addon code.
+- Static triage does not indicate the Lua 5.0.3 200-local cap: the exact source has 144 top-level locals; the largest scanned inner-function local pressure is about 25.
+- No obvious later-Lua syntax/API blacklist hit was found in the exact source, and the registered QUEST_WATCH_UPDATE / QUEST_FINISHED events are valid Vanilla-era events.
 - The exact current runtime still lacks the canonical Lua 5.0.3 compiler pass because of connector/executable-environment separation.
 - The exact current full file also lacks an executable-environment Lua 5.3.6 parser smoke for the same reason.
-- All in-game Phase 1–6 behaviour remains unverified until the broad test.
+- No addon-affecting fix has been made yet because the demonstrated runtime failure has not been localized.
 
 ## Testing
 
 ### Last Runtime Test
-- Version/commit: None.
-- Passed: None.
-- Failed: None.
-- Not tested: all integrated in-game behaviour.
+- Version/commit: 0.1.8-dev / bfe9b578802bf87ed418cb3c329684acfe787825.
+- Passed: no point is being marked passed yet from the available report.
+- Failed: at least one Lua error occurred during the broad in-game test; exact error text/line/stack not yet supplied.
+- Not yet reconciled: the remaining broad-test points (startup/discovery, Group Progress, Guide/Tourist pairing, instructions, disparities, reload/recovery, party churn, window persistence, Off cleanup) until the user's point-by-point results are available.
 
 ### Next Runtime Test
-Run the first broad in-game test on 0.1.8-dev / addon-affecting commit bfe9b578802bf87ed418cb3c329684acfe787825. Cover startup/discovery, Group Progress, Guide/Tourist pairing, instruction baseline/consumption, disparity Hide/Show Hidden, reload/restart recovery, missed-message/full-sync recovery where practical, party leave/rejoin, window persistence, Off-mode cleanup, and Lua-error monitoring. Record results point by point against this exact build.
+First capture the exact Lua error text, file/line and stack from the 0.1.8-dev / bfe9b578802bf87ed418cb3c329684acfe787825 run. Localize and fix only that demonstrated defect with normal version discipline, then resume/repeat the affected broad-test point before continuing release-readiness evaluation.
 
 ## Planned / Next Work
-1. User performs the broad Phase 6 in-game test on 0.1.8-dev.
-2. Fix only defects demonstrated by the broad test, with normal version/checkpoint discipline.
-3. After a known-good runtime state exists, review release/promotion readiness separately; do not treat development checks as a runtime test.
+1. Obtain the exact Lua error text/file/line/stack from the user's 0.1.8-dev broad test.
+2. Localize and fix only the demonstrated defect, with a required dev version bump for any addon-affecting revision.
+3. Re-test the affected runtime path, then reconcile the rest of the broad-test results point by point.
+4. After a known-good runtime state exists, review release/promotion readiness separately; do not treat development checks as a runtime test.
 
 ## Deferred / Out of Scope
 - New feature work beyond the agreed v1 Phase 1–6 scope.
@@ -174,4 +178,4 @@ Run the first broad in-game test on 0.1.8-dev / addon-affecting commit bfe9b5788
 - External/runtime prerequisite: pfQuest.
 
 ## Exact Next Step
-Perform the first broad in-game test of 0.1.8-dev (addon-affecting commit bfe9b578802bf87ed418cb3c329684acfe787825) using the numbered test plan supplied at this checkpoint. Report each result against the exact build. Do not begin unrelated feature work or promote to main before those results are reconciled.
+Capture the exact Lua error text, file/line and stack from the broad test of 0.1.8-dev (addon-affecting commit bfe9b578802bf87ed418cb3c329684acfe787825). Do not change addon code until that demonstrated failure is localized; do not begin unrelated feature work or promote to main.
