@@ -6,7 +6,7 @@
 - Latest addon-affecting development commit: 4df6d0b9c1c3682e5077eaaab6b191f445aa3c16 — suspend the idle quest-scan OnUpdate so PFQG has no steady-state quest-scan per-frame callback.
 - Handoff checkpoint: the current dev head carrying this status file; always verify the actual remote branch head before resuming.
 - Stable baseline: None. main remains exactly bootstrap commit 4c5c63f074923266566c36c51ce2718d0060166f and is not a runtime release.
-- Goal: isolate and reduce the reported mouse-movement frametime regression while preserving the new reverse Tourist-completion feedback, then continue the remaining broad matrix and decide release/promotion readiness.
+- Goal: runtime-validate protocol-v2 reverse Tourist-completion on the performance-verified 0.1.17-dev build, then continue the remaining broad matrix and decide release/promotion readiness.
 - Scope boundary: the user explicitly requested one post-Phase-6 feature addition: when every Tourist eligible for a Guide instruction has completed it, the Guide should receive the same strike/fade/removal feedback. That feature is implemented in 0.1.16-dev through the existing Phase 4b instructions owner and Phase 5 window; remote-member tracker visual fine-tuning remains deferred.
 
 ## Current Design / Development Contract
@@ -188,15 +188,134 @@ Current addon-affecting retest commit: 4df6d0b9c1c3682e5077eaaab6b191f445aa3c16.
 
 ## Testing
 
-### Last Runtime Test
+### Latest Runtime Result
+- Version/commit: 0.1.17-dev / 4df6d0b9c1c3682e5077eaaab6b191f445aa3c16.
+- User A/B result: the mouse-movement frametime regression is resolved for PFQG; enabled frametime now feels no worse than disabled with pfQuest left enabled.
+- This result validates the 0.1.17 performance delta only. It does not upgrade any untested broad-matrix or protocol-v2 reverse-completion item.
+
+### Last Broad-Matrix Runtime Test
 - Version/commit: 0.1.14-dev / fb3f8f3bcf46b0372303db590d4f68694aba97af.
 - Sample size: limited 2-player/solo pass; many matrix cases remain untested.
-- PASS: 1, 2, 3, 5, 6, 7, 8, 11, 12, 13, 15, 17, 20, 22, 30, 32, 33, 34, 39, 43, 44, 45, 52, 75, 76.
-- PASS with qualification: 4 — no ChatThrottleLib recurrence noticed, but not deliberately stress-triggered; 31 — remote Group Progress presentation is functional but visual polish is deferred; 43/44 — instruction behavior passed, but NPC-name presentation was not observed and remains a focused presentation check rather than a confirmed state-sync defect.
-- UNTESTED/SKIP: 9, 10, 14, 16, 18, 19, 21, 23-29, 35-38, 40-42, 46-51, 53-74, 77-91.
-- 76 was reported as "res" and is recorded as PASS under the likely intended "yes"; correct this if that was not intended.
 - No new confirmed functional defect was demonstrated by this partial matrix.
 - Deferred polish: exact remote-member binary presentation/spacing will be fine-tuned later and is not a current functional blocker.
+
+
+### Canonical Broad Runtime Matrix (91 points)
+Status provenance: reconciled from the user's recorded broad-matrix answers against the canonical 91-point checklist. Do not upgrade an UNTESTED item to PASS from static checks or adjacent runtime evidence. Optional cases remain `UNTESTED / SKIP-eligible` unless the user explicitly reports SKIP.
+
+Legend: `PASS` = user runtime pass; `PASS-Q` = runtime pass with qualification; `UNTESTED` = no recorded result; `UNTESTED / SKIP-eligible` = optional/hard-to-force case with no recorded result.
+
+#### A. Startup, errors, and communications
+1. **PASS — Solo login/load.** No Lua errors; pfQuest works normally.
+2. **PASS — Solo `/reload`.** No Lua errors.
+3. **PASS — Form a 2-player party.** Automatic discovery; no manual command required.
+4. **PASS-Q — ChatThrottleLib regression.** No `unknown addon chat type` recurrence was noticed, but this was not deliberately stress-triggered.
+5. **PASS — Reload player A while grouped.** No error; synchronization recovers.
+6. **PASS — Reload player B while grouped.** Same recovery expectation.
+7. **PASS — Both players reload one after another.** State settles without repeated errors or obvious loops.
+8. **PASS — Full relog one player.** Peer state recovers.
+9. **UNTESTED — Leave party and rejoin.** Old remote state should disappear while absent and current state should return after rejoin.
+10. **UNTESTED / SKIP-eligible — Optional 3-player party.** No message storms/errors; all compatible peers synchronize.
+
+#### B. Local pfQuest tracker behavior
+11. **PASS — Binary objective at 0/1.** Native binary count is replaced by the local incomplete symbol.
+12. **PASS — Binary objective reaches 1/1.** Native binary count is replaced by the local complete symbol.
+13. **PASS — Binary quest nobody else has.** Local symbol still appears; no remote class/status appears.
+14. **UNTESTED — Binary state changes live.** Incomplete -> complete should update without reload.
+15. **PASS — Normal count objective.** Numeric pfQuest display remains numeric rather than becoming binary status.
+16. **UNTESTED — Multiple objectives on one quest.** Binary/count objectives should coexist without row collisions.
+17. **PASS — Collapse/expand a tracked quest.** PFQG regions hide/show cleanly without duplicated icons.
+18. **UNTESTED — Tracker refresh/update.** No duplicated rows, drifting icons, or stale text during repeated progress.
+19. **UNTESTED — Switch pfQuest tracker mode away and back.** PFQG overlays should not remain on unrelated tracker content.
+
+#### C. Remote Group Progress
+20. **PASS — Peer has same binary quest, incomplete.** Peer class icon plus incomplete status appears.
+21. **UNTESTED — Peer completes that binary objective.** Remote status should update without reload.
+22. **PASS — Peer does not have the quest.** No class icon/status for that peer.
+23. **UNTESTED — Peer accepts the quest while already grouped.** Class/status should begin appearing after synchronization.
+24. **UNTESTED — Peer abandons or turns in the quest.** Class/status should disappear.
+25. **UNTESTED — Peer has same count quest.** Class/name/progress row should appear beneath the objective.
+26. **UNTESTED — Peer count progresses.** Remote count should update.
+27. **UNTESTED / SKIP-eligible — Equivalent objective cannot be found.** Should display `--`, not bogus `0/N`.
+28. **UNTESTED / SKIP-eligible — Two remote peers with same quest.** Both should display in party order.
+29. **UNTESTED — One remote peer has quest, another does not.** Only the peer with the quest should appear.
+30. **PASS — Group Progress while PFQG mode is Off.** Tracker sharing remains independent of Guide/Tourist mode.
+31. **PASS-Q — Visual sanity.** Functional presentation was readable/correct enough for testing; exact remote-member styling/spacing remains explicitly deferred.
+
+#### D. Basic Guide/Tourist session lifecycle
+32. **PASS — Both players Off.** No Guide/Tourist window.
+33. **PASS — Player A enters Guide.** Guide window appears.
+34. **PASS — Player B enters Tourist following A.** Tourist pairs to A.
+35. **UNTESTED — `/pfqgroup status`.** Both sides should report sensible session status.
+36. **UNTESTED — Tourist command before Guide enters Guide mode.** Tourist should wait and then pair when the target becomes Guide.
+37. **UNTESTED — Guide command repeated while already Guide.** Must not unnecessarily start a fresh Guide session.
+38. **UNTESTED — Tourist follows wrong/nonparty/non-Guide target.** Should wait/fail cleanly without Lua error.
+39. **PASS — Guide -> Off.** Guide window disappears and Guide-specific behavior stops.
+40. **UNTESTED — Tourist -> Off.** Tourist window should disappear and target/binding clear.
+41. **UNTESTED — Group Progress after Guide/Tourist -> Off.** Tracker sharing should continue.
+
+#### E. Guide instructions
+42. **UNTESTED — Tourist pairs first, then Guide accepts a quest.** New ACCEPT instruction should reach Tourist.
+43. **PASS-Q — Guide accepts two quests.** Two ordered instructions passed; NPC-name presentation was not observed and remains separately unverified.
+44. **PASS-Q — Guide turns in a quest.** TURNIN instruction creation passed; NPC-name presentation was not observed and remains separately unverified.
+45. **PASS — Guide accepts and later turns in same quest.** Distinct ordered ACCEPT then TURNIN behavior.
+46. **UNTESTED — Tourist joins after Guide already performed an action.** Pre-join instruction should not become pending.
+47. **UNTESTED — Guide performs a new action after Tourist joins.** New instruction should appear.
+48. **UNTESTED — Tourist performs matching ACCEPT.** Earliest matching pending ACCEPT should be consumed.
+49. **UNTESTED — Tourist performs matching TURNIN.** Matching TURNIN should be consumed.
+50. **UNTESTED — Tourist performs unrelated quest action.** Unrelated pending instruction should remain.
+51. **UNTESTED / SKIP-eligible — Two similar pending actions.** Earliest matching sequence should be consumed first.
+52. **PASS — Completed instruction presentation.** Strike/fade/removal occurs once without replay.
+
+#### F. Guide/Tourist reload and persistence
+53. **UNTESTED — Reload Guide while paired.** Guide session should survive and Tourist recover.
+54. **UNTESTED — Reload Tourist while paired.** Selected Guide/binding/baseline should survive appropriately.
+55. **UNTESTED — Reload with pending Tourist instruction.** Pending instruction should remain.
+56. **UNTESTED — Consume an instruction, then reload Tourist.** Consumed instruction should not return.
+57. **UNTESTED — Guide reload after several instructions.** Guide action sequence/order should continue.
+58. **UNTESTED — Guide Off -> Guide again.** Should create a genuinely new Guide session.
+59. **UNTESTED — Tourist observes new Guide session.** Fresh pairing/baseline; old instructions should not replay.
+60. **UNTESTED — Guide temporarily leaves party and rejoins.** No stale/corrupt state or old instruction replay.
+61. **UNTESTED — Tourist temporarily leaves and rejoins.** No duplicated instructions or Lua errors.
+62. **UNTESTED — Both players relog.** Persisted local sessions plus fresh peer boots should settle correctly.
+
+#### G. Disparities
+63. **UNTESTED — Guide and Tourist have identical quest logs.** No false missing rows.
+64. **UNTESTED — Guide has a quest Tourist lacks.** Appropriate disparity row should appear.
+65. **UNTESTED — Tourist then accepts that quest.** Disparity should resolve after synchronization.
+66. **UNTESTED — Several differing quests.** Multiple disparity rows should display consistently.
+67. **UNTESTED — Hide a disparity.** Row should disappear.
+68. **UNTESTED — Show Hidden.** Hidden disparity should reappear in hidden-state presentation.
+69. **UNTESTED — Unhide.** Row should return to normal disparity list.
+70. **UNTESTED — Reload Guide with hidden disparities.** Hidden state should persist within the same Guide session.
+71. **UNTESTED — Start a fresh Guide session.** Prior session hidden state must not leak.
+72. **UNTESTED — Tourist reloads while Guide disparity view is active.** Temporary unready state must not create false mass-missing disparities.
+73. **UNTESTED / SKIP-eligible — Multiple Tourists.** Disparities should order by party slot then quest title.
+74. **UNTESTED — Instruction rows + disparities together.** Instructions precede disparities without overwrite/duplication.
+
+#### H. Window/UI persistence
+75. **PASS — Drag Guide/Tourist window.** Window can be moved.
+76. **PASS? — Reload.** Position persistence was reported as `res` and is currently interpreted as PASS; correct this status if `res` did not mean yes.
+77. **UNTESTED — Switch Guide -> Off -> Guide.** Saved window position should remain.
+78. **UNTESTED — Switch Tourist -> Off -> Tourist.** Clean behavior with no duplicate frame.
+79. **UNTESTED — Repeated mode changes.** No accumulating rows/buttons/errors.
+80. **UNTESTED — Show Hidden control.** Only appears/behaves when relevant and should not retain stale state.
+
+#### I. Recovery/robustness stress
+81. **UNTESTED — Accept/progress a quest immediately after forming party.** No false empty remote state; eventual correct sync.
+82. **UNTESTED — Reload one client during quest activity.** Final state should converge after reload.
+83. **UNTESTED — Guide accepts a quest immediately after Tourist pairs.** Instruction should not be lost.
+84. **UNTESTED — Guide performs an action around a Tourist reload.** No permanent missing instruction or sequence corruption.
+85. **UNTESTED — Rapid quest progress.** Final count correct; no permanently stale revision.
+86. **UNTESTED — Party member disconnect/relog.** Stale state invalidates and current state returns.
+87. **UNTESTED / SKIP-eligible — Three-player reload/rejoin stress.** No errors/message loops; eventual convergence.
+88. **UNTESTED — Watch Lua errors throughout.** Zero PFQG-triggered Lua errors across stress coverage.
+
+#### J. Optional hard-to-force protocol cases
+89. **UNTESTED / SKIP-eligible — Missed instruction/full-sync recovery.** Later Guide cursor should recover a missed instruction via full sync.
+90. **UNTESTED / SKIP-eligible — Protocol incompatibility.** Older incompatible peer should be excluded cleanly.
+91. **UNTESTED / SKIP-eligible — Duplicate-title / numeric quest-ID edge.** Numeric ID wins when both sides have it; no wrong quest match.
+
 
 ### Next Runtime Test
 Continue runtime validation on 0.1.17-dev / 4df6d0b9c1c3682e5077eaaab6b191f445aa3c16. First test the protocol-v2 reverse-completion feature: one Tourist completion should strike/fade/remove the Guide row; with two Tourists the Guide row must remain until both eligible Tourists complete; a Tourist joining after an older step must not block it; reload/rejoin recovery should preserve acknowledgement where practical. Then continue the remaining broad-matrix gaps. Keep remote-member tracker presentation polish deferred.
