@@ -448,16 +448,18 @@ local function IsPartyMember(name)
   return normalized and party[normalized] ~= nil
 end
 
-local function CurrentDistributionTarget(target)
-  if target and IsPartyMember(target) then
-    return "WHISPER", target
+local function CurrentDistribution(target)
+  if target and not IsPartyMember(target) then
+    return nil
   end
 
-  if not target and GetNumPartyMembers() > 0 then
-    return "PARTY", nil
+  -- Vanilla 1.12 has no addon-message WHISPER channel. Directed recovery
+  -- validates the requested peer but travels over the PARTY addon channel.
+  if GetNumPartyMembers() > 0 then
+    return "PARTY"
   end
 
-  return nil, nil
+  return nil
 end
 
 local function NextMessageId()
@@ -470,7 +472,6 @@ end
 
 local function SendWire(messageType, payload, target)
   local distribution
-  local whisperTarget
   local messageId
   local total
   local part
@@ -479,7 +480,7 @@ local function SendWire(messageType, payload, target)
     return false
   end
 
-  distribution, whisperTarget = CurrentDistributionTarget(target)
+  distribution = CurrentDistribution(target)
   if not distribution then
     return false
   end
@@ -501,11 +502,7 @@ local function SendWire(messageType, payload, target)
     local chunk = string.sub(payload, first, last)
     local wire = SafeString(PROTOCOL_VERSION) .. "\t" .. messageType .. "\t" .. messageId .. "\t" .. SafeString(part) .. "\t" .. SafeString(total) .. "\t" .. chunk
 
-    if whisperTarget then
-      SendAddonMessage(PROTOCOL_PREFIX, wire, distribution, whisperTarget)
-    else
-      SendAddonMessage(PROTOCOL_PREFIX, wire, distribution)
-    end
+    SendAddonMessage(PROTOCOL_PREFIX, wire, distribution)
   end
 
   return true
