@@ -6,7 +6,7 @@ local Addon = pfQuest_Group
 local L = pfQuest_Group_L or {}
 
 local PROTOCOL_PREFIX = "PFQGROUP"
-local PROTOCOL_VERSION = 1
+local PROTOCOL_VERSION = 2
 local DB_SCHEMA_VERSION = 1
 local CHUNK_SIZE = 180
 local MAX_CHUNKS = 64
@@ -40,6 +40,7 @@ local guideTouristUI = {
   title = nil,
   rows = {},
   completing = {},
+  completed = {},
   completionDuration = 0.9,
   sessionKey = nil,
   showHidden = false,
@@ -620,7 +621,7 @@ local function DispatchMessage(sender, protocolVersion, messageType, payload)
 
     previousBoot = peer.bootId
     incomingBoot = hello.boot
-    hadRemoteState = peer.session or peer.questState or peer.instructions
+    hadRemoteState = peer.session or peer.questState or peer.instructions or peer.instructionCompletions
 
     if incomingBoot and incomingBoot ~= "" then
       if previousBoot and previousBoot ~= "" then
@@ -637,6 +638,7 @@ local function DispatchMessage(sender, protocolVersion, messageType, payload)
       peer.session = nil
       peer.questState = nil
       peer.instructions = nil
+      peer.instructionCompletions = nil
       incoming[senderKey] = nil
       if restarted then
         Emit("PEER_RESTARTED", sender)
@@ -652,6 +654,7 @@ local function DispatchMessage(sender, protocolVersion, messageType, payload)
       peer.session = nil
       peer.questState = nil
       peer.instructions = nil
+      peer.instructionCompletions = nil
     end
     peers[senderKey] = peer
     Emit("PEER_STATUS", sender, peer.compatible)
@@ -2314,15 +2317,81 @@ local function DecodeInstructionWire(payload, expectedKind)
   return decoded
 end
 
+local function EncodeInstructionCompletionWire(kind, guideSessionId, consumed)
+  local output = {
+    kind .. "." .. HexEncode(guideSessionId or "") .. ".0"
+  }
+  local keys = {}
+  local key
+  local seq
+  local index
+
+  for key in pairs(consumed or {}) do
+    seq = tonumber(key)
+    if consumed[key] and seq and seq >= 1 then
+      table.insert(keys, math.floor(seq))
+    end
+  end
+  table.sort(keys)
+
+  for index = 1, table.getn(keys) do
+    table.insert(output, "K." .. SafeString(keys[index]))
+  end
+
+  return table.concat(output, "_")
+end
+
+local function DecodeInstructionCompletionWire(payload, expectedKind)
+  local records = SplitPlain(payload, "_")
+  local header = records[1] and SplitPlain(records[1], ".") or nil
+  local decoded = {
+    sessionId = nil,
+    consumed = {}
+  }
+  local index
+  local fields
+  local seq
+
+  if not header or header[1] ~= expectedKind or table.getn(header) < 3 or tonumber(header[3]) ~= 0 then
+    return nil
+  end
+
+  decoded.sessionId = HexDecode(header[2])
+  if decoded.sessionId == "" then
+    decoded.sessionId = nil
+  end
+
+  for index = 2, table.getn(records) do
+    if records[index] ~= "" then
+      fields = SplitPlain(records[index], ".")
+      seq = fields and tonumber(fields[2]) or nil
+      if not fields or fields[1] ~= "K" or table.getn(fields) < 2 or not seq or seq < 1 then
+        return nil
+      end
+      seq = math.floor(seq)
+      if decoded.consumed[seq] then
+        return nil
+      end
+      decoded.consumed[seq] = true
+    end
+  end
+
+  return decoded
+end
+
 local function InstructionSnapshot()
   local session = Addon.db and Addon.db.session
   local store = Addon.db and Addon.db.instructions
 
-  if not session or session.mode ~= "GUIDE" or not session.guideSessionId or not store or store.guideSessionId ~= session.guideSessionId then
-    return EncodeInstructionWire("S", nil, 0, {})
+  if session and session.mode == "GUIDE" and session.guideSessionId and store and store.guideSessionId == session.guideSessionId then
+    return EncodeInstructionWire("S", session.guideSessionId, tonumber(session.guideActionSeq) or 0, store.guideRecords)
   end
 
-  return EncodeInstructionWire("S", session.guideSessionId, tonumber(session.guideActionSeq) or 0, store.guideRecords)
+  if session and session.mode == "TOURIST" and session.guideSessionId and store and store.touristSessionId == session.guideSessionId then
+    return EncodeInstructionCompletionWire("C", session.guideSessionId, store.consumed)
+  end
+
+  return EncodeInstructionCompletionWire("C", nil, {})
 end
 
 local function InstructionMatchesAction(instruction, actionType, quest, context)
@@ -2383,13 +2452,134 @@ local function ReconcileTouristInstructions(sender)
   return true
 end
 
+local function FilterRemoteInstructionCompletions(peer, sessionId, consumed)
+  local output = {}
+  local localSession = Addon.db and Addon.db.session
+  local remoteSession = peer and peer.session
+  local store = Addon.db and Addon.db.instructions
+  local baseline
+  local cursor
+  local seq
+
+  if not localSession
+    or localSession.mode ~= "GUIDE"
+    or not localSession.guideSessionId
+    or sessionId ~= localSession.guideSessionId
+    or not remoteSession
+    or remoteSession.mode ~= "TOURIST"
+    or NormalizeName(remoteSession.guideName) ~= NormalizeName(playerName)
+    or remoteSession.guideSessionId ~= localSession.guideSessionId
+    or remoteSession.joinBaseline == nil
+    or not store
+    or store.guideSessionId ~= localSession.guideSessionId then
+    return nil
+  end
+
+  baseline = tonumber(remoteSession.joinBaseline) or 0
+  cursor = tonumber(localSession.guideActionSeq) or 0
+
+  for seq in pairs(consumed or {}) do
+    seq = tonumber(seq)
+    if seq
+      and seq > baseline
+      and seq <= cursor
+      and store.guideRecords
+      and store.guideRecords[seq] then
+      output[seq] = true
+    end
+  end
+
+  return output
+end
+
+local function ApplyRemoteInstructionCompletionFull(sender, decoded)
+  local senderKey = NormalizeName(sender)
+  local peer = senderKey and peers[senderKey]
+  local filtered
+  local seq
+
+  if not peer or not decoded then
+    return
+  end
+
+  if not decoded.sessionId then
+    peer.instructionCompletions = nil
+    Emit("REMOTE_INSTRUCTION_COMPLETIONS_CHANGED", sender, nil)
+    return
+  end
+
+  filtered = FilterRemoteInstructionCompletions(peer, decoded.sessionId, decoded.consumed)
+  if not filtered then
+    return
+  end
+
+  if not peer.instructionCompletions or peer.instructionCompletions.sessionId ~= decoded.sessionId then
+    peer.instructionCompletions = {
+      sessionId = decoded.sessionId,
+      consumed = {}
+    }
+  end
+
+  for seq in pairs(filtered) do
+    peer.instructionCompletions.consumed[seq] = true
+  end
+
+  Emit("REMOTE_INSTRUCTION_COMPLETIONS_CHANGED", sender, peer.instructionCompletions)
+end
+
+local function ApplyRemoteInstructionCompletionDelta(sender, payload)
+  local decoded = DecodeInstructionCompletionWire(payload, "A")
+  local senderKey = NormalizeName(sender)
+  local peer = senderKey and peers[senderKey]
+  local filtered
+  local seq
+  local changed = false
+
+  if not decoded or not decoded.sessionId or not peer then
+    return
+  end
+
+  filtered = FilterRemoteInstructionCompletions(peer, decoded.sessionId, decoded.consumed)
+  if not filtered then
+    Addon.RequestFullSync(sender)
+    return
+  end
+
+  if not peer.instructionCompletions or peer.instructionCompletions.sessionId ~= decoded.sessionId then
+    peer.instructionCompletions = {
+      sessionId = decoded.sessionId,
+      consumed = {}
+    }
+  end
+
+  for seq in pairs(filtered) do
+    if not peer.instructionCompletions.consumed[seq] then
+      peer.instructionCompletions.consumed[seq] = true
+      changed = true
+    end
+  end
+
+  if changed then
+    Emit("REMOTE_INSTRUCTION_COMPLETIONS_CHANGED", sender, peer.instructionCompletions)
+  end
+end
+
 local function ApplyRemoteInstructionFull(sender, payload)
   local decoded = DecodeInstructionWire(payload, "S")
+  local completionDecoded
   local senderKey = NormalizeName(sender)
   local peer = senderKey and peers[senderKey]
   local remoteSession
 
-  if not decoded or not peer then
+  if not peer then
+    return
+  end
+
+  if not decoded then
+    completionDecoded = DecodeInstructionCompletionWire(payload, "C")
+    if completionDecoded then
+      ApplyRemoteInstructionCompletionFull(sender, completionDecoded)
+    end
     return
   end
 
@@ -2432,7 +2622,16 @@ local function ApplyRemoteInstructionDelta(sender, payload)
   local currentCursor
   local instruction
 
-  if not decoded or not decoded.sessionId or not peer then
+  if not peer then
+    return
+  end
+
+  if not decoded then
+    ApplyRemoteInstructionCompletionDelta(sender, payload)
+    return
+  end
+
+  if not decoded.sessionId then
     return
   end
 
@@ -2591,9 +2790,11 @@ local function ApplyRemoteSession(sender, payload, checkInstructionSync)
     joinBaseline = nil
     guideActionSeq = nil
     peer.instructions = nil
+    peer.instructionCompletions = nil
   elseif mode == "GUIDE" then
     guideName = nil
     joinBaseline = nil
+    peer.instructionCompletions = nil
     if peer.instructions and peer.instructions.sessionId ~= guideSessionId then
       peer.instructions = nil
     end
@@ -2602,6 +2803,9 @@ local function ApplyRemoteSession(sender, payload, checkInstructionSync)
     guideActionSeq = nil
     if not guideSessionId then
       joinBaseline = nil
+    end
+    if peer.instructionCompletions and peer.instructionCompletions.sessionId ~= guideSessionId then
+      peer.instructionCompletions = nil
     end
   end
 
@@ -2966,6 +3170,9 @@ local function HandleInstructionQuestAction(actionType, quest, context)
   store = Addon.db.instructions
   store.consumed[pendingSeq] = true
   touristPendingInstructions[pendingSeq] = nil
+  Addon.SendDelta("instructions", EncodeInstructionCompletionWire("A", session.guideSessionId, {
+    [pendingSeq] = true
+  }), session.guideName)
   Emit("TOURIST_INSTRUCTION_COMPLETED", CopyInstruction(instruction))
   Emit("TOURIST_INSTRUCTIONS_CHANGED", Addon.GetTouristInstructions())
 end
@@ -2977,6 +3184,57 @@ local function GuideTouristInstructionText(instruction)
   end
 
   return string.format(L.QUEST_ID_FALLBACK or "Quest %d", tonumber(instruction and instruction.questID) or 0)
+end
+
+local function GuideInstructionAllTouristsComplete(session, instruction)
+  local seq = tonumber(instruction and instruction.seq)
+  local guideKey = NormalizeName(playerName)
+  local eligible = 0
+  local completed = 0
+  local partyIndex
+  local unit
+  local name
+  local normalized
+  local member
+  local peer
+  local remoteSession
+  local completionState
+
+  if not session or session.mode ~= "GUIDE" or not session.guideSessionId or not seq then
+    return false
+  end
+
+  for partyIndex = 1, 4 do
+    unit = "party" .. partyIndex
+    if UnitExists(unit) then
+      name = UnitName(unit)
+      normalized = NormalizeName(name)
+      member = normalized and party[normalized]
+      peer = normalized and peers[normalized]
+      remoteSession = peer and peer.session
+
+      if member
+        and peer
+        and peer.compatible
+        and remoteSession
+        and remoteSession.mode == "TOURIST"
+        and NormalizeName(remoteSession.guideName) == guideKey
+        and remoteSession.guideSessionId == session.guideSessionId
+        and remoteSession.joinBaseline ~= nil
+        and seq > remoteSession.joinBaseline then
+        eligible = eligible + 1
+        completionState = peer.instructionCompletions
+        if completionState
+          and completionState.sessionId == session.guideSessionId
+          and completionState.consumed
+          and completionState.consumed[seq] then
+          completed = completed + 1
+        end
+      end
+    end
+  end
+
+  return eligible > 0 and completed == eligible
 end
 
 local function GuideDisparityKey(peerName, quest)
@@ -3166,6 +3424,7 @@ local function RefreshGuideTouristWindow()
   local index
   local seq
   local completion
+  local allComplete
   local row
   local entry
   local title
@@ -3178,6 +3437,7 @@ local function RefreshGuideTouristWindow()
 
   if not session or session.mode == "OFF" then
     guideTouristUI.completing = {}
+    guideTouristUI.completed = {}
     guideTouristUI.sessionKey = nil
     guideTouristUI.showHidden = false
     if guideTouristUI.showHiddenButton then
@@ -3193,6 +3453,7 @@ local function RefreshGuideTouristWindow()
   sessionKey = session.mode .. ":" .. SafeString(session.guideName) .. ":" .. SafeString(session.guideSessionId)
   if guideTouristUI.sessionKey ~= sessionKey then
     guideTouristUI.completing = {}
+    guideTouristUI.completed = {}
     guideTouristUI.sessionKey = sessionKey
     guideTouristUI.showHidden = false
   end
@@ -3209,13 +3470,42 @@ local function RefreshGuideTouristWindow()
   guideTouristUI.title:SetText(title)
 
   for index = 1, table.getn(instructions) do
-    entry = {
-      kind = "instruction",
-      instruction = instructions[index],
-      completing = false
-    }
-    table.insert(display, entry)
-    present[tonumber(instructions[index].seq) or 0] = true
+    seq = tonumber(instructions[index].seq) or 0
+    if session.mode == "GUIDE" then
+      allComplete = GuideInstructionAllTouristsComplete(session, instructions[index])
+      if not allComplete then
+        guideTouristUI.completed[seq] = nil
+        if guideTouristUI.completing[seq] and guideTouristUI.completing[seq].guide then
+          guideTouristUI.completing[seq] = nil
+        end
+      elseif not guideTouristUI.completed[seq] and not guideTouristUI.completing[seq] then
+        guideTouristUI.completing[seq] = {
+          instruction = CopyInstruction(instructions[index]),
+          started = GetTime(),
+          row = nil,
+          guide = true
+        }
+      end
+
+      if not guideTouristUI.completed[seq] then
+        completion = guideTouristUI.completing[seq]
+        entry = {
+          kind = "instruction",
+          instruction = instructions[index],
+          completing = completion and true or false,
+          completion = completion
+        }
+        table.insert(display, entry)
+      end
+    else
+      entry = {
+        kind = "instruction",
+        instruction = instructions[index],
+        completing = false
+      }
+      table.insert(display, entry)
+      present[seq] = true
+    end
   end
 
   if session.mode == "TOURIST" then
@@ -3356,6 +3646,9 @@ local function UpdateGuideTouristCompletion()
   for seq, completion in pairs(guideTouristUI.completing) do
     elapsed = now - (tonumber(completion.started) or now)
     if elapsed >= guideTouristUI.completionDuration then
+      if completion.guide then
+        guideTouristUI.completed[seq] = true
+      end
       guideTouristUI.completing[seq] = nil
       changed = true
     elseif completion.row and completion.row.seq == seq then
@@ -3527,6 +3820,7 @@ Addon.RegisterListener("SESSION_CHANGED", RefreshGuideTouristWindow)
 Addon.RegisterListener("GUIDE_INSTRUCTIONS_CHANGED", RefreshGuideTouristWindow)
 Addon.RegisterListener("TOURIST_INSTRUCTIONS_CHANGED", RefreshGuideTouristWindow)
 Addon.RegisterListener("TOURIST_INSTRUCTION_COMPLETED", HandleTouristInstructionCompleted)
+Addon.RegisterListener("REMOTE_INSTRUCTION_COMPLETIONS_CHANGED", RefreshGuideTouristWindow)
 
 
 SLASH_PFQUESTGROUP1 = "/pfqgroup"
