@@ -7,7 +7,7 @@
 - Handoff checkpoint: the current `dev` head carrying this status file; always verify the actual remote branch head before resuming.
 - Stable baseline: None; `main` is repository bootstrap only, not a runtime release.
 - Goal: Implement the agreed v1 addon across staged development chats, then perform the first broad in-game test on the integrated build.
-- Current scope boundary: Phase 3 is complete. Phase 4 has not started. No intermediate in-game testing is planned before the Phase 6 integrated test build.
+- Current scope boundary: Phase 3 is complete. Phase 4 is formally split into Phase 4a and Phase 4b; neither has started. Phase 4a must stop before instruction-generation behaviour, and Phase 4b must stop before Phase 5 UI/disparity work. No intermediate in-game testing is planned before the Phase 6 integrated test build.
 
 ## Current Design / Development Contract
 
@@ -63,6 +63,7 @@
 - Integration wraps `pfQuest.tracker.ButtonEvent`, rewires already-created tracker buttons and leaves future buttons on the wrapped handler. Group Progress remains independent of Guide/Tourist mode.
 
 ### Guide / Tourist
+- Phase 4 is deliberately split into two clean implementation checkpoints to reduce chat/tooling risk: Phase 4a establishes the session model; Phase 4b adds instruction behaviour on top of it.
 - Modes: Off, Guide, Tourist. A Tourist follows one specific Guide.
 - Guide/Tourist uses a compact movable minimal window.
 - Guide actions are one-line entries using Blizzard yellow `!` for accept and yellow `?` for hand-in.
@@ -70,7 +71,7 @@
 - Hand-in presentation: `? NPC Name — Quest Name`.
 - Tourist matching is automatic; no acknowledgement buttons.
 - On matching Tourist action, strike through the instruction, fade for about 10 seconds, then remove it.
-- Behaviour/UI remains deferred to Phases 4–5.
+- Phase 4a owns mode/session foundation; Phase 4b owns instruction behaviour; all Guide/Tourist presentation remains deferred to Phase 5.
 
 ### Missing Quest / Disparity Handling
 - Guide mode compares the Guide's current quest state against active Tourists.
@@ -86,7 +87,7 @@
 - Entering Guide mode creates a Guide session id; remaining in the same Guide session preserves it. Turning Guide mode Off clears Guide session state; re-entering Guide starts a new session.
 - Tourist mode requires a specific Guide. The Guide session id and join baseline persist across reload/relog/reconnect and are not cleared merely because the remote Guide temporarily disappears from the party.
 - Turning Tourist mode Off resets Tourist session state.
-- When a Tourist joins a Guide session, the later Guide/Tourist phase must record that join as the instruction baseline and must not replay earlier Guide quest actions as instructions.
+- Phase 4a records the Tourist join baseline as part of the session foundation. Phase 4b must honor that baseline and must not replay earlier Guide quest actions as instructions.
 - Current quest disparity is separate from the instruction baseline and may show quests accepted by the Guide before the Tourist joined.
 
 ### Quest / NPC Data Model
@@ -153,14 +154,16 @@ Performed against the exact Phase 3 runtime blob `707a0f40266c7c1d2902f01149cfcc
 1. **Phase 1 — Foundation / protocol:** complete at `746265a4561fedcb924bba729aef22458984d994`.
 2. **Phase 2 — Quest-state engine:** complete at `d83669c6a476a5a7521a3308102a267c2e79a668`.
 3. **Phase 3 — Group Progress UI:** complete at `e3b988309054eb86a3ad39953bf5a39332168e83`.
-4. **Phase 4 — Guide/Tourist behaviour:** commands/modes, pairing, join baseline, accept/hand-in instructions, automatic Tourist completion, persistence/reset rules.
-5. **Phase 5 — Guide/Tourist UI + disparity:** compact window, Blizzard !/?, strike-through/fade, missing-quest rows, hide/Show Hidden, layout/persistence.
-6. **Phase 6 — Integration hardening / test build:** whole-system audit, stale/duplicate/order handling, SavedVariables/protocol robustness, final static/compiler checks, then one broad in-game test plan.
+4. **Phase 4a — Guide/Tourist mode/session foundation:** commands/modes, Guide/Tourist pairing, Guide session lifecycle, Tourist join baseline, persistence/reset rules, and the protocol/state plumbing required to represent the relationship. Phase 4a must leave a valid self-contained session foundation even with Phase 4b absent; do not add Guide instruction generation/consumption yet.
+5. **Phase 4b — Guide/Tourist instruction behaviour:** Guide accept/hand-in instruction creation, transport/synchronization, Tourist-side matching and automatic completion/consumption, plus duplicate/stale/order handling needed for reliable instruction state. Build only on the Phase 4a session foundation and stop before any Phase 5 UI/disparity work.
+6. **Phase 5 — Guide/Tourist UI + disparity:** compact window, Blizzard !/?, strike-through/fade, missing-quest rows, hide/Show Hidden, layout/persistence.
+7. **Phase 6 — Integration hardening / test build:** whole-system audit, remaining stale/duplicate/order handling, SavedVariables/protocol robustness, final static/compiler checks, then one broad in-game test plan.
 
 Each coding phase ends with available static/compiler checks, a clean commit checkpoint and an updated handoff. Runtime behaviour remains untested until Phase 6 unless the user changes that plan explicitly.
 
 ## Deferred / Out of Scope
-- All Phase 4 Guide/Tourist behaviour remains deferred and has not started.
+- Phase 4a Guide/Tourist mode/session foundation remains deferred and has not started.
+- Phase 4b Guide/Tourist instruction behaviour remains deferred and has not started.
 - All Phase 5 Guide/Tourist UI/disparity work remains deferred.
 - Phase 6 integration hardening and broad in-game testing remain deferred.
 - No in-game testing was performed in Phase 3.
@@ -172,4 +175,4 @@ Each coding phase ends with available static/compiler checks, a clean commit che
 - External/runtime prerequisite: pfQuest (`## Dependencies: pfQuest`).
 
 ## Exact Next Step
-Begin **Phase 4 — Guide/Tourist behaviour** from the Phase 3 implementation at `e3b988309054eb86a3ad39953bf5a39332168e83`. First verify the current `dev` handoff against the actual branch head, then implement only the documented Phase 4 commands/modes, Guide/Tourist pairing, join baseline, accept/hand-in instruction state, automatic Tourist completion and persistence/reset rules. Stop before Phase 5 Guide/Tourist UI/disparity work. No in-game testing yet.
+Begin **Phase 4a — Guide/Tourist mode/session foundation** from the current `dev` handoff, whose latest addon-affecting implementation remains Phase 3 at `e3b988309054eb86a3ad39953bf5a39332168e83`. First verify the current `dev` handoff against the actual branch head, then implement only commands/modes, Guide/Tourist pairing, Guide session lifecycle, Tourist join baseline, persistence/reset rules, and required protocol/state plumbing. Phase 4a must be valid independently of Phase 4b. Do not implement Guide accept/hand-in instruction generation, Tourist instruction matching/completion, or any Phase 5 UI/disparity work. No in-game testing yet.
