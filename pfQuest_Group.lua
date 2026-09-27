@@ -1279,6 +1279,582 @@ local function ScanQuestState()
   end
 end
 
+
+local GROUP_CLASS_ICON_TEXTURE = "Interface\\Glues\\CharacterCreate\\UI-CharacterCreate-Classes"
+local GROUP_CLASS_ICON_COORDS = {
+  WARRIOR = { 0, 0.25, 0, 0.25 },
+  MAGE = { 0.25, 0.49609375, 0, 0.25 },
+  ROGUE = { 0.49609375, 0.7421875, 0, 0.25 },
+  DRUID = { 0.7421875, 0.98828125, 0, 0.25 },
+  HUNTER = { 0, 0.25, 0.25, 0.5 },
+  SHAMAN = { 0.25, 0.49609375, 0.25, 0.5 },
+  PRIEST = { 0.49609375, 0.7421875, 0.25, 0.5 },
+  WARLOCK = { 0.7421875, 0.98828125, 0.25, 0.5 },
+  PALADIN = { 0, 0.25, 0.5, 0.75 }
+}
+local GROUP_CLASS_COLORS = {
+  WARRIOR = { r = 0.78, g = 0.61, b = 0.43 },
+  MAGE = { r = 0.41, g = 0.80, b = 0.94 },
+  ROGUE = { r = 1.00, g = 0.96, b = 0.41 },
+  DRUID = { r = 1.00, g = 0.49, b = 0.04 },
+  HUNTER = { r = 0.67, g = 0.83, b = 0.45 },
+  SHAMAN = { r = 0.14, g = 0.35, b = 1.00 },
+  PRIEST = { r = 1.00, g = 1.00, b = 1.00 },
+  WARLOCK = { r = 0.58, g = 0.51, b = 0.79 },
+  PALADIN = { r = 0.96, g = 0.55, b = 0.73 }
+}
+local groupTrackerInstalled = false
+local originalTrackerButtonEvent = nil
+
+local function GroupClassColor(classToken)
+  if RAID_CLASS_COLORS and classToken and RAID_CLASS_COLORS[classToken] then
+    return RAID_CLASS_COLORS[classToken]
+  end
+
+  if classToken and GROUP_CLASS_COLORS[classToken] then
+    return GROUP_CLASS_COLORS[classToken]
+  end
+
+  return { r = 1, g = 1, b = 1 }
+end
+
+local function GroupClassColorHex(classToken)
+  local color = GroupClassColor(classToken)
+  local red = math.floor((color.r or 1) * 255 + 0.5)
+  local green = math.floor((color.g or 1) * 255 + 0.5)
+  local blue = math.floor((color.b or 1) * 255 + 0.5)
+  return string.format("%02x%02x%02x", red, green, blue)
+end
+
+local function SetGroupClassIcon(texture, classToken)
+  local coords = classToken and GROUP_CLASS_ICON_COORDS[classToken]
+
+  texture:SetTexture(GROUP_CLASS_ICON_TEXTURE)
+  if coords then
+    texture:SetTexCoord(unpack(coords))
+  else
+    texture:SetTexCoord(0, 1, 0, 1)
+  end
+end
+
+local function GetGroupTrackerFontSize(button)
+  local objective
+  local _, fontSize
+
+  if button and button.objectives then
+    for _, objective in pairs(button.objectives) do
+      if objective and objective:IsShown() then
+        _, fontSize = objective:GetFont()
+        if fontSize then
+          return fontSize
+        end
+      end
+    end
+  end
+
+  return tonumber(pfQuest_config and pfQuest_config["trackerfontsize"]) or 12
+end
+
+local function CopyGroupTrackerFont(source, target, fallbackSize)
+  local fontPath
+  local fontSize
+  local fontFlags
+
+  if source and source.GetFont then
+    fontPath, fontSize, fontFlags = source:GetFont()
+  end
+
+  if fontPath and fontSize then
+    if fontFlags then
+      target:SetFont(fontPath, fontSize, fontFlags)
+    else
+      target:SetFont(fontPath, fontSize)
+    end
+  elseif pfUI and pfUI.font_default then
+    target:SetFont(pfUI.font_default, fallbackSize or 12)
+  end
+end
+
+local function FindLocalTrackerQuest(button)
+  local numericQuestID
+  local key
+  local quest
+
+  if not questState.ready or not button then
+    return nil
+  end
+
+  numericQuestID = tonumber(button.questid)
+  if numericQuestID then
+    quest = questState.quests[QuestKey(numericQuestID, button.title)]
+    if quest then
+      return quest
+    end
+  end
+
+  for key, quest in pairs(questState.quests) do
+    if quest.title == button.title then
+      return quest
+    end
+  end
+
+  return nil
+end
+
+local function FindRemoteTrackerQuest(remoteState, localQuest)
+  local key
+  local quest
+
+  if not remoteState or not remoteState.ready or not localQuest then
+    return nil
+  end
+
+  if localQuest.questID then
+    quest = remoteState.quests[QuestKey(localQuest.questID, localQuest.title)]
+    if quest then
+      return quest
+    end
+  end
+
+  for key, quest in pairs(remoteState.quests or {}) do
+    if quest.title == localQuest.title then
+      return quest
+    end
+  end
+
+  return nil
+end
+
+local function GetCompatibleGroupPeers()
+  local output = {}
+  local index
+  local unit
+  local name
+  local normalized
+  local member
+  local peer
+
+  for index = 1, 4 do
+    unit = "party" .. index
+    if UnitExists(unit) then
+      name = UnitName(unit)
+      normalized = NormalizeName(name)
+      member = normalized and party[normalized]
+      peer = normalized and peers[normalized]
+
+      if member and peer and peer.compatible then
+        table.insert(output, {
+          name = peer.name or member.name or name,
+          classToken = member.classToken,
+          questState = peer.questState
+        })
+      end
+    end
+  end
+
+  return output
+end
+
+local function GetRemoteObjective(peerInfo, localQuest, objectiveIndex)
+  local remoteQuest = FindRemoteTrackerQuest(peerInfo and peerInfo.questState, localQuest)
+  if not remoteQuest or not remoteQuest.objectives then
+    return nil
+  end
+
+  return remoteQuest.objectives[objectiveIndex]
+end
+
+local function RemoteObjectiveDone(objective)
+  local current
+  local required
+
+  if not objective then
+    return false
+  end
+
+  if objective.done then
+    return true
+  end
+
+  current = tonumber(objective.current) or 0
+  required = tonumber(objective.required) or 1
+  return required > 0 and current >= required
+end
+
+local function EnsureBinaryGroupStatus(button, objectiveIndex, peerIndex)
+  local objectiveStatuses
+  local entry
+
+  button.pfqGroupBinary = button.pfqGroupBinary or {}
+  objectiveStatuses = button.pfqGroupBinary[objectiveIndex]
+  if not objectiveStatuses then
+    objectiveStatuses = {}
+    button.pfqGroupBinary[objectiveIndex] = objectiveStatuses
+  end
+
+  entry = objectiveStatuses[peerIndex]
+  if not entry then
+    entry = {}
+    entry.icon = button:CreateTexture(nil, "ARTWORK")
+    entry.mark = button:CreateFontString(nil, "HIGH", "GameFontNormal")
+    entry.mark:SetJustifyH("CENTER")
+    objectiveStatuses[peerIndex] = entry
+  end
+
+  return entry
+end
+
+local function EnsureCountGroupRow(button, objectiveIndex, peerIndex)
+  local objectiveRows
+  local row
+
+  button.pfqGroupRows = button.pfqGroupRows or {}
+  objectiveRows = button.pfqGroupRows[objectiveIndex]
+  if not objectiveRows then
+    objectiveRows = {}
+    button.pfqGroupRows[objectiveIndex] = objectiveRows
+  end
+
+  row = objectiveRows[peerIndex]
+  if not row then
+    row = {}
+    row.icon = button:CreateTexture(nil, "ARTWORK")
+    row.text = button:CreateFontString(nil, "HIGH", "GameFontNormal")
+    row.text:SetJustifyH("LEFT")
+    objectiveRows[peerIndex] = row
+  end
+
+  return row
+end
+
+local function HideGroupTrackerRegions(button)
+  local objectiveEntries
+  local entry
+
+  if button.pfqGroupBinary then
+    for _, objectiveEntries in pairs(button.pfqGroupBinary) do
+      for _, entry in pairs(objectiveEntries) do
+        entry.icon:Hide()
+        entry.mark:Hide()
+      end
+    end
+  end
+
+  if button.pfqGroupRows then
+    for _, objectiveEntries in pairs(button.pfqGroupRows) do
+      for _, entry in pairs(objectiveEntries) do
+        entry.icon:Hide()
+        entry.text:Hide()
+      end
+    end
+  end
+
+  button.pfqGroupStatusWidth = {}
+end
+
+local function CaptureGroupObjectiveBase(objective)
+  local red
+  local green
+  local blue
+
+  objective.pfqGroupBaseText = objective:GetText()
+  red, green, blue = objective:GetTextColor()
+  objective.pfqGroupBaseColor = {
+    r = red,
+    g = green,
+    b = blue
+  }
+end
+
+local function RestoreGroupObjectiveBase(objective)
+  local color = objective.pfqGroupBaseColor
+
+  if objective.pfqGroupBaseText then
+    objective:SetText(objective.pfqGroupBaseText)
+  end
+
+  if color then
+    objective:SetTextColor(color.r, color.g, color.b)
+  end
+end
+
+local function RestoreGroupTrackerButton(button)
+  local fontSize = GetGroupTrackerFontSize(button)
+  local entryHeight = math.ceil(fontSize * 1.6)
+  local objective
+  local maxVisible = 0
+  local index
+
+  HideGroupTrackerRegions(button)
+
+  if button.objectives then
+    for index, objective in pairs(button.objectives) do
+      RestoreGroupObjectiveBase(objective)
+      objective:ClearAllPoints()
+      objective:SetPoint("TOPLEFT", 20, -fontSize * index - 6)
+      objective:SetPoint("TOPRIGHT", -10, -fontSize * index - 6)
+      if objective:IsShown() and index > maxVisible then
+        maxVisible = index
+      end
+    end
+  end
+
+  if button.title and not button.empty then
+    button:SetHeight(entryHeight + maxVisible * fontSize)
+  end
+end
+
+local function RelayoutGroupTracker()
+  local trackerFrame = pfQuest and pfQuest.tracker
+  local panelHeight
+  local height
+  local width = 100
+  local count
+  local buttonIndex
+  local button
+  local objectiveIndex
+  local objective
+  local rowEntries
+  local row
+  local candidateWidth
+
+  if not trackerFrame or not trackerFrame.buttons then
+    return
+  end
+
+  panelHeight = trackerFrame.panel and trackerFrame.panel:GetHeight() or 16
+  height = panelHeight
+  count = table.getn(trackerFrame.buttons)
+
+  for buttonIndex = 1, count do
+    button = trackerFrame.buttons[buttonIndex]
+    if button then
+      button:ClearAllPoints()
+      button:SetPoint("TOPRIGHT", trackerFrame, "TOPRIGHT", 0, -height)
+      button:SetPoint("TOPLEFT", trackerFrame, "TOPLEFT", 0, -height)
+
+      if not button.empty then
+        height = height + button:GetHeight()
+
+        if button.text and button.text:GetStringWidth() > width then
+          width = button.text:GetStringWidth()
+        end
+
+        if button.objectives then
+          for objectiveIndex, objective in pairs(button.objectives) do
+            if objective:IsShown() then
+              candidateWidth = objective:GetStringWidth() + (button.pfqGroupStatusWidth and button.pfqGroupStatusWidth[objectiveIndex] or 0)
+              if candidateWidth > width then
+                width = candidateWidth
+              end
+            end
+          end
+        end
+
+        if button.pfqGroupRows then
+          for _, rowEntries in pairs(button.pfqGroupRows) do
+            for _, row in pairs(rowEntries) do
+              if row.text:IsShown() then
+                candidateWidth = row.text:GetStringWidth() + 20
+                if candidateWidth > width then
+                  width = candidateWidth
+                end
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+
+  trackerFrame:SetHeight(height)
+  trackerFrame:SetWidth(math.min(width, 300) + 30)
+end
+
+local function ApplyGroupProgressToButton(button, captureBase)
+  local trackerFrame = pfQuest and pfQuest.tracker
+  local peersInOrder
+  local localQuest
+  local fontSize
+  local entryHeight
+  local lineCount = 0
+  local objectiveIndex
+  local objective
+  local localObjective
+  local required
+  local peerIndex
+  local peerInfo
+  local remoteObjective
+  local entry
+  local row
+  local iconSize
+  local pairWidth
+  local statusWidth
+  local rightOffset
+  local progressText
+
+  if not button then
+    return
+  end
+
+  HideGroupTrackerRegions(button)
+
+  if not trackerFrame or trackerFrame.mode ~= "QUEST_TRACKING" or button.empty or not button.title then
+    RestoreGroupTrackerButton(button)
+    return
+  end
+
+  localQuest = FindLocalTrackerQuest(button)
+  peersInOrder = GetCompatibleGroupPeers()
+  if not localQuest or table.getn(peersInOrder) == 0 then
+    RestoreGroupTrackerButton(button)
+    return
+  end
+
+  fontSize = GetGroupTrackerFontSize(button)
+  entryHeight = math.ceil(fontSize * 1.6)
+  iconSize = math.max(8, fontSize - 2)
+  pairWidth = iconSize + 8
+
+  for objectiveIndex = 1, table.getn(localQuest.objectives or {}) do
+    objective = button.objectives and button.objectives[objectiveIndex]
+    localObjective = localQuest.objectives[objectiveIndex]
+
+    if objective and objective:IsShown() and localObjective then
+      if captureBase or not objective.pfqGroupBaseText then
+        CaptureGroupObjectiveBase(objective)
+      else
+        RestoreGroupObjectiveBase(objective)
+      end
+
+      lineCount = lineCount + 1
+      objective:ClearAllPoints()
+      objective:SetPoint("TOPLEFT", 20, -fontSize * lineCount - 6)
+
+      required = tonumber(localObjective.required) or 1
+      if required <= 1 then
+        statusWidth = table.getn(peersInOrder) * pairWidth
+        button.pfqGroupStatusWidth[objectiveIndex] = statusWidth
+        objective:SetPoint("TOPRIGHT", -10 - statusWidth - 4, -fontSize * lineCount - 6)
+
+        for peerIndex = 1, table.getn(peersInOrder) do
+          peerInfo = peersInOrder[peerIndex]
+          remoteObjective = GetRemoteObjective(peerInfo, localQuest, objectiveIndex)
+          entry = EnsureBinaryGroupStatus(button, objectiveIndex, peerIndex)
+
+          entry.icon:ClearAllPoints()
+          rightOffset = -10 - ((table.getn(peersInOrder) - peerIndex) * pairWidth) - (pairWidth - iconSize)
+          entry.icon:SetPoint("TOPRIGHT", button, "TOPRIGHT", rightOffset, -fontSize * lineCount - 6)
+          entry.icon:SetWidth(iconSize)
+          entry.icon:SetHeight(iconSize)
+          SetGroupClassIcon(entry.icon, peerInfo.classToken)
+          entry.icon:Show()
+
+          entry.mark:ClearAllPoints()
+          entry.mark:SetPoint("LEFT", entry.icon, "RIGHT", 1, 0)
+          entry.mark:SetWidth(7)
+          entry.mark:SetHeight(iconSize)
+          CopyGroupTrackerFont(objective, entry.mark, fontSize)
+          entry.mark:SetText(RemoteObjectiveDone(remoteObjective) and "✓" or "✗")
+          entry.mark:SetTextColor(1, 1, 1)
+          entry.mark:Show()
+        end
+      else
+        objective:SetPoint("TOPRIGHT", -10, -fontSize * lineCount - 6)
+
+        for peerIndex = 1, table.getn(peersInOrder) do
+          peerInfo = peersInOrder[peerIndex]
+          remoteObjective = GetRemoteObjective(peerInfo, localQuest, objectiveIndex)
+          row = EnsureCountGroupRow(button, objectiveIndex, peerIndex)
+          lineCount = lineCount + 1
+
+          row.icon:ClearAllPoints()
+          row.icon:SetPoint("TOPLEFT", button, "TOPLEFT", 32, -fontSize * lineCount - 6)
+          row.icon:SetWidth(iconSize)
+          row.icon:SetHeight(iconSize)
+          SetGroupClassIcon(row.icon, peerInfo.classToken)
+          row.icon:Show()
+
+          row.text:ClearAllPoints()
+          row.text:SetPoint("TOPLEFT", button, "TOPLEFT", 44, -fontSize * lineCount - 6)
+          row.text:SetPoint("TOPRIGHT", button, "TOPRIGHT", -10, -fontSize * lineCount - 6)
+          CopyGroupTrackerFont(objective, row.text, fontSize)
+
+          if remoteObjective then
+            progressText = SafeString(tonumber(remoteObjective.current) or 0) .. "/" .. SafeString(tonumber(remoteObjective.required) or required)
+          else
+            progressText = "--"
+          end
+
+          row.text:SetText("|cff" .. GroupClassColorHex(peerInfo.classToken) .. SafeString(peerInfo.name) .. "|r  " .. progressText)
+          row.text:SetTextColor(0.85, 0.85, 0.85)
+          row.text:Show()
+        end
+      end
+    end
+  end
+
+  button:SetHeight(entryHeight + lineCount * fontSize)
+end
+
+local function RefreshGroupProgress()
+  local trackerFrame = pfQuest and pfQuest.tracker
+  local buttonIndex
+  local button
+
+  if not groupTrackerInstalled or not trackerFrame or not trackerFrame.buttons then
+    return
+  end
+
+  for buttonIndex = 1, table.getn(trackerFrame.buttons) do
+    button = trackerFrame.buttons[buttonIndex]
+    if button then
+      ApplyGroupProgressToButton(button, false)
+    end
+  end
+
+  RelayoutGroupTracker()
+end
+
+local function GroupTrackerButtonEvent(self)
+  local button = self or this
+
+  if originalTrackerButtonEvent then
+    originalTrackerButtonEvent(button)
+  end
+
+  ApplyGroupProgressToButton(button, true)
+  RelayoutGroupTracker()
+end
+
+local function InstallGroupProgressTracker()
+  local trackerFrame = pfQuest and pfQuest.tracker
+  local buttonIndex
+  local button
+
+  if groupTrackerInstalled then
+    return true
+  end
+
+  if not trackerFrame or type(trackerFrame.ButtonEvent) ~= "function" then
+    return false
+  end
+
+  originalTrackerButtonEvent = trackerFrame.ButtonEvent
+  trackerFrame.ButtonEvent = GroupTrackerButtonEvent
+  groupTrackerInstalled = true
+
+  for buttonIndex = 1, table.getn(trackerFrame.buttons or {}) do
+    button = trackerFrame.buttons[buttonIndex]
+    if button then
+      button:SetScript("OnEvent", GroupTrackerButtonEvent)
+    end
+  end
+
+  RefreshGroupProgress()
+  return true
+end
+
 local function SessionSnapshot()
   local session = Addon.db and Addon.db.session
   if not session then
@@ -1536,6 +2112,13 @@ Addon.party = party
 Addon.RegisterStateComponent("session", SessionSnapshot, ApplyRemoteSession, ApplyRemoteSession)
 Addon.RegisterStateComponent("quests", QuestSnapshot, ApplyRemoteQuestFull, ApplyRemoteQuestDelta)
 
+Addon.RegisterListener("LOCAL_QUEST_STATE_CHANGED", RefreshGroupProgress)
+Addon.RegisterListener("REMOTE_QUEST_STATE_CHANGED", RefreshGroupProgress)
+Addon.RegisterListener("PEER_STATUS", RefreshGroupProgress)
+Addon.RegisterListener("PEER_LEFT", RefreshGroupProgress)
+Addon.RegisterListener("PARTY_CHANGED", RefreshGroupProgress)
+
+
 frame:RegisterEvent("ADDON_LOADED")
 frame:RegisterEvent("PLAYER_ENTERING_WORLD")
 frame:RegisterEvent("PARTY_MEMBERS_CHANGED")
@@ -1554,6 +2137,7 @@ frame:SetScript("OnEvent", function()
     messageCounter = math.floor(GetTime() * 10)
     InitializeDatabase()
     InstallQuestActionHooks()
+    InstallGroupProgressTracker()
     initialized = true
     RefreshParty()
     return
@@ -1565,6 +2149,7 @@ frame:SetScript("OnEvent", function()
 
   if event == "PLAYER_ENTERING_WORLD" or event == "PARTY_MEMBERS_CHANGED" then
     playerName = UnitName("player") or playerName
+    InstallGroupProgressTracker()
     RefreshParty()
 
     if event == "PLAYER_ENTERING_WORLD" then
