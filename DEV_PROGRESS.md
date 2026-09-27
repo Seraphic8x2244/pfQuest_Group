@@ -2,12 +2,12 @@
 
 ## Current
 - Branch: dev.
-- Version: 0.1.11-dev from pfQuest_Group.toc.
-- Latest addon-affecting development commit: 2affbf36a4435fec245c58a04a21740686a7d3f8 — replace pfQuest binary objective `0/1` / `1/1` suffixes with the active Group Progress status presentation, on top of the communications and peer-quest filtering fixes.
+- Version: 0.1.12-dev from pfQuest_Group.toc.
+- Latest addon-affecting development commit: 6419463902225f4672eb1a398bd34a79ae8406a3 — replace non-rendering Unicode binary status glyphs with Vanilla-safe Blizzard textures, on top of the communications, peer filtering, and binary-count text fixes.
 - Handoff checkpoint: the current dev head carrying this status file; always verify the actual remote branch head before resuming.
 - Stable baseline: None. main remains exactly bootstrap commit 4c5c63f074923266566c36c51ce2718d0060166f and is not a runtime release.
 - Goal: reconcile the first broad in-game validation of the integrated Phase 1–6 test build, diagnose and fix only demonstrated defects, then decide release/promotion readiness.
-- Scope boundary: Phase 6 code hardening is complete. Broad runtime testing found the Vanilla addon-WHISPER transport defect plus two Group Progress presentation defects: status for peers without the tracked quest, and binary rows retaining pfQuest's native `0/1` / `1/1` suffix beside the tick/cross overlay. All three are fixed on dev and await focused retest; no unrelated feature work or architecture changes are authorized.
+- Scope boundary: Phase 6 code hardening is complete. Broad runtime testing found the Vanilla addon-WHISPER transport defect plus three Group Progress presentation defects: status for peers without the tracked quest, binary rows retaining pfQuest's native `0/1` / `1/1` suffix, and the tick/cross marks themselves not rendering because the implementation used Unicode glyphs. All are fixed on dev and await focused retest; no unrelated feature work or architecture changes are authorized.
 
 ## Current Design / Development Contract
 
@@ -56,7 +56,7 @@
 - The addon post-processes pfQuest's existing tracker; pfQuest source remains untouched.
 - Only compatible current party peers are displayed, in party-slot order.
 - Numeric questID is matched first and remains authoritative; title fallback is unresolved-ID compatibility only.
-- Binary objectives append class icon plus check/cross status for compatible peers who currently have the tracked quest; the overlay is independent of Guide/Tourist mode. While this overlay is active, only the terminal numeric `0/1` or `1/1`-style progress token is removed from pfQuest's objective fontstring; the original text/color is retained for restoration.
+- Binary objectives append class icon plus check/cross status for compatible peers who currently have the tracked quest; the overlay is independent of Guide/Tourist mode. While this overlay is active, only the terminal numeric `0/1` or `1/1`-style progress token is removed from pfQuest's objective fontstring; the original text/color is retained for restoration. Status marks use Vanilla-safe Blizzard textures rather than Unicode font glyphs.
 - A compatible PFQG peer who does not have the tracked quest contributes no class icon/status for that quest.
 - Count objectives add one class-icon/name/progress row per compatible peer who has the tracked quest; a missing matching objective within an otherwise matched quest displays --.
 - Reusable tracker regions are hidden/restored as peers change and tracker dimensions are recalculated.
@@ -107,6 +107,7 @@
 - 5a9de26b4978bb943cef371cc27b5886e74a2884 — replace invalid Vanilla addon-message WHISPER transport with PARTY transport; version 0.1.9-dev.
 - a736701f8bb26af2309a415b6885aa7cce52e313 — hide Group Progress status for compatible peers without the tracked quest; version 0.1.10-dev.
 - 2affbf36a4435fec245c58a04a21740686a7d3f8 — strip pfQuest's terminal binary `0/1` / `1/1` token while the Group Progress binary overlay is active; version 0.1.11-dev.
+- 6419463902225f4672eb1a398bd34a79ae8406a3 — replace Unicode `✓` / `✗` font glyphs with Blizzard `UI-CheckBox-Check` / `UI-GroupLoot-Pass-Up` textures; version 0.1.12-dev.
 
 ## Validation State
 
@@ -117,11 +118,13 @@
 - The reported Lua error is localized to aux-addon's ChatThrottleLib rejecting pfQuest_Group's SendAddonMessage(..., "WHISPER", target) path as an unknown addon chat type. WoW 1.12 addon messages support PARTY/RAID/GUILD/BATTLEGROUND; addon WHISPER was added later.
 - Group Progress also showed/was specified to show PFQG peer status only when that peer has the tracked quest; peers without the quest must be omitted.
 - Follow-up runtime feedback on 0.1.10-dev: the binary tick/cross overlay was present but pfQuest's native `0/1` or `1/1` count text remained visible on the same objective row.
+- Follow-up runtime feedback after the text fix: the expected binary tick/cross mark itself was not visible. Inspection showed the mark was a literal Unicode `✓` / `✗` in `GameFontNormal`, which is not reliable on the Vanilla client font set.
 
 ### Implemented / Awaiting Runtime Test
 - 0.1.9+ delta: all addon transport uses the Vanilla-supported PARTY addon channel; no four-argument addon-WHISPER send remains.
 - 0.1.10+ delta: Group Progress filters compatible peers per tracked quest before creating binary/count status regions, so peers without that quest are omitted while the overlay remains mode-independent.
-- 0.1.11-dev delta: in the binary branch only, Group Progress strips a terminal numeric fraction from the saved pfQuest objective text before rendering peer status. Multi-count objectives remain on the existing count-row path and the untouched base text is restored whenever the overlay is not applicable.
+- 0.1.11+ delta: in the binary branch only, Group Progress strips a terminal numeric fraction from the saved pfQuest objective text before rendering peer status. Multi-count objectives remain on the existing count-row path and the untouched base text is restored whenever the overlay is not applicable.
+- 0.1.12-dev delta: binary status marks are textures, not font glyphs. Complete uses `Interface\\Buttons\\UI-CheckBox-Check` tinted green; incomplete uses `Interface\\Buttons\\UI-GroupLoot-Pass-Up` tinted red.
 - Integrated Phase 1 foundation/protocol.
 - Phase 2 local/remote quest-state engine.
 - Phase 3 Group Progress tracker integration.
@@ -132,7 +135,7 @@
 
 ### Static / Automated Checks — Exact Phase 6 Addon State
 Exact original Phase 6 test commit: bfe9b578802bf87ed418cb3c329684acfe787825.
-Current addon-affecting retest commit: 2affbf36a4435fec245c58a04a21740686a7d3f8.
+Current addon-affecting retest commit: 6419463902225f4672eb1a398bd34a79ae8406a3.
 - pfQuest_Group.lua blob: 2aeb9ed756936f27d3c69f341fa8acf437782182.
 - locales/enUS.lua blob: 0122994a3bd10ef5d0202dc6794d0c7bd32c7655 (unchanged from Phase 5b).
 - pfQuest_Group.toc blob: 0a19ef766fb6453a2967bb8ed91a7ec574f563e7.
@@ -142,7 +145,7 @@ Current addon-affecting retest commit: 2affbf36a4435fec245c58a04a21740686a7d3f8.
 - main remains exactly 4c5c63f074923266566c36c51ce2718d0060166f.
 - Protocol check: PFQGROUP protocol version remains 1.
 - Ownership check: exactly one session component registration, one quests component registration, one instructions component registration, one Addon.SetMode definition, and one Guide/Tourist window initializer.
-- UI structural count is unchanged from Phase 5b: 5 CreateFrame, 5 CreateFontString, and 3 CreateTexture call sites.
+- Current UI structural count after the Vanilla-safe binary status marker change: 5 CreateFrame, 4 CreateFontString, and 4 CreateTexture call sites. The net change converts the binary status mark from a fontstring to a texture; no new window architecture is introduced.
 - Static later-Lua/API scan passed for the exact committed source: no string.match, string.gmatch, table.unpack, select(, RegisterAddonMessagePrefix, C_QuestLog, C_ChatInfo, or C_Timer tokens.
 - Token-level local scan of the original 0.1.8 source found 144 actual top-level locals. The 0.1.9 transport change renames one top-level local function without changing that count, and the 0.1.10 tracker change adds only one inner-function local; current top-level pressure therefore remains 144, leaving 56 below Lua 5.0.3's 200-local top-level chunk limit. The affected tracker function remains far below 200 locals.
 - Focused Phase 6 mocked integration harness passed texluac -p and runtime assertions under the available Lua 5.3.6 texluac/texlua environment. Coverage: session-first full snapshots; first-known/restarted boot invalidation and recovery; quest readiness/revision handling; numeric-ID-authoritative matching; cross-session instruction-full rejection; missed-instruction cursor resync; instruction validation before cursor mutation; instruction-delta-before-session-delta ordering.
@@ -155,7 +158,8 @@ Current addon-affecting retest commit: 2affbf36a4435fec245c58a04a21740686a7d3f8.
 ### Current Issues / Validation Debt
 - The 0.1.8 runtime transport defect is fixed in 0.1.9+: there is now exactly one SendAddonMessage call and it uses the three-argument PARTY form. Focused in-game retest is still required.
 - The Group Progress no-quest status defect/requirement is fixed in 0.1.10+ by filtering peers through the matched remote quest before rendering status. Focused in-game retest is still required.
-- The binary objective text collision is fixed in 0.1.11-dev by removing only the terminal numeric fraction in the binary overlay branch; the underlying captured pfQuest text is not destroyed. Focused in-game retest is still required.
+- The binary objective text collision is fixed in 0.1.11+ by removing only the terminal numeric fraction in the binary overlay branch; the underlying captured pfQuest text is not destroyed. Focused in-game retest is still required.
+- The invisible binary mark defect is fixed in 0.1.12-dev by replacing literal Unicode marks with Vanilla-era Blizzard textures. Focused in-game retest is still required.
 - Static triage excludes the Lua 5.0.3 200-local cap as the reported error source; current top-level pressure remains 144.
 - No obvious later-Lua syntax/API blacklist hit is present in the current source.
 - Canonical Lua 5.0.3 compiler check remains not run against 0.1.10-dev: the connected GitHub source is not mounted in the executable environment, and direct network cloning from the executable environment is unavailable.
@@ -171,10 +175,10 @@ Current addon-affecting retest commit: 2affbf36a4435fec245c58a04a21740686a7d3f8.
 - Not yet reconciled: exhaustive instruction/recovery paths, disparities, reload/restart recovery, party churn, window persistence, Off cleanup, and the remainder of Group Progress.
 
 ### Next Runtime Test
-Run 0.1.11-dev / 2affbf36a4435fec245c58a04a21740686a7d3f8. Verify: (1) party discovery/sync and reload/recovery produce no ChatThrottleLib `unknown addon chat type` error; (2) Guide/Tourist basic behavior still works; (3) binary pfQuest objectives no longer show the native `0/1` or `1/1` suffix while peer tick/cross status is active; (4) multi-count objectives such as `3/10` remain unchanged; (5) a compatible PFQG peer without the tracked quest shows no class icon/status for that quest.
+Run 0.1.12-dev / 6419463902225f4672eb1a398bd34a79ae8406a3. Verify: (1) party discovery/sync and reload/recovery produce no ChatThrottleLib `unknown addon chat type` error; (2) Guide/Tourist basic behavior still works; (3) binary objectives show visible complete/incomplete status textures beside the class icon; (4) binary pfQuest objectives no longer show the native `0/1` or `1/1` suffix while peer status is active; (5) multi-count objectives such as `3/10` remain unchanged; (6) a compatible PFQG peer without the tracked quest shows no class icon/status for that quest.
 
 ## Planned / Next Work
-1. User performs the focused 0.1.11-dev retest for communications, basic Guide/Tourist behavior, binary objective text replacement, and Group Progress peer filtering.
+1. User performs the focused 0.1.12-dev retest for communications, basic Guide/Tourist behavior, visible binary status textures, binary objective text replacement, and Group Progress peer filtering.
 2. Fix only defects demonstrated by that retest, with normal version discipline.
 3. Reconcile the remaining broad-test results point by point.
 4. After a known-good runtime state exists, review release/promotion readiness separately; do not treat development checks as a runtime test.
@@ -191,4 +195,4 @@ Run 0.1.11-dev / 2affbf36a4435fec245c58a04a21740686a7d3f8. Verify: (1) party dis
 - External/runtime prerequisite: pfQuest.
 
 ## Exact Next Step
-Test 0.1.11-dev / 2affbf36a4435fec245c58a04a21740686a7d3f8 in game, starting with communications/reload, Guide/Tourist, binary objective `0/1` / `1/1` replacement, and pfQuest tracker peer-status filtering. Do not begin unrelated feature work or promote to main before this retest is reconciled.
+Test 0.1.12-dev / 6419463902225f4672eb1a398bd34a79ae8406a3 in game, starting with communications/reload, Guide/Tourist, visible binary complete/incomplete textures, binary objective `0/1` / `1/1` replacement, and pfQuest tracker peer-status filtering. Do not begin unrelated feature work or promote to main before this retest is reconciled.
