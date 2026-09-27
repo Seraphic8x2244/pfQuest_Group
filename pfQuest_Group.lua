@@ -34,6 +34,7 @@ local questHooksInstalled = false
 local pendingAccept = nil
 local pendingTurnin = nil
 local pendingAbandon = nil
+local touristPendingInstructions = {}
 
 local function SafeString(value)
   if value == nil then
@@ -281,6 +282,108 @@ local function NormalizeSession(session)
   return session
 end
 
+local function NormalizeInstructionRecord(record, fallbackSeq)
+  local seq
+  local actionType
+  local questID
+  local mobID
+  local questTitle
+  local npcName
+
+  if type(record) ~= "table" then
+    return nil
+  end
+
+  seq = tonumber(record.seq) or tonumber(fallbackSeq)
+  if not seq or seq < 1 then
+    return nil
+  end
+  seq = math.floor(seq)
+
+  actionType = string.upper(SafeString(record.actionType))
+  if actionType ~= "ACCEPT" and actionType ~= "TURNIN" then
+    return nil
+  end
+
+  questID = tonumber(record.questID)
+  mobID = tonumber(record.mobID)
+  questTitle = SafeString(record.questTitle)
+  npcName = SafeString(record.npcName)
+
+  if not questID and questTitle == "" then
+    return nil
+  end
+
+  return {
+    seq = seq,
+    actionType = actionType,
+    questID = questID,
+    questTitle = questTitle,
+    mobID = mobID,
+    npcName = npcName
+  }
+end
+
+local function NormalizeInstructionStore(store, session)
+  local guideRecords = {}
+  local consumed = {}
+  local guideCursor = tonumber(session and session.guideActionSeq) or 0
+  local baseline = tonumber(session and session.joinBaseline)
+  local key
+  local record
+  local normalized
+  local seq
+
+  if type(store) ~= "table" then
+    store = {}
+  end
+
+  if type(store.guideRecords) == "table" then
+    for key, record in pairs(store.guideRecords) do
+      normalized = NormalizeInstructionRecord(record, key)
+      if normalized and normalized.seq <= guideCursor then
+        guideRecords[normalized.seq] = normalized
+      end
+    end
+  end
+
+  if session and session.mode == "GUIDE" and session.guideSessionId then
+    if store.guideSessionId ~= session.guideSessionId then
+      guideRecords = {}
+    end
+    store.guideSessionId = session.guideSessionId
+    store.guideRecords = guideRecords
+  else
+    store.guideSessionId = nil
+    store.guideRecords = {}
+  end
+
+  if type(store.consumed) == "table" then
+    for key, record in pairs(store.consumed) do
+      seq = tonumber(key)
+      if record and seq and seq >= 1 then
+        seq = math.floor(seq)
+        if not baseline or seq > baseline then
+          consumed[seq] = true
+        end
+      end
+    end
+  end
+
+  if session and session.mode == "TOURIST" and session.guideSessionId then
+    if store.touristSessionId ~= session.guideSessionId then
+      consumed = {}
+    end
+    store.touristSessionId = session.guideSessionId
+    store.consumed = consumed
+  else
+    store.touristSessionId = nil
+    store.consumed = {}
+  end
+
+  return store
+end
+
 local function InitializeDatabase()
   if type(pfQuest_GroupDB) ~= "table" then
     pfQuest_GroupDB = {}
@@ -288,6 +391,8 @@ local function InitializeDatabase()
 
   pfQuest_GroupDB.schema = DB_SCHEMA_VERSION
   pfQuest_GroupDB.session = NormalizeSession(pfQuest_GroupDB.session)
+  pfQuest_GroupDB.instructions = NormalizeInstructionStore(pfQuest_GroupDB.instructions, pfQuest_GroupDB.session)
+  touristPendingInstructions = {}
   Addon.db = pfQuest_GroupDB
 end
 
@@ -458,6 +563,7 @@ local function DispatchMessage(sender, protocolVersion, messageType, payload)
     if peer.bootId and hello.boot and hello.boot ~= "" and peer.bootId ~= hello.boot then
       peer.session = nil
       peer.questState = nil
+      peer.instructions = nil
       incoming[senderKey] = nil
       Emit("PEER_RESTARTED", sender)
     end
@@ -470,6 +576,7 @@ local function DispatchMessage(sender, protocolVersion, messageType, payload)
     if not peer.compatible then
       peer.session = nil
       peer.questState = nil
+      peer.instructions = nil
     end
     peers[senderKey] = peer
     Emit("PEER_STATUS", sender, peer.compatible)
@@ -1894,6 +2001,315 @@ local function InstallGroupProgressTracker()
   return true
 end
 
+
+local function CopyInstruction(source)
+  if not source then
+    return nil
+  end
+
+  return {
+    seq = source.seq,
+    actionType = source.actionType,
+    questID = source.questID,
+    questTitle = source.questTitle,
+    mobID = source.mobID,
+    npcName = source.npcName
+  }
+end
+
+local function CopyInstructionList(records)
+  local output = {}
+  local keys = {}
+  local key
+  local index
+
+  for key in pairs(records or {}) do
+    table.insert(keys, tonumber(key) or key)
+  end
+  table.sort(keys)
+
+  for index = 1, table.getn(keys) do
+    if records[keys[index]] then
+      table.insert(output, CopyInstruction(records[keys[index]]))
+    end
+  end
+
+  return output
+end
+
+local function EncodeInstructionRecord(instruction)
+  local actionCode = instruction.actionType == "ACCEPT" and "A" or "T"
+
+  return table.concat({
+    "I",
+    SafeString(instruction.seq or 0),
+    actionCode,
+    SafeString(instruction.questID or 0),
+    SafeString(instruction.mobID or 0),
+    HexEncode(instruction.questTitle),
+    HexEncode(instruction.npcName)
+  }, ".")
+end
+
+local function DecodeInstructionRecord(record)
+  local fields = SplitPlain(record, ".")
+  local seq
+  local actionType
+  local questID
+  local mobID
+  local questTitle
+  local npcName
+
+  if fields[1] ~= "I" or table.getn(fields) < 7 then
+    return nil
+  end
+
+  seq = tonumber(fields[2])
+  if not seq or seq < 1 then
+    return nil
+  end
+  seq = math.floor(seq)
+
+  if fields[3] == "A" then
+    actionType = "ACCEPT"
+  elseif fields[3] == "T" then
+    actionType = "TURNIN"
+  else
+    return nil
+  end
+
+  questID = tonumber(fields[4])
+  if questID == 0 then
+    questID = nil
+  end
+
+  mobID = tonumber(fields[5])
+  if mobID == 0 then
+    mobID = nil
+  end
+
+  questTitle = HexDecode(fields[6])
+  npcName = HexDecode(fields[7])
+  if not questID and questTitle == "" then
+    return nil
+  end
+
+  return {
+    seq = seq,
+    actionType = actionType,
+    questID = questID,
+    questTitle = questTitle,
+    mobID = mobID,
+    npcName = npcName
+  }
+end
+
+local function EncodeInstructionWire(kind, guideSessionId, cursor, records)
+  local output = {
+    kind .. "." .. HexEncode(guideSessionId or "") .. "." .. SafeString(cursor or 0)
+  }
+  local keys = {}
+  local key
+  local index
+
+  for key in pairs(records or {}) do
+    table.insert(keys, tonumber(key) or key)
+  end
+  table.sort(keys)
+
+  for index = 1, table.getn(keys) do
+    if records[keys[index]] then
+      table.insert(output, EncodeInstructionRecord(records[keys[index]]))
+    end
+  end
+
+  return table.concat(output, "_")
+end
+
+local function DecodeInstructionWire(payload, expectedKind)
+  local records = SplitPlain(payload, "_")
+  local header = records[1] and SplitPlain(records[1], ".") or nil
+  local decoded = {
+    sessionId = nil,
+    cursor = 0,
+    instructions = {}
+  }
+  local index
+  local instruction
+
+  if not header or header[1] ~= expectedKind or table.getn(header) < 3 then
+    return nil
+  end
+
+  decoded.sessionId = HexDecode(header[2])
+  if decoded.sessionId == "" then
+    decoded.sessionId = nil
+  end
+
+  decoded.cursor = tonumber(header[3])
+  if not decoded.cursor or decoded.cursor < 0 then
+    return nil
+  end
+  decoded.cursor = math.floor(decoded.cursor)
+
+  for index = 2, table.getn(records) do
+    if records[index] ~= "" then
+      instruction = DecodeInstructionRecord(records[index])
+      if not instruction or not decoded.sessionId or instruction.seq > decoded.cursor or decoded.instructions[instruction.seq] then
+        return nil
+      end
+      decoded.instructions[instruction.seq] = instruction
+    end
+  end
+
+  return decoded
+end
+
+local function InstructionSnapshot()
+  local session = Addon.db and Addon.db.session
+  local store = Addon.db and Addon.db.instructions
+
+  if not session or session.mode ~= "GUIDE" or not session.guideSessionId or not store or store.guideSessionId ~= session.guideSessionId then
+    return EncodeInstructionWire("S", nil, 0, {})
+  end
+
+  return EncodeInstructionWire("S", session.guideSessionId, tonumber(session.guideActionSeq) or 0, store.guideRecords)
+end
+
+local function InstructionMatchesAction(instruction, actionType, quest, context)
+  local actionQuestID
+  local actionTitle
+
+  if not instruction or instruction.actionType ~= actionType then
+    return false
+  end
+
+  actionQuestID = tonumber(context and context.questID) or tonumber(quest and quest.questID)
+  actionTitle = SafeString((context and context.questTitle) or (quest and quest.title))
+
+  if instruction.questID and actionQuestID then
+    return instruction.questID == actionQuestID
+  end
+
+  return instruction.questTitle ~= "" and actionTitle ~= "" and instruction.questTitle == actionTitle
+end
+
+local function ReconcileTouristInstructions(sender)
+  local session = Addon.db and Addon.db.session
+  local store = Addon.db and Addon.db.instructions
+  local guideKey
+  local peer
+  local baseline
+  local nextPending = {}
+  local seq
+  local instruction
+
+  if not session or session.mode ~= "TOURIST" or not session.guideName or not session.guideSessionId or session.joinBaseline == nil then
+    return false
+  end
+
+  if sender and NormalizeName(sender) ~= NormalizeName(session.guideName) then
+    return false
+  end
+
+  guideKey = NormalizeName(session.guideName)
+  peer = guideKey and peers[guideKey]
+  if not peer or not peer.compatible or not peer.instructions or peer.instructions.sessionId ~= session.guideSessionId then
+    return false
+  end
+
+  baseline = tonumber(session.joinBaseline) or 0
+  store = NormalizeInstructionStore(store, session)
+  Addon.db.instructions = store
+
+  for seq, instruction in pairs(peer.instructions.instructions or {}) do
+    seq = tonumber(seq)
+    if seq and seq > baseline and not store.consumed[seq] then
+      nextPending[seq] = CopyInstruction(instruction)
+    end
+  end
+
+  touristPendingInstructions = nextPending
+  Emit("TOURIST_INSTRUCTIONS_CHANGED", CopyInstructionList(touristPendingInstructions))
+  return true
+end
+
+local function ApplyRemoteInstructionFull(sender, payload)
+  local decoded = DecodeInstructionWire(payload, "S")
+  local senderKey = NormalizeName(sender)
+  local peer = senderKey and peers[senderKey]
+
+  if not decoded or not peer then
+    return
+  end
+
+  if not decoded.sessionId then
+    peer.instructions = nil
+    Emit("REMOTE_INSTRUCTIONS_CHANGED", sender, nil)
+    ReconcileTouristInstructions(sender)
+    return
+  end
+
+  if peer.instructions and peer.instructions.sessionId == decoded.sessionId and decoded.cursor < (peer.instructions.cursor or 0) then
+    return
+  end
+
+  peer.instructions = {
+    sessionId = decoded.sessionId,
+    cursor = decoded.cursor,
+    instructions = decoded.instructions
+  }
+
+  Emit("REMOTE_INSTRUCTIONS_CHANGED", sender, peer.instructions)
+  ReconcileTouristInstructions(sender)
+end
+
+local function ApplyRemoteInstructionDelta(sender, payload)
+  local decoded = DecodeInstructionWire(payload, "D")
+  local senderKey = NormalizeName(sender)
+  local peer = senderKey and peers[senderKey]
+  local currentCursor
+  local instruction
+
+  if not decoded or not decoded.sessionId or not peer then
+    return
+  end
+
+  if not peer.instructions or peer.instructions.sessionId ~= decoded.sessionId then
+    if peer.session and peer.session.mode == "GUIDE" and peer.session.guideSessionId == decoded.sessionId and decoded.cursor == 1 then
+      peer.instructions = {
+        sessionId = decoded.sessionId,
+        cursor = 0,
+        instructions = {}
+      }
+    else
+      Addon.RequestFullSync(sender)
+      return
+    end
+  end
+
+  currentCursor = tonumber(peer.instructions.cursor) or 0
+  if decoded.cursor <= currentCursor then
+    return
+  end
+
+  if decoded.cursor ~= currentCursor + 1 then
+    Addon.RequestFullSync(sender)
+    return
+  end
+
+  instruction = decoded.instructions[decoded.cursor]
+  if not instruction then
+    Addon.RequestFullSync(sender)
+    return
+  end
+
+  peer.instructions.instructions[decoded.cursor] = instruction
+  peer.instructions.cursor = decoded.cursor
+  Emit("REMOTE_INSTRUCTIONS_CHANGED", sender, peer.instructions)
+  ReconcileTouristInstructions(sender)
+end
+
 local function SessionSnapshot()
   local session = Addon.db and Addon.db.session
   if not session then
@@ -2010,10 +2426,15 @@ local function ApplyRemoteSession(sender, payload)
     guideSessionId = nil
     joinBaseline = nil
     guideActionSeq = nil
+    peer.instructions = nil
   elseif mode == "GUIDE" then
     guideName = nil
     joinBaseline = nil
+    if peer.instructions and peer.instructions.sessionId ~= guideSessionId then
+      peer.instructions = nil
+    end
   else
+    peer.instructions = nil
     guideActionSeq = nil
     if not guideSessionId then
       joinBaseline = nil
@@ -2031,6 +2452,7 @@ local function ApplyRemoteSession(sender, payload)
 
   Emit("REMOTE_SESSION_CHANGED", sender, peer.session)
   ReconcileTouristPairing(sender)
+  ReconcileTouristInstructions(sender)
 end
 
 function Addon.RegisterListener(eventName, handler)
@@ -2104,6 +2526,27 @@ function Addon.GetRemoteQuestState(name)
   end
 
   return CopyQuestState(peer.questState)
+end
+
+function Addon.GetGuideInstructions()
+  local session = Addon.db and Addon.db.session
+  local store = Addon.db and Addon.db.instructions
+
+  if not session or session.mode ~= "GUIDE" or not store or store.guideSessionId ~= session.guideSessionId then
+    return {}
+  end
+
+  return CopyInstructionList(store.guideRecords)
+end
+
+function Addon.GetTouristInstructions()
+  local session = Addon.db and Addon.db.session
+
+  if not session or session.mode ~= "TOURIST" or not session.guideSessionId or session.joinBaseline == nil then
+    return {}
+  end
+
+  return CopyInstructionList(touristPendingInstructions)
 end
 
 function Addon.GetSession()
@@ -2193,6 +2636,8 @@ function Addon.SetMode(mode, guideName)
   end
 
   if changed then
+    Addon.db.instructions = NormalizeInstructionStore(Addon.db.instructions, session)
+    touristPendingInstructions = {}
     session.revision = session.revision + 1
     BroadcastSessionDelta()
     Emit("SESSION_CHANGED", Addon.GetSession())
@@ -2200,6 +2645,7 @@ function Addon.SetMode(mode, guideName)
 
   if mode == "TOURIST" then
     ReconcileTouristPairing()
+    ReconcileTouristInstructions()
   end
 
   return true
@@ -2230,9 +2676,12 @@ function Addon.SetTouristSession(guideName, guideSessionId, joinBaseline)
 
   session.guideSessionId = guideSessionId
   session.joinBaseline = baseline
+  Addon.db.instructions = NormalizeInstructionStore(Addon.db.instructions, session)
+  touristPendingInstructions = {}
   session.revision = session.revision + 1
   BroadcastSessionDelta()
   Emit("SESSION_CHANGED", Addon.GetSession())
+  ReconcileTouristInstructions(guideName)
   return true
 end
 
@@ -2254,27 +2703,84 @@ function Addon.ClearTouristSession()
 
   session.guideSessionId = nil
   session.joinBaseline = nil
+  Addon.db.instructions = NormalizeInstructionStore(Addon.db.instructions, session)
+  touristPendingInstructions = {}
   session.revision = session.revision + 1
   BroadcastSessionDelta()
   Emit("SESSION_CHANGED", Addon.GetSession())
+  Emit("TOURIST_INSTRUCTIONS_CHANGED", {})
   return true
 end
 
-local function TrackGuideAction(actionType)
+local function HandleInstructionQuestAction(actionType, quest, context)
   local session = Addon.db and Addon.db.session
+  local store
+  local seq
+  local instruction
+  local pendingSeq
+  local candidateSeq
+  local candidate
 
-  if not session or session.mode ~= "GUIDE" then
+  if not session or (actionType ~= "ACCEPT" and actionType ~= "TURNIN") then
     return
   end
 
-  if actionType ~= "ACCEPT" and actionType ~= "TURNIN" then
+  if session.mode == "GUIDE" and session.guideSessionId then
+    session.guideActionSeq = (tonumber(session.guideActionSeq) or 0) + 1
+    seq = session.guideActionSeq
+    Addon.db.instructions = NormalizeInstructionStore(Addon.db.instructions, session)
+    store = Addon.db.instructions
+
+    instruction = NormalizeInstructionRecord({
+      seq = seq,
+      actionType = actionType,
+      questID = tonumber(context and context.questID) or tonumber(quest and quest.questID),
+      questTitle = SafeString((context and context.questTitle) or (quest and quest.title)),
+      mobID = tonumber(context and context.mobID),
+      npcName = SafeString(context and context.npcName)
+    }, seq)
+
+    if not instruction then
+      return
+    end
+
+    store.guideSessionId = session.guideSessionId
+    store.guideRecords[seq] = instruction
+    session.revision = session.revision + 1
+    BroadcastSessionDelta()
+    Addon.SendDelta("instructions", EncodeInstructionWire("D", session.guideSessionId, seq, {
+      [seq] = instruction
+    }))
+    Emit("SESSION_CHANGED", Addon.GetSession())
+    Emit("GUIDE_INSTRUCTION_CREATED", CopyInstruction(instruction))
+    Emit("GUIDE_INSTRUCTIONS_CHANGED", Addon.GetGuideInstructions())
     return
   end
 
-  session.guideActionSeq = (tonumber(session.guideActionSeq) or 0) + 1
-  session.revision = session.revision + 1
-  BroadcastSessionDelta()
-  Emit("SESSION_CHANGED", Addon.GetSession())
+  if session.mode ~= "TOURIST" or not session.guideSessionId or session.joinBaseline == nil then
+    return
+  end
+
+  for candidateSeq, candidate in pairs(touristPendingInstructions) do
+    candidateSeq = tonumber(candidateSeq)
+    if candidateSeq and InstructionMatchesAction(candidate, actionType, quest, context) then
+      if not pendingSeq or candidateSeq < pendingSeq then
+        pendingSeq = candidateSeq
+        instruction = candidate
+      end
+    end
+  end
+
+  if not pendingSeq or not instruction then
+    return
+  end
+
+  Addon.db.instructions = NormalizeInstructionStore(Addon.db.instructions, session)
+  store = Addon.db.instructions
+  store.consumed[pendingSeq] = true
+  touristPendingInstructions[pendingSeq] = nil
+  Emit("TOURIST_INSTRUCTION_COMPLETED", CopyInstruction(instruction))
+  Emit("TOURIST_INSTRUCTIONS_CHANGED", Addon.GetTouristInstructions())
 end
 
 local function SessionStatusText()
@@ -2345,8 +2851,9 @@ Addon.party = party
 
 Addon.RegisterStateComponent("session", SessionSnapshot, ApplyRemoteSession, ApplyRemoteSession)
 Addon.RegisterStateComponent("quests", QuestSnapshot, ApplyRemoteQuestFull, ApplyRemoteQuestDelta)
+Addon.RegisterStateComponent("instructions", InstructionSnapshot, ApplyRemoteInstructionFull, ApplyRemoteInstructionDelta)
 
-Addon.RegisterListener("LOCAL_QUEST_ACTION", TrackGuideAction)
+Addon.RegisterListener("LOCAL_QUEST_ACTION", HandleInstructionQuestAction)
 Addon.RegisterListener("LOCAL_QUEST_STATE_CHANGED", RefreshGroupProgress)
 Addon.RegisterListener("REMOTE_QUEST_STATE_CHANGED", RefreshGroupProgress)
 Addon.RegisterListener("PEER_STATUS", RefreshGroupProgress)
