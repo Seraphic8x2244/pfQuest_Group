@@ -548,11 +548,20 @@ local function ApplyFullState(sender, payload)
   local snapshot = DecodeMap(payload)
   local componentName
   local componentPayload
+  local component
+
+  componentPayload = snapshot.session
+  component = components.session
+  if componentPayload ~= nil and component and component.applyFull then
+    component.applyFull(sender, componentPayload)
+  end
 
   for componentName, componentPayload in pairs(snapshot) do
-    local component = components[componentName]
-    if component and component.applyFull then
-      component.applyFull(sender, componentPayload)
+    if componentName ~= "session" then
+      component = components[componentName]
+      if component and component.applyFull then
+        component.applyFull(sender, componentPayload)
+      end
     end
   end
 
@@ -605,20 +614,42 @@ local function DispatchMessage(sender, protocolVersion, messageType, payload)
 
   if messageType == "H" then
     local hello = DecodeMap(payload)
+    local previousBoot
+    local incomingBoot
+    local establishBoot = false
+    local restarted = false
+    local hadRemoteState
     peer = peers[senderKey] or { name = sender }
 
-    if peer.bootId and hello.boot and hello.boot ~= "" and peer.bootId ~= hello.boot then
+    previousBoot = peer.bootId
+    incomingBoot = hello.boot
+    hadRemoteState = peer.session or peer.questState or peer.instructions
+
+    if incomingBoot and incomingBoot ~= "" then
+      if previousBoot and previousBoot ~= "" then
+        if previousBoot ~= incomingBoot then
+          establishBoot = true
+          restarted = true
+        end
+      else
+        establishBoot = true
+      end
+    end
+
+    if establishBoot and ((previousBoot and previousBoot ~= "") or hadRemoteState) then
       peer.session = nil
       peer.questState = nil
       peer.instructions = nil
       incoming[senderKey] = nil
-      Emit("PEER_RESTARTED", sender)
+      if restarted then
+        Emit("PEER_RESTARTED", sender)
+      end
     end
 
     peer.name = sender
     peer.version = hello.version
     peer.protocol = protocolVersion
-    peer.bootId = hello.boot
+    peer.bootId = incomingBoot
     peer.compatible = protocolVersion == PROTOCOL_VERSION
     if not peer.compatible then
       peer.session = nil
@@ -629,7 +660,13 @@ local function DispatchMessage(sender, protocolVersion, messageType, payload)
     Emit("PEER_STATUS", sender, peer.compatible)
 
     if peer.compatible then
+      if establishBoot then
+        SendHello(sender)
+      end
       SendFullState(sender)
+      if establishBoot then
+        RequestFullState(sender)
+      end
     end
     return
   end
@@ -1081,9 +1118,10 @@ local function DecodeQuestWire(payload, expectedKind)
   end
 
   decoded.revision = tonumber(header[2])
-  if not decoded.revision then
+  if not decoded.revision or decoded.revision < 0 then
     return nil
   end
+  decoded.revision = math.floor(decoded.revision)
 
   for index = 2, table.getn(records) do
     if string.sub(records[index], 1, 2) == "Q." then
@@ -1281,6 +1319,10 @@ local function BuildActionContext(quest, phase, pending)
 end
 
 local function QuestSnapshot()
+  if not questState.ready then
+    return nil
+  end
+
   return EncodeQuestWire("S", questState.revision, questState.quests)
 end
 
@@ -1290,6 +1332,18 @@ local function ApplyRemoteQuestFull(sender, payload)
   local peer = senderKey and peers[senderKey]
 
   if not decoded or not peer then
+    return
+  end
+
+  if decoded.revision == 0 then
+    if not peer.questState or (tonumber(peer.questState.revision) or 0) <= 0 then
+      peer.questState = {
+        revision = 0,
+        ready = false,
+        quests = {}
+      }
+      Emit("REMOTE_QUEST_STATE_CHANGED", sender, CopyQuestState(peer.questState))
+    end
     return
   end
 
@@ -1586,7 +1640,7 @@ local function FindLocalTrackerQuest(button)
   end
 
   for key, quest in pairs(questState.quests) do
-    if quest.title == button.title then
+    if quest.title == button.title and (not numericQuestID or not quest.questID) then
       return quest
     end
   end
@@ -1610,7 +1664,7 @@ local function FindRemoteTrackerQuest(remoteState, localQuest)
   end
 
   for key, quest in pairs(remoteState.quests or {}) do
-    if quest.title == localQuest.title then
+    if quest.title == localQuest.title and (not localQuest.questID or not quest.questID) then
       return quest
     end
   end
@@ -2285,9 +2339,21 @@ local function ApplyRemoteInstructionFull(sender, payload)
   local decoded = DecodeInstructionWire(payload, "S")
   local senderKey = NormalizeName(sender)
   local peer = senderKey and peers[senderKey]
+  local remoteSession
 
   if not decoded or not peer then
     return
+  end
+
+  remoteSession = peer.session
+  if remoteSession then
+    if remoteSession.mode == "GUIDE" and remoteSession.guideSessionId then
+      if decoded.sessionId ~= remoteSession.guideSessionId then
+        return
+      end
+    elseif decoded.sessionId then
+      return
+    end
   end
 
   if not decoded.sessionId then
@@ -2421,7 +2487,7 @@ local function ReconcileTouristPairing(sender)
   return false
 end
 
-local function ApplyRemoteSession(sender, payload)
+local function ApplyRemoteSession(sender, payload, checkInstructionSync)
   local values = DecodeMap(payload)
   local mode = values.mode
   local senderKey = NormalizeName(sender)
@@ -2431,6 +2497,9 @@ local function ApplyRemoteSession(sender, payload)
   local guideSessionId
   local joinBaseline
   local guideActionSeq
+  local localSession
+  local remoteInstructions
+  local remoteInstructionCursor
 
   if not peer then
     return
@@ -2500,6 +2569,30 @@ local function ApplyRemoteSession(sender, payload)
   Emit("REMOTE_SESSION_CHANGED", sender, peer.session)
   ReconcileTouristPairing(sender)
   ReconcileTouristInstructions(sender)
+
+  if checkInstructionSync and mode == "GUIDE" and guideSessionId and guideActionSeq and guideActionSeq > 0 then
+    localSession = Addon.db and Addon.db.session
+    if localSession
+      and localSession.mode == "TOURIST"
+      and NormalizeName(localSession.guideName) == senderKey
+      and localSession.guideSessionId == guideSessionId
+      and localSession.joinBaseline ~= nil
+      and guideActionSeq > localSession.joinBaseline then
+      remoteInstructions = peer.instructions
+      remoteInstructionCursor = remoteInstructions and remoteInstructions.sessionId == guideSessionId and tonumber(remoteInstructions.cursor) or nil
+      if not remoteInstructionCursor or remoteInstructionCursor < guideActionSeq then
+        Addon.RequestFullSync(sender)
+      end
+    end
+  end
+end
+
+local function ApplyRemoteSessionFull(sender, payload)
+  ApplyRemoteSession(sender, payload, false)
+end
+
+local function ApplyRemoteSessionDelta(sender, payload)
+  ApplyRemoteSession(sender, payload, true)
 end
 
 function Addon.RegisterListener(eventName, handler)
@@ -2773,11 +2866,7 @@ local function HandleInstructionQuestAction(actionType, quest, context)
   end
 
   if session.mode == "GUIDE" and session.guideSessionId then
-    session.guideActionSeq = (tonumber(session.guideActionSeq) or 0) + 1
-    seq = session.guideActionSeq
-    Addon.db.instructions = NormalizeInstructionStore(Addon.db.instructions, session)
-    store = Addon.db.instructions
-
+    seq = (tonumber(session.guideActionSeq) or 0) + 1
     instruction = NormalizeInstructionRecord({
       seq = seq,
       actionType = actionType,
@@ -2791,13 +2880,16 @@ local function HandleInstructionQuestAction(actionType, quest, context)
       return
     end
 
+    session.guideActionSeq = seq
+    Addon.db.instructions = NormalizeInstructionStore(Addon.db.instructions, session)
+    store = Addon.db.instructions
     store.guideSessionId = session.guideSessionId
     store.guideRecords[seq] = instruction
     session.revision = session.revision + 1
-    BroadcastSessionDelta()
     Addon.SendDelta("instructions", EncodeInstructionWire("D", session.guideSessionId, seq, {
       [seq] = instruction
     }))
+    BroadcastSessionDelta()
     Emit("SESSION_CHANGED", Addon.GetSession())
     Emit("GUIDE_INSTRUCTION_CREATED", CopyInstruction(instruction))
     Emit("GUIDE_INSTRUCTIONS_CHANGED", Addon.GetGuideInstructions())
@@ -3367,7 +3459,7 @@ Addon.protocolPrefix = PROTOCOL_PREFIX
 Addon.peers = peers
 Addon.party = party
 
-Addon.RegisterStateComponent("session", SessionSnapshot, ApplyRemoteSession, ApplyRemoteSession)
+Addon.RegisterStateComponent("session", SessionSnapshot, ApplyRemoteSessionFull, ApplyRemoteSessionDelta)
 Addon.RegisterStateComponent("quests", QuestSnapshot, ApplyRemoteQuestFull, ApplyRemoteQuestDelta)
 Addon.RegisterStateComponent("instructions", InstructionSnapshot, ApplyRemoteInstructionFull, ApplyRemoteInstructionDelta)
 
