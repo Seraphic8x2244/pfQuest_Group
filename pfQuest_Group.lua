@@ -1955,7 +1955,6 @@ local function ApplyGroupProgressToButton(button, captureBase)
   local pairWidth
   local remoteStatusWidth
   local statusWidth
-  local rightOffset
   local progressText
 
   if not button then
@@ -2009,13 +2008,16 @@ local function ApplyGroupProgressToButton(button, captureBase)
         objective:SetText(string.gsub(objective.pfqGroupBaseText or objective:GetText() or "", "%s*[%d]+%s*/%s*[%d]+%s*$", ""))
 
         remoteStatusWidth = table.getn(peersInOrder) * pairWidth
-        statusWidth = remoteStatusWidth + iconSize + 4
+        statusWidth = iconSize + 2
+        if remoteStatusWidth > 0 then
+          statusWidth = statusWidth + remoteStatusWidth + 3
+        end
         button.pfqGroupStatusWidth[objectiveIndex] = statusWidth
-        objective:SetPoint("TOPRIGHT", -10 - statusWidth, -fontSize * lineCount - 6)
+        objective:SetPoint("TOPRIGHT", -10, -fontSize * lineCount - 6)
 
         localMark = EnsureLocalBinaryStatus(button, objectiveIndex)
         localMark:ClearAllPoints()
-        localMark:SetPoint("TOPRIGHT", button, "TOPRIGHT", -12 - remoteStatusWidth, -fontSize * lineCount - 6)
+        localMark:SetPoint("LEFT", objective, "LEFT", objective:GetStringWidth() + 2, 0)
         localMark:SetWidth(iconSize)
         localMark:SetHeight(iconSize)
         if RemoteObjectiveDone(localObjective) then
@@ -2033,8 +2035,7 @@ local function ApplyGroupProgressToButton(button, captureBase)
           entry = EnsureBinaryGroupStatus(button, objectiveIndex, peerIndex)
 
           entry.icon:ClearAllPoints()
-          rightOffset = -10 - ((table.getn(peersInOrder) - peerIndex) * pairWidth) - (pairWidth - iconSize)
-          entry.icon:SetPoint("TOPRIGHT", button, "TOPRIGHT", rightOffset, -fontSize * lineCount - 6)
+          entry.icon:SetPoint("LEFT", localMark, "RIGHT", 3 + ((peerIndex - 1) * pairWidth), 0)
           entry.icon:SetWidth(iconSize)
           entry.icon:SetHeight(iconSize)
           SetGroupClassIcon(entry.icon, peerInfo.classToken)
