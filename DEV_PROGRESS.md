@@ -177,7 +177,7 @@ Current addon-affecting retest commit: c74a0da565d412ad118466faaff1640e21d8096c.
 - The invisible binary mark defect is fixed in 0.1.12+ by replacing literal Unicode marks with Vanilla-era Blizzard textures; the screenshot confirms the remote red incomplete/cross texture is visible.
 - The 0.1.12 local binary replacement gating defect is fixed and user-verified in 0.1.13-dev: local binary status no longer depends on any peer having the quest.
 - The 0.1.13 binary-row justification defect is fixed and locally user-verified in 0.1.14-dev by placing the local status inline after the objective label. Remote-member presentation polish is deferred.
-- Static triage excludes the Lua 5.0.3 200-local cap as the reported error source; current top-level pressure is 145.
+- Static triage excludes the Lua 5.0.3 200-local cap as the reported error source; current top-level pressure is 151.
 - No obvious later-Lua syntax/API blacklist hit is present in the current source.
 - Canonical Lua 5.0.3 compiler check remains not run against 0.1.16-dev: the connected GitHub source is not mounted in the executable environment, and direct network cloning from the executable environment is unavailable.
 - The 0.1.16 reverse-completion delta is not yet user-tested. The 0.1.14 partial broad-matrix results remain the last runtime baseline and must not be rewritten as tests of protocol v2.
