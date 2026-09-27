@@ -2541,7 +2541,6 @@ local function ApplyRemoteInstructionCompletionDelta(sender, payload)
 
   filtered = FilterRemoteInstructionCompletions(peer, decoded.sessionId, decoded.consumed)
   if not filtered then
-    Addon.RequestFullSync(sender)
     return
   end
 
