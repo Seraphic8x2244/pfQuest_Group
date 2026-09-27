@@ -1725,6 +1725,19 @@ local function RemoteObjectiveDone(objective)
   return required > 0 and current >= required
 end
 
+local function EnsureLocalBinaryStatus(button, objectiveIndex)
+  local mark
+
+  button.pfqGroupLocalBinary = button.pfqGroupLocalBinary or {}
+  mark = button.pfqGroupLocalBinary[objectiveIndex]
+  if not mark then
+    mark = button:CreateTexture(nil, "OVERLAY")
+    button.pfqGroupLocalBinary[objectiveIndex] = mark
+  end
+
+  return mark
+end
+
 local function EnsureBinaryGroupStatus(button, objectiveIndex, peerIndex)
   local objectiveStatuses
   local entry
@@ -1773,6 +1786,12 @@ end
 local function HideGroupTrackerRegions(button)
   local objectiveEntries
   local entry
+
+  if button.pfqGroupLocalBinary then
+    for _, entry in pairs(button.pfqGroupLocalBinary) do
+      entry:Hide()
+    end
+  end
 
   if button.pfqGroupBinary then
     for _, objectiveEntries in pairs(button.pfqGroupBinary) do
@@ -1930,9 +1949,11 @@ local function ApplyGroupProgressToButton(button, captureBase)
   local peerInfo
   local remoteObjective
   local entry
+  local localMark
   local row
   local iconSize
   local pairWidth
+  local remoteStatusWidth
   local statusWidth
   local rightOffset
   local progressText
@@ -1950,7 +1971,7 @@ local function ApplyGroupProgressToButton(button, captureBase)
 
   localQuest = FindLocalTrackerQuest(button)
   peersInOrder = GetCompatibleGroupPeers()
-  if not localQuest or table.getn(peersInOrder) == 0 then
+  if not localQuest then
     RestoreGroupTrackerButton(button)
     return
   end
@@ -1960,11 +1981,6 @@ local function ApplyGroupProgressToButton(button, captureBase)
     if FindRemoteTrackerQuest(peerInfo.questState, localQuest) then
       table.insert(questPeers, peerInfo)
     end
-  end
-
-  if table.getn(questPeers) == 0 then
-    RestoreGroupTrackerButton(button)
-    return
   end
 
   peersInOrder = questPeers
@@ -1991,9 +2007,25 @@ local function ApplyGroupProgressToButton(button, captureBase)
       required = tonumber(localObjective.required) or 1
       if required <= 1 then
         objective:SetText(string.gsub(objective.pfqGroupBaseText or objective:GetText() or "", "%s*[%d]+%s*/%s*[%d]+%s*$", ""))
-        statusWidth = table.getn(peersInOrder) * pairWidth
+
+        remoteStatusWidth = table.getn(peersInOrder) * pairWidth
+        statusWidth = remoteStatusWidth + iconSize + 4
         button.pfqGroupStatusWidth[objectiveIndex] = statusWidth
-        objective:SetPoint("TOPRIGHT", -10 - statusWidth - 4, -fontSize * lineCount - 6)
+        objective:SetPoint("TOPRIGHT", -10 - statusWidth, -fontSize * lineCount - 6)
+
+        localMark = EnsureLocalBinaryStatus(button, objectiveIndex)
+        localMark:ClearAllPoints()
+        localMark:SetPoint("TOPRIGHT", button, "TOPRIGHT", -12 - remoteStatusWidth, -fontSize * lineCount - 6)
+        localMark:SetWidth(iconSize)
+        localMark:SetHeight(iconSize)
+        if RemoteObjectiveDone(localObjective) then
+          localMark:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
+          localMark:SetVertexColor(0.25, 1, 0.25, 1)
+        else
+          localMark:SetTexture("Interface\\Buttons\\UI-GroupLoot-Pass-Up")
+          localMark:SetVertexColor(1, 0.25, 0.25, 1)
+        end
+        localMark:Show()
 
         for peerIndex = 1, table.getn(peersInOrder) do
           peerInfo = peersInOrder[peerIndex]
