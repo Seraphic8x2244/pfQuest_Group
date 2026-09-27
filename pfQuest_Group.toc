@@ -1,0 +1,10 @@
+## Interface: 11200
+## Title: pfQuest_Group-dev
+## Notes: Party quest progress and Guide/Tourist companion for pfQuest
+## Author: Seraphic8x2244
+## Version: 0.1.0-dev
+## Dependencies: pfQuest
+## SavedVariablesPerCharacter: pfQuest_GroupDB
+
+locales\enUS.lua
+pfQuest_Group.lua
