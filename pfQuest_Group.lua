@@ -21,6 +21,18 @@ local peers = {}
 local incoming = {}
 local components = {}
 local listeners = {}
+local questState = {
+  revision = 0,
+  ready = false,
+  quests = {}
+}
+local questScanPending = false
+local questScanAt = 0
+local questBaselineAt = 0
+local questHooksInstalled = false
+local pendingAccept = nil
+local pendingTurnin = nil
+local pendingAbandon = nil
 
 local function SafeString(value)
   if value == nil then
@@ -103,6 +115,70 @@ local function NormalizeName(name)
     return nil
   end
   return string.lower(name)
+end
+
+local function Trim(value)
+  local text = SafeString(value)
+  text = string.gsub(text, "^%s+", "")
+  text = string.gsub(text, "%s+$", "")
+  return text
+end
+
+local function HexEncode(value)
+  local text = SafeString(value)
+  local output = {}
+  local index
+
+  for index = 1, string.len(text) do
+    table.insert(output, string.format("%02X", string.byte(text, index)))
+  end
+
+  return table.concat(output, "")
+end
+
+local function HexDecode(value)
+  local text = SafeString(value)
+  local output = {}
+  local index
+
+  if math.mod(string.len(text), 2) ~= 0 then
+    return ""
+  end
+
+  for index = 1, string.len(text), 2 do
+    local byteValue = tonumber(string.sub(text, index, index + 1), 16)
+    if not byteValue then
+      return ""
+    end
+    table.insert(output, string.char(byteValue))
+  end
+
+  return table.concat(output, "")
+end
+
+local function SplitPlain(value, separator)
+  local output = {}
+  local text = SafeString(value)
+  local startAt = 1
+  local separatorLength = string.len(separator)
+
+  if separator == "" then
+    table.insert(output, text)
+    return output
+  end
+
+  while true do
+    local foundAt = string.find(text, separator, startAt, true)
+    if not foundAt then
+      table.insert(output, string.sub(text, startAt))
+      break
+    end
+
+    table.insert(output, string.sub(text, startAt, foundAt - 1))
+    startAt = foundAt + separatorLength
+  end
+
+  return output
 end
 
 local function Emit(eventName, argA, argB, argC)
@@ -342,7 +418,9 @@ local function DispatchMessage(sender, protocolVersion, messageType, payload)
 
     if peer.bootId and hello.boot and hello.boot ~= "" and peer.bootId ~= hello.boot then
       peer.session = nil
+      peer.questState = nil
       incoming[senderKey] = nil
+      Emit("PEER_RESTARTED", sender)
     end
 
     peer.name = sender
@@ -350,6 +428,10 @@ local function DispatchMessage(sender, protocolVersion, messageType, payload)
     peer.protocol = protocolVersion
     peer.bootId = hello.boot
     peer.compatible = protocolVersion == PROTOCOL_VERSION
+    if not peer.compatible then
+      peer.session = nil
+      peer.questState = nil
+    end
     peers[senderKey] = peer
     Emit("PEER_STATUS", sender, peer.compatible)
 
@@ -515,6 +597,688 @@ local function RefreshParty()
   end
 end
 
+local function ReadQuestLogTitle(index)
+  if pfQuestCompat and pfQuestCompat.GetQuestLogTitle then
+    return pfQuestCompat.GetQuestLogTitle(index)
+  end
+
+  return GetQuestLogTitle(index)
+end
+
+local function QuestKey(questID, title)
+  if questID then
+    return "i:" .. SafeString(questID)
+  end
+
+  return "t:" .. SafeString(title)
+end
+
+local function ResolveQuestID(qlogIndex, title)
+  local questID
+  local data
+  local key
+
+  if pfQuest and type(pfQuest.questlog) == "table" then
+    for key, data in pairs(pfQuest.questlog) do
+      if data and data.qlogid == qlogIndex and data.title == title then
+        questID = tonumber(key)
+        if questID then
+          return questID
+        end
+      end
+    end
+
+    questID = nil
+    for key, data in pairs(pfQuest.questlog) do
+      if data and data.title == title and tonumber(key) then
+        if questID and questID ~= tonumber(key) then
+          questID = nil
+          break
+        end
+        questID = tonumber(key)
+      end
+    end
+    if questID then
+      return questID
+    end
+  end
+
+  if pfDatabase and type(pfDatabase.GetQuestIDs) == "function" then
+    local ok
+    local result
+    ok, result = pcall(function()
+      return pfDatabase:GetQuestIDs(qlogIndex)
+    end)
+
+    if ok and type(result) == "table" and result[1] then
+      questID = tonumber(result[1])
+      if questID then
+        return questID
+      end
+    end
+  end
+
+  return nil
+end
+
+local function NormalizeObjective(index, text, objectiveType, done)
+  local normalized = string.gsub(SafeString(text), "\239\188\154", ":")
+  local _, _, label, current, required = string.find(normalized, "(.*):%s*([%d]+)%s*/%s*([%d]+)")
+  local isDone = done == true or done == 1
+
+  if current and required then
+    return {
+      index = index,
+      text = Trim(label),
+      current = tonumber(current) or 0,
+      required = tonumber(required) or 0,
+      done = isDone,
+      objectiveType = SafeString(objectiveType)
+    }
+  end
+
+  return {
+    index = index,
+    text = Trim(normalized),
+    current = isDone and 1 or 0,
+    required = 1,
+    done = isDone,
+    objectiveType = SafeString(objectiveType)
+  }
+end
+
+local function BuildQuest(qlogIndex)
+  local title, _, _, header, _, complete = ReadQuestLogTitle(qlogIndex)
+  local questID
+  local objectiveCount
+  local objectives = {}
+  local index
+
+  if not title or header then
+    return nil
+  end
+
+  questID = ResolveQuestID(qlogIndex, title)
+  objectiveCount = GetNumQuestLeaderBoards(qlogIndex) or 0
+
+  for index = 1, objectiveCount do
+    local text, objectiveType, done = GetQuestLogLeaderBoard(index, qlogIndex)
+    table.insert(objectives, NormalizeObjective(index, text, objectiveType, done))
+  end
+
+  return {
+    key = QuestKey(questID, title),
+    questID = questID,
+    title = title,
+    complete = complete == true or complete == 1,
+    qlogIndex = qlogIndex,
+    objectives = objectives
+  }
+end
+
+local function CopyObjective(source)
+  return {
+    index = source.index,
+    text = source.text,
+    current = source.current,
+    required = source.required,
+    done = source.done,
+    objectiveType = source.objectiveType
+  }
+end
+
+local function CopyQuest(source)
+  local copy = {
+    key = source.key,
+    questID = source.questID,
+    title = source.title,
+    complete = source.complete,
+    qlogIndex = source.qlogIndex,
+    objectives = {}
+  }
+  local index
+
+  for index = 1, table.getn(source.objectives or {}) do
+    table.insert(copy.objectives, CopyObjective(source.objectives[index]))
+  end
+
+  return copy
+end
+
+local function CopyQuestState(source)
+  local copy = {
+    revision = source.revision or 0,
+    ready = source.ready and true or false,
+    quests = {}
+  }
+  local key
+  local quest
+
+  for key, quest in pairs(source.quests or {}) do
+    copy.quests[key] = CopyQuest(quest)
+  end
+
+  return copy
+end
+
+local function EncodeQuestRecord(quest)
+  local objectives = quest.objectives or {}
+  local fields = {
+    "Q",
+    HexEncode(quest.key),
+    SafeString(quest.questID or 0),
+    quest.complete and "1" or "0",
+    HexEncode(quest.title),
+    SafeString(table.getn(objectives))
+  }
+  local index
+  local objective
+
+  for index = 1, table.getn(objectives) do
+    objective = objectives[index]
+    table.insert(fields, SafeString(objective.index or index))
+    table.insert(fields, SafeString(objective.current or 0))
+    table.insert(fields, SafeString(objective.required or 0))
+    table.insert(fields, objective.done and "1" or "0")
+    table.insert(fields, HexEncode(objective.objectiveType))
+    table.insert(fields, HexEncode(objective.text))
+  end
+
+  return table.concat(fields, ".")
+end
+
+local function EncodeQuestWire(kind, revision, quests, removals)
+  local records = {
+    kind .. "." .. SafeString(revision or 0)
+  }
+  local keys = {}
+  local key
+  local quest
+  local index
+
+  for key, quest in pairs(quests or {}) do
+    table.insert(keys, key)
+  end
+  table.sort(keys)
+
+  for index = 1, table.getn(keys) do
+    table.insert(records, EncodeQuestRecord(quests[keys[index]]))
+  end
+
+  keys = {}
+  for key, quest in pairs(removals or {}) do
+    table.insert(keys, key)
+  end
+  table.sort(keys)
+
+  for index = 1, table.getn(keys) do
+    table.insert(records, "R." .. HexEncode(keys[index]))
+  end
+
+  return table.concat(records, "_")
+end
+
+local function DecodeQuestRecord(record)
+  local fields = SplitPlain(record, ".")
+  local objectiveCount
+  local quest
+  local fieldIndex
+  local index
+
+  if fields[1] ~= "Q" then
+    return nil
+  end
+
+  objectiveCount = tonumber(fields[6])
+  if not objectiveCount or objectiveCount < 0 then
+    return nil
+  end
+
+  if table.getn(fields) < 6 + (objectiveCount * 6) then
+    return nil
+  end
+
+  quest = {
+    key = HexDecode(fields[2]),
+    questID = tonumber(fields[3]),
+    complete = fields[4] == "1",
+    title = HexDecode(fields[5]),
+    objectives = {}
+  }
+
+  if quest.questID == 0 then
+    quest.questID = nil
+  end
+
+  if quest.key == "" then
+    quest.key = QuestKey(quest.questID, quest.title)
+  end
+
+  fieldIndex = 7
+  for index = 1, objectiveCount do
+    table.insert(quest.objectives, {
+      index = tonumber(fields[fieldIndex]) or index,
+      current = tonumber(fields[fieldIndex + 1]) or 0,
+      required = tonumber(fields[fieldIndex + 2]) or 0,
+      done = fields[fieldIndex + 3] == "1",
+      objectiveType = HexDecode(fields[fieldIndex + 4]),
+      text = HexDecode(fields[fieldIndex + 5])
+    })
+    fieldIndex = fieldIndex + 6
+  end
+
+  return quest
+end
+
+local function DecodeQuestWire(payload, expectedKind)
+  local records = SplitPlain(payload, "_")
+  local header = records[1] and SplitPlain(records[1], ".") or nil
+  local decoded = {
+    revision = 0,
+    quests = {},
+    removals = {}
+  }
+  local index
+  local quest
+  local fields
+  local key
+
+  if not header or header[1] ~= expectedKind then
+    return nil
+  end
+
+  decoded.revision = tonumber(header[2])
+  if not decoded.revision then
+    return nil
+  end
+
+  for index = 2, table.getn(records) do
+    if string.sub(records[index], 1, 2) == "Q." then
+      quest = DecodeQuestRecord(records[index])
+      if not quest or not quest.key or quest.key == "" then
+        return nil
+      end
+      decoded.quests[quest.key] = quest
+    elseif string.sub(records[index], 1, 2) == "R." then
+      fields = SplitPlain(records[index], ".")
+      key = HexDecode(fields[2])
+      if key ~= "" then
+        decoded.removals[key] = true
+      end
+    elseif records[index] ~= "" then
+      return nil
+    end
+  end
+
+  return decoded
+end
+
+local function QuestSignature(quest)
+  return EncodeQuestRecord(quest)
+end
+
+local function ScanCurrentQuests()
+  local quests = {}
+  local _, numQuests = GetNumQuestLogEntries()
+  local found = 0
+  local qlogIndex
+  local quest
+
+  for qlogIndex = 1, 40 do
+    quest = BuildQuest(qlogIndex)
+    if quest then
+      quests[quest.key] = quest
+      found = found + 1
+      if numQuests and found >= numQuests then
+        break
+      end
+    end
+  end
+
+  return quests
+end
+
+local function FindFallbackMatch(quests, quest)
+  local key
+  local candidate
+
+  for key, candidate in pairs(quests or {}) do
+    if candidate.title == quest.title and (not candidate.questID or not quest.questID) then
+      return key, candidate
+    end
+  end
+
+  return nil, nil
+end
+
+local function ResolveQuestNpc(questID, phase, capturedName)
+  local questData
+  local units
+  local unitID
+  local count = 0
+  local onlyID = nil
+  local localizedName
+
+  if questID and pfDB and pfDB.quests and pfDB.quests.data then
+    questData = pfDB.quests.data[questID]
+  end
+
+  units = questData and questData[phase] and questData[phase]["U"]
+  if units then
+    for _, unitID in pairs(units) do
+      count = count + 1
+      onlyID = tonumber(unitID) or unitID
+
+      if capturedName and pfDB.units and pfDB.units.loc then
+        localizedName = pfDB.units.loc[unitID]
+        if localizedName == capturedName then
+          return tonumber(unitID) or unitID, capturedName
+        end
+      end
+    end
+  end
+
+  if count == 1 and onlyID then
+    localizedName = pfDB and pfDB.units and pfDB.units.loc and pfDB.units.loc[onlyID]
+    return tonumber(onlyID) or onlyID, capturedName or localizedName
+  end
+
+  return nil, capturedName
+end
+
+local function CurrentQuestNpcName()
+  local name = UnitName("npc")
+  if not name or name == "" then
+    name = UnitName("target")
+  end
+  return name
+end
+
+local function CurrentDialogQuestTitle()
+  if type(GetTitleText) == "function" then
+    local title = GetTitleText()
+    if title and title ~= "" then
+      return title
+    end
+  end
+
+  return nil
+end
+
+local function ScheduleQuestScan(delay)
+  local nextAt = GetTime() + (delay or 0)
+
+  questScanPending = true
+  if questScanAt == 0 or nextAt < questScanAt then
+    questScanAt = nextAt
+  end
+end
+
+local function InstallQuestActionHooks()
+  if questHooksInstalled then
+    return
+  end
+  questHooksInstalled = true
+
+  if type(AcceptQuest) == "function" then
+    local previousAcceptQuest = AcceptQuest
+    AcceptQuest = function()
+      pendingAccept = {
+        title = CurrentDialogQuestTitle(),
+        npcName = CurrentQuestNpcName(),
+        time = GetTime()
+      }
+      previousAcceptQuest()
+      ScheduleQuestScan(0.05)
+    end
+  end
+
+  if type(GetQuestReward) == "function" then
+    local previousGetQuestReward = GetQuestReward
+    GetQuestReward = function(choice)
+      pendingTurnin = {
+        title = CurrentDialogQuestTitle(),
+        npcName = CurrentQuestNpcName(),
+        time = GetTime()
+      }
+      previousGetQuestReward(choice)
+      ScheduleQuestScan(0.05)
+    end
+  end
+
+  if type(AbandonQuest) == "function" then
+    local previousAbandonQuest = AbandonQuest
+    AbandonQuest = function()
+      local title = type(GetAbandonQuestName) == "function" and GetAbandonQuestName() or nil
+      pendingAbandon = {
+        title = title,
+        time = GetTime()
+      }
+      previousAbandonQuest()
+      ScheduleQuestScan(0.05)
+    end
+  end
+end
+
+local function ClearStalePendingActions()
+  local now = GetTime()
+
+  if pendingAccept and now - (pendingAccept.time or 0) > 10 then
+    pendingAccept = nil
+  end
+  if pendingTurnin and now - (pendingTurnin.time or 0) > 10 then
+    pendingTurnin = nil
+  end
+  if pendingAbandon and now - (pendingAbandon.time or 0) > 10 then
+    pendingAbandon = nil
+  end
+end
+
+local function BuildActionContext(quest, phase, pending)
+  local context = {
+    questID = quest.questID,
+    questTitle = quest.title
+  }
+
+  if pending and phase then
+    context.mobID, context.npcName = ResolveQuestNpc(quest.questID, phase, pending.npcName)
+  end
+
+  return context
+end
+
+local function QuestSnapshot()
+  return EncodeQuestWire("S", questState.revision, questState.quests)
+end
+
+local function ApplyRemoteQuestFull(sender, payload)
+  local decoded = DecodeQuestWire(payload, "S")
+  local senderKey = NormalizeName(sender)
+  local peer = senderKey and peers[senderKey]
+
+  if not decoded or not peer then
+    return
+  end
+
+  if peer.questState and peer.questState.revision and decoded.revision < peer.questState.revision then
+    return
+  end
+
+  peer.questState = {
+    revision = decoded.revision,
+    ready = true,
+    quests = decoded.quests
+  }
+
+  Emit("REMOTE_QUEST_STATE_CHANGED", sender, CopyQuestState(peer.questState))
+end
+
+local function ApplyRemoteQuestDelta(sender, payload)
+  local decoded = DecodeQuestWire(payload, "D")
+  local senderKey = NormalizeName(sender)
+  local peer = senderKey and peers[senderKey]
+  local key
+  local quest
+
+  if not decoded or not peer then
+    return
+  end
+
+  if not peer.questState then
+    if decoded.revision ~= 1 then
+      Addon.RequestFullSync(sender)
+      return
+    end
+    peer.questState = {
+      revision = 0,
+      ready = true,
+      quests = {}
+    }
+  end
+
+  if decoded.revision <= (peer.questState.revision or 0) then
+    return
+  end
+
+  if decoded.revision ~= (peer.questState.revision or 0) + 1 then
+    Addon.RequestFullSync(sender)
+    return
+  end
+
+  for key, quest in pairs(decoded.quests) do
+    peer.questState.quests[key] = quest
+  end
+
+  for key, quest in pairs(decoded.removals) do
+    peer.questState.quests[key] = nil
+  end
+
+  peer.questState.revision = decoded.revision
+  peer.questState.ready = true
+  Emit("REMOTE_QUEST_STATE_CHANGED", sender, CopyQuestState(peer.questState))
+end
+
+local function ScanQuestState()
+  local nextQuests
+  local changes = {}
+  local removals = {}
+  local actions = {}
+  local migrated = {}
+  local key
+  local quest
+  local previous
+  local fallbackKey
+  local fallbackQuest
+  local action
+  local changed = false
+
+  questScanPending = false
+  questScanAt = 0
+  ClearStalePendingActions()
+  nextQuests = ScanCurrentQuests()
+
+  if not questState.ready then
+    questState.ready = true
+    questState.quests = nextQuests
+    questState.revision = questState.revision + 1
+
+    for key, quest in pairs(nextQuests) do
+      changes[key] = quest
+    end
+
+    Addon.SendDelta("quests", EncodeQuestWire("D", questState.revision, changes))
+    Emit("LOCAL_QUEST_STATE_CHANGED", CopyQuestState(questState))
+    return
+  end
+
+  for key, quest in pairs(nextQuests) do
+    previous = questState.quests[key]
+
+    if not previous then
+      fallbackKey, fallbackQuest = FindFallbackMatch(questState.quests, quest)
+      if fallbackQuest and fallbackKey ~= key then
+        migrated[fallbackKey] = true
+        removals[fallbackKey] = true
+        changes[key] = quest
+        changed = true
+      else
+        local acceptPending = nil
+
+        changes[key] = quest
+        changed = true
+
+        if pendingAccept and (not pendingAccept.title or pendingAccept.title == quest.title) then
+          acceptPending = pendingAccept
+          pendingAccept = nil
+        end
+
+        action = {
+          actionType = "ACCEPT",
+          quest = CopyQuest(quest),
+          context = BuildActionContext(quest, acceptPending and "start" or nil, acceptPending)
+        }
+        table.insert(actions, action)
+      end
+    elseif QuestSignature(previous) ~= QuestSignature(quest) then
+      changes[key] = quest
+      changed = true
+      table.insert(actions, {
+        actionType = "PROGRESS",
+        quest = CopyQuest(quest),
+        context = {
+          questID = quest.questID,
+          questTitle = quest.title
+        }
+      })
+    end
+  end
+
+  for key, previous in pairs(questState.quests) do
+    if not nextQuests[key] and not migrated[key] then
+      removals[key] = true
+      changed = true
+
+      if pendingTurnin and (not pendingTurnin.title or pendingTurnin.title == previous.title) then
+        table.insert(actions, {
+          actionType = "TURNIN",
+          quest = CopyQuest(previous),
+          context = BuildActionContext(previous, "end", pendingTurnin)
+        })
+        pendingTurnin = nil
+      else
+        table.insert(actions, {
+          actionType = "REMOVE",
+          quest = CopyQuest(previous),
+          context = {
+            questID = previous.questID,
+            questTitle = previous.title,
+            reason = pendingAbandon and (not pendingAbandon.title or pendingAbandon.title == previous.title) and "ABANDON" or "UNKNOWN"
+          }
+        })
+
+        if pendingAbandon and (not pendingAbandon.title or pendingAbandon.title == previous.title) then
+          pendingAbandon = nil
+        end
+      end
+    end
+  end
+
+  questState.quests = nextQuests
+
+  if not changed then
+    return
+  end
+
+  questState.revision = questState.revision + 1
+  Addon.SendDelta("quests", EncodeQuestWire("D", questState.revision, changes, removals))
+  Emit("LOCAL_QUEST_STATE_CHANGED", CopyQuestState(questState))
+
+  for key = 1, table.getn(actions) do
+    action = actions[key]
+    Emit("LOCAL_QUEST_ACTION", action.actionType, action.quest, action.context)
+  end
+end
+
 local function SessionSnapshot()
   local session = Addon.db and Addon.db.session
   if not session then
@@ -621,6 +1385,21 @@ end
 function Addon.GetPeer(name)
   local normalized = NormalizeName(name)
   return normalized and peers[normalized] or nil
+end
+
+function Addon.GetLocalQuestState()
+  return CopyQuestState(questState)
+end
+
+function Addon.GetRemoteQuestState(name)
+  local normalized = NormalizeName(name)
+  local peer = normalized and peers[normalized]
+
+  if not peer or not peer.questState then
+    return nil
+  end
+
+  return CopyQuestState(peer.questState)
 end
 
 function Addon.GetSession()
@@ -755,10 +1534,14 @@ Addon.peers = peers
 Addon.party = party
 
 Addon.RegisterStateComponent("session", SessionSnapshot, ApplyRemoteSession, ApplyRemoteSession)
+Addon.RegisterStateComponent("quests", QuestSnapshot, ApplyRemoteQuestFull, ApplyRemoteQuestDelta)
 
 frame:RegisterEvent("ADDON_LOADED")
 frame:RegisterEvent("PLAYER_ENTERING_WORLD")
 frame:RegisterEvent("PARTY_MEMBERS_CHANGED")
+frame:RegisterEvent("QUEST_LOG_UPDATE")
+frame:RegisterEvent("QUEST_WATCH_UPDATE")
+frame:RegisterEvent("QUEST_FINISHED")
 frame:RegisterEvent("CHAT_MSG_ADDON")
 frame:SetScript("OnEvent", function()
   if event == "ADDON_LOADED" then
@@ -770,6 +1553,7 @@ frame:SetScript("OnEvent", function()
     bootId = NewSessionId()
     messageCounter = math.floor(GetTime() * 10)
     InitializeDatabase()
+    InstallQuestActionHooks()
     initialized = true
     RefreshParty()
     return
@@ -782,7 +1566,26 @@ frame:SetScript("OnEvent", function()
   if event == "PLAYER_ENTERING_WORLD" or event == "PARTY_MEMBERS_CHANGED" then
     playerName = UnitName("player") or playerName
     RefreshParty()
+
+    if event == "PLAYER_ENTERING_WORLD" then
+      questBaselineAt = GetTime() + 1
+      ScheduleQuestScan(1)
+    end
+  elseif event == "QUEST_LOG_UPDATE" or event == "QUEST_WATCH_UPDATE" or event == "QUEST_FINISHED" then
+    ScheduleQuestScan(0.05)
   elseif event == "CHAT_MSG_ADDON" then
     ReceiveWire(arg1, arg2, arg3, arg4)
   end
+end)
+
+frame:SetScript("OnUpdate", function()
+  if not initialized or not questScanPending then
+    return
+  end
+
+  if GetTime() < questScanAt or (not questState.ready and GetTime() < questBaselineAt) then
+    return
+  end
+
+  ScanQuestState()
 end)
