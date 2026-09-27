@@ -41,7 +41,10 @@ local guideTouristUI = {
   rows = {},
   completing = {},
   completionDuration = 0.9,
-  sessionKey = nil
+  sessionKey = nil,
+  showHidden = false,
+  showHiddenButton = nil,
+  refresh = nil
 }
 
 local function SafeString(value)
@@ -2836,6 +2839,115 @@ local function GuideTouristInstructionText(instruction)
   return string.format(L.QUEST_ID_FALLBACK or "Quest %d", tonumber(instruction and instruction.questID) or 0)
 end
 
+local function GuideDisparityKey(peerName, quest)
+  local questKey = quest and quest.key
+
+  if not questKey or questKey == "" then
+    questKey = QuestKey(quest and quest.questID, quest and quest.title)
+  end
+
+  return SafeString(NormalizeName(peerName)) .. "|" .. SafeString(questKey)
+end
+
+local function BuildGuideDisparities(session)
+  local output = {}
+  local hidden
+  local guideKey
+  local partyIndex
+  local unit
+  local name
+  local normalized
+  local member
+  local peer
+  local remoteSession
+  local questKey
+  local quest
+  local disparityKey
+
+  if not session or session.mode ~= "GUIDE" or not session.guideSessionId or not questState.ready then
+    return output
+  end
+
+  hidden = Addon.db and Addon.db.session and Addon.db.session.hiddenDisparities or {}
+  guideKey = NormalizeName(playerName)
+
+  for partyIndex = 1, 4 do
+    unit = "party" .. partyIndex
+    if UnitExists(unit) then
+      name = UnitName(unit)
+      normalized = NormalizeName(name)
+      member = normalized and party[normalized]
+      peer = normalized and peers[normalized]
+      remoteSession = peer and peer.session
+
+      if member
+        and peer
+        and peer.compatible
+        and remoteSession
+        and remoteSession.mode == "TOURIST"
+        and NormalizeName(remoteSession.guideName) == guideKey
+        and remoteSession.guideSessionId == session.guideSessionId
+        and remoteSession.joinBaseline ~= nil
+        and peer.questState
+        and peer.questState.ready then
+        for questKey, quest in pairs(questState.quests or {}) do
+          if not FindRemoteTrackerQuest(peer.questState, quest) then
+            disparityKey = GuideDisparityKey(peer.name or member.name or name, quest)
+            table.insert(output, {
+              key = disparityKey,
+              partyIndex = partyIndex,
+              playerName = peer.name or member.name or name,
+              quest = quest,
+              hidden = hidden[disparityKey] and true or false
+            })
+          end
+        end
+      end
+    end
+  end
+
+  table.sort(output, function(left, right)
+    local leftTitle
+    local rightTitle
+
+    if left.partyIndex ~= right.partyIndex then
+      return left.partyIndex < right.partyIndex
+    end
+
+    leftTitle = string.lower(SafeString(left.quest and left.quest.title))
+    rightTitle = string.lower(SafeString(right.quest and right.quest.title))
+    if leftTitle ~= rightTitle then
+      return leftTitle < rightTitle
+    end
+
+    return SafeString(left.key) < SafeString(right.key)
+  end)
+
+  return output
+end
+
+local function SetGuideDisparityHidden(disparityKey, hidden)
+  local session = Addon.db and Addon.db.session
+
+  if not session or session.mode ~= "GUIDE" or not disparityKey or disparityKey == "" then
+    return
+  end
+
+  if type(session.hiddenDisparities) ~= "table" then
+    session.hiddenDisparities = {}
+  end
+
+  if hidden then
+    session.hiddenDisparities[disparityKey] = true
+  else
+    session.hiddenDisparities[disparityKey] = nil
+  end
+
+  if guideTouristUI.refresh then
+    guideTouristUI.refresh()
+  end
+end
+
 local function EnsureGuideTouristRow(index)
   local row = guideTouristUI.rows[index]
 
@@ -2868,6 +2980,17 @@ local function EnsureGuideTouristRow(index)
   row.strike:SetTexture(1, 0.82, 0)
   row.strike:Hide()
 
+  row.action = CreateFrame("Button", nil, row.frame, "UIPanelButtonTemplate")
+  row.action:SetPoint("RIGHT", row.frame, "RIGHT", 0, 0)
+  row.action:SetWidth(52)
+  row.action:SetHeight(18)
+  row.action:SetScript("OnClick", function()
+    if row.disparityKey then
+      SetGuideDisparityHidden(row.disparityKey, not row.disparityHidden)
+    end
+  end)
+  row.action:Hide()
+
   guideTouristUI.rows[index] = row
   return row
 end
@@ -2896,6 +3019,7 @@ end
 local function RefreshGuideTouristWindow()
   local session = Addon.GetSession()
   local instructions
+  local disparities = {}
   local display = {}
   local present = {}
   local sessionKey
@@ -2905,6 +3029,8 @@ local function RefreshGuideTouristWindow()
   local row
   local entry
   local title
+  local disparity
+  local hiddenCount = 0
 
   if not guideTouristUI.frame then
     return
@@ -2913,6 +3039,10 @@ local function RefreshGuideTouristWindow()
   if not session or session.mode == "OFF" then
     guideTouristUI.completing = {}
     guideTouristUI.sessionKey = nil
+    guideTouristUI.showHidden = false
+    if guideTouristUI.showHiddenButton then
+      guideTouristUI.showHiddenButton:Hide()
+    end
     for index = 1, table.getn(guideTouristUI.rows) do
       guideTouristUI.rows[index].frame:Hide()
     end
@@ -2924,11 +3054,13 @@ local function RefreshGuideTouristWindow()
   if guideTouristUI.sessionKey ~= sessionKey then
     guideTouristUI.completing = {}
     guideTouristUI.sessionKey = sessionKey
+    guideTouristUI.showHidden = false
   end
 
   if session.mode == "GUIDE" then
     title = L.WINDOW_TITLE_GUIDE or "Guide"
     instructions = Addon.GetGuideInstructions()
+    disparities = BuildGuideDisparities(session)
   else
     title = string.format(L.WINDOW_TITLE_TOURIST or "Tourist: %s", SafeString(session.guideName))
     instructions = Addon.GetTouristInstructions()
@@ -2938,6 +3070,7 @@ local function RefreshGuideTouristWindow()
 
   for index = 1, table.getn(instructions) do
     entry = {
+      kind = "instruction",
       instruction = instructions[index],
       completing = false
     }
@@ -2949,6 +3082,7 @@ local function RefreshGuideTouristWindow()
     for seq, completion in pairs(guideTouristUI.completing) do
       if not present[seq] then
         table.insert(display, {
+          kind = "instruction",
           instruction = completion.instruction,
           completing = true,
           completion = completion
@@ -2961,22 +3095,67 @@ local function RefreshGuideTouristWindow()
     return (tonumber(left.instruction and left.instruction.seq) or 0) < (tonumber(right.instruction and right.instruction.seq) or 0)
   end)
 
+  if session.mode == "GUIDE" then
+    for index = 1, table.getn(disparities) do
+      disparity = disparities[index]
+      if disparity.hidden then
+        hiddenCount = hiddenCount + 1
+      end
+      if not disparity.hidden or guideTouristUI.showHidden then
+        table.insert(display, {
+          kind = "disparity",
+          disparity = disparity
+        })
+      end
+    end
+  end
+
+  if hiddenCount == 0 then
+    guideTouristUI.showHidden = false
+  end
+
   for index = 1, table.getn(display) do
     entry = display[index]
     row = EnsureGuideTouristRow(index)
-    row.seq = tonumber(entry.instruction and entry.instruction.seq) or 0
     row.frame:ClearAllPoints()
     row.frame:SetPoint("TOPLEFT", guideTouristUI.frame, "TOPLEFT", 8, -28 - ((index - 1) * 20))
-    row.marker:SetText(entry.instruction and entry.instruction.actionType == "ACCEPT" and "!" or "?")
-    row.text:SetText(GuideTouristInstructionText(entry.instruction))
     row.frame:SetAlpha(1)
+    row.marker:SetTextColor(1, 0.82, 0)
+    row.text:SetTextColor(1, 1, 1)
+    row.text:SetWidth(238)
+    row.strike:Hide()
+    row.action:Hide()
+    row.disparityKey = nil
+    row.disparityHidden = false
 
-    if entry.completing then
-      row.strike:SetWidth(math.min(row.text:GetStringWidth(), 238))
-      row.strike:Show()
-      entry.completion.row = row
+    if entry.kind == "disparity" then
+      disparity = entry.disparity
+      row.seq = nil
+      row.disparityKey = disparity.key
+      row.disparityHidden = disparity.hidden and true or false
+      row.marker:SetText("!")
+      row.marker:SetTextColor(1, 0.35, 0.15)
+      row.text:SetWidth(180)
+      row.text:SetText(string.format(
+        L.DISPARITY_MISSING_QUEST or "%s missing: %s",
+        SafeString(disparity.playerName),
+        SafeString(disparity.quest and disparity.quest.title)
+      ))
+      row.action:SetText(row.disparityHidden and (L.DISPARITY_UNHIDE or "Unhide") or (L.DISPARITY_HIDE or "Hide"))
+      row.action:Show()
+      if row.disparityHidden then
+        row.frame:SetAlpha(0.55)
+      end
     else
-      row.strike:Hide()
+      row.seq = tonumber(entry.instruction and entry.instruction.seq) or 0
+      row.marker:SetText(entry.instruction and entry.instruction.actionType == "ACCEPT" and "!" or "?")
+      row.text:SetText(GuideTouristInstructionText(entry.instruction))
+
+      if entry.completing then
+        row.strike:SetWidth(math.min(row.text:GetStringWidth(), 238))
+        row.strike:Show()
+        entry.completion.row = row
+      end
     end
 
     row.frame:Show()
@@ -2986,10 +3165,25 @@ local function RefreshGuideTouristWindow()
     guideTouristUI.rows[index].frame:Hide()
   end
 
-  guideTouristUI.frame:SetHeight(34 + (table.getn(display) * 20))
+  if session.mode == "GUIDE" and hiddenCount > 0 and guideTouristUI.showHiddenButton then
+    if guideTouristUI.showHidden then
+      guideTouristUI.showHiddenButton:SetText(L.DISPARITY_HIDE_HIDDEN or "Hide Hidden")
+    else
+      guideTouristUI.showHiddenButton:SetText(string.format(L.DISPARITY_SHOW_HIDDEN or "Show Hidden (%d)", hiddenCount))
+    end
+    guideTouristUI.showHiddenButton:Show()
+    guideTouristUI.frame:SetHeight(58 + (table.getn(display) * 20))
+  else
+    if guideTouristUI.showHiddenButton then
+      guideTouristUI.showHiddenButton:Hide()
+    end
+    guideTouristUI.frame:SetHeight(34 + (table.getn(display) * 20))
+  end
+
   guideTouristUI.frame:Show()
 end
 
+guideTouristUI.refresh = RefreshGuideTouristWindow
 local function HandleTouristInstructionCompleted(instruction)
   local session = Addon.GetSession()
   local seq = tonumber(instruction and instruction.seq)
@@ -3083,6 +3277,16 @@ local function InitializeGuideTouristWindow()
   guideTouristUI.title:SetJustifyH("LEFT")
   guideTouristUI.title:SetTextColor(1, 0.82, 0)
 
+  guideTouristUI.showHiddenButton = CreateFrame("Button", nil, guideTouristUI.frame, "UIPanelButtonTemplate")
+  guideTouristUI.showHiddenButton:SetPoint("BOTTOMLEFT", guideTouristUI.frame, "BOTTOMLEFT", 8, 7)
+  guideTouristUI.showHiddenButton:SetWidth(112)
+  guideTouristUI.showHiddenButton:SetHeight(18)
+  guideTouristUI.showHiddenButton:SetScript("OnClick", function()
+    guideTouristUI.showHidden = not guideTouristUI.showHidden
+    RefreshGuideTouristWindow()
+  end)
+  guideTouristUI.showHiddenButton:Hide()
+
   guideTouristUI.frame:SetScript("OnDragStart", function()
     guideTouristUI.frame:StartMoving()
   end)
@@ -3173,6 +3377,12 @@ Addon.RegisterListener("REMOTE_QUEST_STATE_CHANGED", RefreshGroupProgress)
 Addon.RegisterListener("PEER_STATUS", RefreshGroupProgress)
 Addon.RegisterListener("PEER_LEFT", RefreshGroupProgress)
 Addon.RegisterListener("PARTY_CHANGED", RefreshGroupProgress)
+Addon.RegisterListener("LOCAL_QUEST_STATE_CHANGED", RefreshGuideTouristWindow)
+Addon.RegisterListener("REMOTE_QUEST_STATE_CHANGED", RefreshGuideTouristWindow)
+Addon.RegisterListener("REMOTE_SESSION_CHANGED", RefreshGuideTouristWindow)
+Addon.RegisterListener("PEER_STATUS", RefreshGuideTouristWindow)
+Addon.RegisterListener("PEER_LEFT", RefreshGuideTouristWindow)
+Addon.RegisterListener("PARTY_CHANGED", RefreshGuideTouristWindow)
 Addon.RegisterListener("SESSION_CHANGED", RefreshGuideTouristWindow)
 Addon.RegisterListener("GUIDE_INSTRUCTIONS_CHANGED", RefreshGuideTouristWindow)
 Addon.RegisterListener("TOURIST_INSTRUCTIONS_CHANGED", RefreshGuideTouristWindow)
