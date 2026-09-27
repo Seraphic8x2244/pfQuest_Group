@@ -2,7 +2,7 @@
 ## Title: pfQuest_Group-dev
 ## Notes: Party quest progress and Guide/Tourist companion for pfQuest
 ## Author: Seraphic8x2244
-## Version: 0.1.10-dev
+## Version: 0.1.11-dev
 ## Dependencies: pfQuest
 ## SavedVariablesPerCharacter: pfQuest_GroupDB
 

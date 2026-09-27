@@ -1991,6 +1991,7 @@ local function ApplyGroupProgressToButton(button, captureBase)
 
       required = tonumber(localObjective.required) or 1
       if required <= 1 then
+        objective:SetText(string.gsub(objective.pfqGroupBaseText or objective:GetText() or "", "%s*[%d]+%s*/%s*[%d]+%s*$", ""))
         statusWidth = table.getn(peersInOrder) * pairWidth
         button.pfqGroupStatusWidth[objectiveIndex] = statusWidth
         objective:SetPoint("TOPRIGHT", -10 - statusWidth - 4, -fontSize * lineCount - 6)
