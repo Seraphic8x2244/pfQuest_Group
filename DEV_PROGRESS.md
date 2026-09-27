@@ -2,11 +2,11 @@
 
 ## Current
 - Branch: dev.
-- Version: 0.1.16-dev from pfQuest_Group.toc.
-- Latest addon-affecting development commit: c74a0da565d412ad118466faaff1640e21d8096c — reverse Tourist instruction completion acknowledgement hardening on top of the Guide-side completion feedback feature.
+- Version: 0.1.17-dev from pfQuest_Group.toc.
+- Latest addon-affecting development commit: 4df6d0b9c1c3682e5077eaaab6b191f445aa3c16 — suspend the idle quest-scan OnUpdate so PFQG has no steady-state quest-scan per-frame callback.
 - Handoff checkpoint: the current dev head carrying this status file; always verify the actual remote branch head before resuming.
 - Stable baseline: None. main remains exactly bootstrap commit 4c5c63f074923266566c36c51ce2718d0060166f and is not a runtime release.
-- Goal: validate the new reverse Tourist-completion feedback on top of the partially user-verified 0.1.14 baseline, then continue the remaining broad matrix and decide release/promotion readiness.
+- Goal: isolate and reduce the reported mouse-movement frametime regression while preserving the new reverse Tourist-completion feedback, then continue the remaining broad matrix and decide release/promotion readiness.
 - Scope boundary: the user explicitly requested one post-Phase-6 feature addition: when every Tourist eligible for a Guide instruction has completed it, the Guide should receive the same strike/fade/removal feedback. That feature is implemented in 0.1.16-dev through the existing Phase 4b instructions owner and Phase 5 window; remote-member tracker visual fine-tuning remains deferred.
 
 ## Current Design / Development Contract
@@ -151,10 +151,10 @@
 
 ### Static / Automated Checks — Exact Phase 6 Addon State
 Exact original Phase 6 test commit: bfe9b578802bf87ed418cb3c329684acfe787825.
-Current addon-affecting retest commit: c74a0da565d412ad118466faaff1640e21d8096c.
-- pfQuest_Group.lua blob: 5e03d3a1d3b7c7a15d7ef2e643f4ec82f385e747.
+Current addon-affecting retest commit: 4df6d0b9c1c3682e5077eaaab6b191f445aa3c16.
+- pfQuest_Group.lua blob: 57964b863207f3dd70562cef5285197d0bf62a4b.
 - locales/enUS.lua blob: 0122994a3bd10ef5d0202dc6794d0c7bd32c7655 (unchanged from the tested 0.1.14 baseline).
-- pfQuest_Group.toc blob: 70433a2bcdae8d69a991fbc7b5529012425a8dba.
+- pfQuest_Group.toc blob: 5fb3ad3c36f49b792bf108e632d2939704108e8a.
 - dev_rulebook.md blob: 1e054bc02930ece70445abd9ef910750193a9461 (unchanged).
 - Version discipline: passed for the new delta; 0.1.14-dev -> 0.1.15-dev for the feature, then -> 0.1.16-dev for the PARTY-recipient robustness correction.
 - Protocol check: PFQGROUP is deliberately protocol version 2; prefix remains PFQGROUP and SavedVariables schema remains 1.
@@ -162,7 +162,7 @@ Current addon-affecting retest commit: c74a0da565d412ad118466faaff1640e21d8096c.
 - Transport check: exactly one SendAddonMessage call remains and it uses the Vanilla three-argument PARTY form.
 - UI structural call-site count remains 5 CreateFrame, 4 CreateFontString, and 5 CreateTexture; the reverse feedback reuses the existing strike/fade row presentation.
 - Static later-Lua/API scan passed for the exact 0.1.16 source: no string.match, string.gmatch, table.unpack, select(, RegisterAddonMessagePrefix, C_QuestLog, C_ChatInfo, C_Timer, goto, or label syntax.
-- Token-level local scan of the exact 0.1.16 source found 151 top-level locals, leaving 49 below Lua 5.0.3's 200-local top-level chunk limit. The largest scanned inner function remains far below 200 locals.
+- 0.1.17 adds one top-level worker-frame local, bringing the expected top-level local count to 152, leaving 48 below Lua 5.0.3's 200-local top-level chunk limit. No later-Lua/API blacklist tokens were introduced.
 - Focused Phase 6 mocked integration harness passed texluac -p and runtime assertions under the available Lua 5.3.6 texluac/texlua environment. Coverage: session-first full snapshots; first-known/restarted boot invalidation and recovery; quest readiness/revision handling; numeric-ID-authoritative matching; cross-session instruction-full rejection; missed-instruction cursor resync; instruction validation before cursor mutation; instruction-delta-before-session-delta ordering.
 
 ### Checks Not Actually Runnable
@@ -177,11 +177,12 @@ Current addon-affecting retest commit: c74a0da565d412ad118466faaff1640e21d8096c.
 - The invisible binary mark defect is fixed in 0.1.12+ by replacing literal Unicode marks with Vanilla-era Blizzard textures; the screenshot confirms the remote red incomplete/cross texture is visible.
 - The 0.1.12 local binary replacement gating defect is fixed and user-verified in 0.1.13-dev: local binary status no longer depends on any peer having the quest.
 - The 0.1.13 binary-row justification defect is fixed and locally user-verified in 0.1.14-dev by placing the local status inline after the objective label. Remote-member presentation polish is deferred.
-- Static triage excludes the Lua 5.0.3 200-local cap as the reported error source; current top-level pressure is 151.
+- Static triage excludes the Lua 5.0.3 200-local cap as the reported error source; current top-level pressure is 152.
 - No obvious later-Lua syntax/API blacklist hit is present in the current source.
-- Canonical Lua 5.0.3 compiler check remains not run against 0.1.16-dev: the connected GitHub source is not mounted in the executable environment, and direct network cloning from the executable environment is unavailable.
+- Canonical Lua 5.0.3 compiler check remains not run against 0.1.17-dev: the connected GitHub source is not mounted in the executable environment, and direct network cloning from the executable environment is unavailable.
 - The 0.1.16 reverse-completion delta is not yet user-tested. The 0.1.14 partial broad-matrix results remain the last runtime baseline and must not be rewritten as tests of protocol v2.
-- New performance report during testing: with the client otherwise around 120 FPS, moving the mouse anywhere on screen can drop below 100 FPS with severe frametime disturbance; stationary mouse returns to the cap. Direct source inspection found no PFQG global mouse-movement hook, only the Guide/Tourist window as mouse-enabled plus two lightweight OnUpdate handlers. This symptom is therefore not yet localized to PFQG. Before changing addon code, compare mouse polling/report rate at 125/250 Hz and perform an A/B run with PFQG disabled but pfQuest still enabled.
+- Performance A/B result: with PFQG enabled, moving the mouse anywhere on screen drops from about 120 FPS to below 100 with poor frametime; with PFQG disabled but pfQuest still enabled, mouse movement still drops FPS (about 120 -> 80) but frametime feels substantially smoother. This demonstrates that PFQG is exacerbating an underlying mouse/input-sensitive client cost even though PFQG has no global mouse-movement hook.
+- 0.1.17-dev performance isolation: the always-installed main quest-scan OnUpdate was replaced by a hidden worker frame that is shown only while a quest scan is actually pending and hides itself immediately when idle. This removes PFQG's steady-state quest-scan per-frame Lua callback without changing quest-scan behavior. The Guide/Tourist window's completion OnUpdate remains unchanged for this A/B so the effect can be isolated.
 - Separate from the mouse-specific symptom, the current Vanilla PARTY transport still has a known fan-out inefficiency: logically targeted recovery packets are PARTY broadcasts without an encoded recipient, so non-target PFQG peers can process them. This is a concrete optimization candidate, but it has not yet been changed because it does not explain a stutter that occurs only while the mouse moves.
 
 ## Testing
@@ -197,10 +198,10 @@ Current addon-affecting retest commit: c74a0da565d412ad118466faaff1640e21d8096c.
 - Deferred polish: exact remote-member binary presentation/spacing will be fine-tuned later and is not a current functional blocker.
 
 ### Next Runtime Test
-First run a focused protocol-v2/reverse-completion test on 0.1.16-dev / c74a0da565d412ad118466faaff1640e21d8096c with every participating PFQG client updated to 0.1.16: (1) 2-player discovery and basic Guide/Tourist pairing still work with no Lua/ChatThrottleLib errors; (2) Guide creates a step, one Tourist consumes it, Tourist still gets its local strike/fade and Guide now gets strike/fade/removal; (3) with two Tourists, one completion leaves the Guide row visible and the second completion triggers Guide removal; (4) a Tourist joining after an existing step does not block that old step; (5) reload/rejoin/full-sync recovery preserves completion acknowledgement where practical; (6) unrelated Tourist PARTY recipients do not cause sync churn/errors. After that passes, continue the remaining 0.1.14 broad-matrix gaps on the 0.1.16 build. Keep remote-member tracker visual fine-tuning deferred.
+First A/B 0.1.17-dev / 4df6d0b9c1c3682e5077eaaab6b191f445aa3c16 against the same mouse-movement scenario: stationary at the FPS cap, then continuous mouse movement anywhere on screen, noting FPS and especially frametime feel. Compare PFQG enabled vs disabled with pfQuest left enabled. Also compare PFQG enabled in Off mode versus Guide/Tourist mode if practical. If 0.1.17 materially improves enabled frametime, continue reverse-completion and broad-matrix testing on 0.1.17. If not, next inspect/disable the Guide/Tourist completion OnUpdate and then address the separate PARTY targeted-traffic fan-out inefficiency.
 
 ## Planned / Next Work
-1. User runs the focused 0.1.16 protocol-v2/reverse-completion test on all-updated clients.
+1. User first A/B tests 0.1.17-dev for the mouse-movement frametime regression with pfQuest left enabled.
 2. Fix only defects demonstrated by that runtime test, with normal version discipline.
 3. Continue the remaining broad-matrix gaps on the resulting known-good build; keep remote-member tracker presentation polish deferred.
 4. After a known-good runtime state exists, review release/promotion readiness separately; do not treat development checks as a runtime test.
@@ -217,4 +218,4 @@ First run a focused protocol-v2/reverse-completion test on 0.1.16-dev / c74a0da5
 - External/runtime prerequisite: pfQuest.
 
 ## Exact Next Step
-Update every PFQG test client to 0.1.16-dev / c74a0da565d412ad118466faaff1640e21d8096c and test the reverse completion path first: one Tourist completion, then the two-Tourist all-complete gate, plus a reload/recovery pass. Protocol v1 builds are intentionally incompatible with this test. Report PASS / FAIL / SKIP with notes before continuing the remaining broad matrix or considering promotion.
+Update the test client(s) to 0.1.17-dev / 4df6d0b9c1c3682e5077eaaab6b191f445aa3c16 and repeat the same stationary-vs-moving-mouse frametime A/B with PFQG enabled and disabled while keeping pfQuest enabled. If possible, also compare PFQG Off mode against Guide/Tourist mode. Report the qualitative frametime difference and approximate FPS ranges before further optimization or promotion.
