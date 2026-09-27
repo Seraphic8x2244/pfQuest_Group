@@ -5,8 +5,8 @@
 - Version: Not established yet; no addon `.toc` or runtime files exist.
 - Development head: `107ab19b47996cb0081735c6d1f94c35392d95eb` (latest pre-status development commit).
 - Stable baseline: None; `main` is repository bootstrap only, not a runtime release.
-- Goal: Prepare the repository and lock the initial pfQuest_Group development contract before implementation.
-- Current scope boundary: Repository/documentation setup only. No addon runtime code is authorized in the current task.
+- Goal: Implement the agreed v1 addon across staged development chats, then perform the first broad in-game test on the integrated build.
+- Current scope boundary: Coding is authorized by phase; no intermediate in-game testing is planned before the integrated test build.
 
 ## Current Design / Development Contract
 
@@ -109,8 +109,16 @@
 - To be defined after the first authorized runtime implementation checkpoint.
 
 ## Planned / Next Work
-- Wait for explicit authorization to begin addon implementation.
-- When authorized, create the minimal addon skeleton on `dev`, establish the first `-dev` version in the `.toc`, and begin with protocol/state ownership before tracker/UI work.
+Use six coding phases, each ending with static/Lua 5.0.3 checks where available, a clean commit checkpoint, and an updated handoff. Runtime behaviour remains untested until Phase 6 produces the integrated test build.
+
+1. **Foundation / protocol** — addon skeleton, versioning, SavedVariables, pfQuest dependency, party discovery, versioned messaging, full-sync/delta framework, persistent Guide/Tourist session state.
+2. **Quest-state engine** — normalize local pfQuest quest/objective state, accept/remove/turn-in/progress detection, remote state, reload/group resync, quest/NPC ID fallback handling.
+3. **Group Progress UI** — pfQuest tracker integration, binary class-icon + ✓/✗ statuses, expanded multi-count rows, class colours/icons, layout and group churn handling.
+4. **Guide/Tourist behaviour** — commands/modes, pairing, join baseline, accept/hand-in instructions, automatic Tourist completion, persistence/reset rules.
+5. **Guide/Tourist UI + disparity** — compact window, Blizzard !/?, strike-through/fade, missing-quest rows, hide/Show Hidden, layout/persistence.
+6. **Integration hardening / test build** — whole-system audit, stale/duplicate/order handling, SavedVariables/protocol robustness, final static/compiler checks, then one broad in-game test plan.
+
+Phases may be split or combined if implementation complexity warrants it, but each chat must end at a coherent handoff checkpoint.
 
 ## Deferred / Out of Scope
 - No additional product scope is documented here beyond the currently agreed v1 contract.
@@ -123,4 +131,4 @@
 - External/runtime prerequisites: pfQuest; exact dependency metadata/path will be established during implementation.
 
 ## Exact Next Step
-After explicit user authorization to code, create the minimal `pfQuest_Group` addon skeleton on `dev` with Interface 11200, pfQuest dependency metadata, localization entry point and initial `-dev` version; do not implement feature logic before that skeleton/status checkpoint is committed.
+Begin Phase 1: create the minimal addon skeleton on `dev`, establish the initial `-dev` version, then implement party discovery, protocol/state ownership, synchronization framework and persistent Guide/Tourist session state. Do not begin tracker or Guide/Tourist UI work in Phase 1.
