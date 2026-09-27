@@ -2,12 +2,12 @@
 
 ## Current
 - Branch: dev.
-- Version: 0.1.4-dev from pfQuest_Group.toc.
-- Latest addon-affecting development commit: 84fa3c77e327407a066fa1d9c3a5e7d41f7e89d5 — Phase 4b Guide/Tourist instruction behaviour.
+- Version: 0.1.6-dev from pfQuest_Group.toc.
+- Latest addon-affecting development commit: 5c142f5174d8d0d30ea544e09958bd43466e83fe — Phase 5a Guide/Tourist instruction-window presentation final implementation state.
 - Handoff checkpoint: the current dev head carrying this status file; always verify the actual remote branch head before resuming.
 - Stable baseline: None; main is still exactly repository bootstrap commit 4c5c63f074923266566c36c51ce2718d0060166f and is not a runtime release.
 - Goal: Implement the agreed v1 addon across staged development chats, then perform the first broad in-game test on the integrated Phase 6 build.
-- Current scope boundary: Phases 1–4b are complete. Phase 5 is split into Phase 5a (Guide/Tourist instruction-window presentation) and Phase 5b (quest-disparity presentation/controls). Phase 5a is next; Phase 5b must not be started in the same development chat unless Phase 5a has first been cleanly checkpointed. No intermediate in-game testing is planned before Phase 6.
+- Current scope boundary: Phases 1–5a are complete. Phase 5b (quest-disparity presentation/controls) is next and must build only on the existing Phase 5a window plus Phase 2 quest state. No intermediate in-game testing is planned before Phase 6.
 
 ## Current Design / Development Contract
 
@@ -94,6 +94,15 @@
 - Both Phase 5a and 5b are presentation/disparity work only. They must consume the Phase 4a/4b state and events rather than introducing another Guide/Tourist session or instruction owner.
 - Phase 5a must end in a valid self-contained UI state even if Phase 5b does not exist yet.
 
+### Guide / Tourist Instruction Window — Phase 5a Implemented
+- The Guide/Tourist window is a compact movable frame shown only in Guide or Tourist mode and hidden in Off mode.
+- Window position is persisted under pfQuest_GroupDB.ui.guideWindow; this is presentation state only and does not alter Guide/Tourist session or instruction ownership.
+- Guide rows consume Addon.GetGuideInstructions(); Tourist rows consume Addon.GetTouristInstructions().
+- ACCEPT rows use a Blizzard-style yellow ! marker and TURNIN rows use a yellow ? marker.
+- Tourist completion uses the existing TOURIST_INSTRUCTION_COMPLETED event to keep only an ephemeral presentation copy long enough to strike the row through, hold briefly, fade it, then remove it. TOURIST_INSTRUCTIONS_CHANGED remains the authoritative pending-list update.
+- SESSION_CHANGED, GUIDE_INSTRUCTIONS_CHANGED and TOURIST_INSTRUCTIONS_CHANGED refresh the same Phase 5a window.
+- Phase 5a adds no disparity rows, hidden-disparity controls or Show Hidden behaviour and does not add another session/instruction owner.
+
 ## Recent Relevant Commits
 - 4c5c63f074923266566c36c51ce2718d0060166f — initialize main with repository README only.
 - 746265a4561fedcb924bba729aef22458984d994 — implement Phase 1 foundation/protocol.
@@ -103,6 +112,9 @@
 - b7655c8bd7d7108b38ad19f271a456f9bcad78d4 — implement Phase 4a Guide/Tourist session foundation.
 - 91f8519aa104f69bb618b98c39532ad89348cd23 — checkpoint Phase 4a handoff.
 - 84fa3c77e327407a066fa1d9c3a5e7d41f7e89d5 — implement Phase 4b Guide/Tourist instruction behaviour.
+- a1631d41075464333e187264e3264e886b8bf8f1 — split Phase 5 into 5a and 5b.
+- c61780b9b24c4651ec6e3f02cd574e368dbeedc4 — implement Phase 5a Guide/Tourist instruction window.
+- 5c142f5174d8d0d30ea544e09958bd43466e83fe — fix Phase 5a window-position save; final Phase 5a addon state.
 
 ## Completed / User-Verified
 - Repository and feature/design direction were confirmed by the user.
@@ -115,40 +127,45 @@
 - Phase 3 Group Progress tracker integration for compatible party peers.
 - Phase 4a Off/Guide/Tourist commands, Guide session lifecycle, automatic pairing and fixed Tourist join baseline.
 - Phase 4b Guide ACCEPT/TURNIN instruction creation, persistence, component synchronization, Tourist baseline filtering, matching/consumption, and duplicate/stale/gap recovery.
-- Phase 5a and Phase 5b remain unimplemented; Phase 5a is the next coding phase.
+- Phase 5a compact movable Guide/Tourist instruction window, yellow !/? rows, persisted position and Tourist completion strike/fade/removal presentation.
+- Phase 5b remains unimplemented and is the next coding phase.
 
 ## Static / Automated Checks
 
-### Phase 4b exact implementation state
-Exact implementation commit: 84fa3c77e327407a066fa1d9c3a5e7d41f7e89d5.
-- Exact pfQuest_Group.lua Git blob: db73598f637d3bf8cf2641c0ea2b9287f9aab861.
-- Exact pfQuest_Group.toc Git blob: d7be058f982dbb65abe9399d2572862da7721f13.
-- TOC version: 0.1.4-dev.
-- Pre-write handoff verification: dev was exactly 91f8519aa104f69bb618b98c39532ad89348cd23 and had no newer branch movement.
-- Stable-baseline verification: main was still exactly 4c5c63f074923266566c36c51ce2718d0060166f.
-- Implementation commit scope check: passed. Relative to the Phase 4a handoff it changes only pfQuest_Group.lua and pfQuest_Group.toc. dev_rulebook.md and DEV_PROGRESS.md are unchanged by the addon-affecting commit.
-- Version check: passed; 0.1.3-dev -> 0.1.4-dev.
-- Protocol/ownership check: passed. PFQGROUP protocol version remains 1; top-level wire message types remain H/R/F/D; there is exactly one session component registration, one quests component registration, one instructions component registration and one Addon.SetMode definition.
-- Phase boundary/UI check: passed. CreateFrame, CreateFontString and CreateTexture call counts remain 1, 2 and 2 respectively, unchanged from Phase 4a, so Phase 4b adds no Phase 5 UI regions.
+### Phase 5a exact implementation state
+Exact final addon-affecting Phase 5a commit: 5c142f5174d8d0d30ea544e09958bd43466e83fe.
+- Phase 5a implementation commit: c61780b9b24c4651ec6e3f02cd574e368dbeedc4.
+- Validation-fix commit: 5c142f5174d8d0d30ea544e09958bd43466e83fe.
+- Exact pfQuest_Group.lua Git blob: 0082cda8cc341c8ba515f523ea2029d649c5ae52.
+- Exact locales/enUS.lua Git blob: 256e2229fe321ff2577a1199899b8e4385089f7a.
+- Exact pfQuest_Group.toc Git blob: 76dabd4b63a638889e4d211c0f290382f71f6e1b.
+- TOC version: 0.1.6-dev.
+- Pre-write handoff verification: dev was exactly a1631d41075464333e187264e3264e886b8bf8f1; main remained exactly bootstrap commit 4c5c63f074923266566c36c51ce2718d0060166f.
+- Scope check: passed. Relative to the Phase 5a handoff, addon-affecting work changes only locales/enUS.lua, pfQuest_Group.lua and pfQuest_Group.toc. dev_rulebook.md is unchanged.
+- Version discipline: 0.1.4-dev -> 0.1.5-dev for the Phase 5a implementation, then 0.1.6-dev for the validation-fix revision.
+- Protocol/ownership check: passed. PFQGROUP protocol version remains 1; there is still exactly one session component registration, one instructions component registration and one Addon.SetMode definition.
+- Phase 5 boundary check: passed. Phase 5a source contains the single Guide/Tourist window implementation and the expected session/instruction listeners; no Show Hidden or disparity-row presentation was added.
+- UI structural count: current source contains 3 CreateFrame, 5 CreateFontString and 3 CreateTexture call sites, including the pre-existing Phase 3 tracker regions and the new Phase 5a window/row regions.
 - Static later-Lua/API scan: passed for the exact committed source; no string.match, string.gmatch, table.unpack, select(, RegisterAddonMessagePrefix or modern C_ API tokens are present.
-- Top-level local-declaration line count: 130 versus 116 before Phase 4b, below Lua 5.0.3's 200-local top-level chunk limit. This is a structural count, not a compiler proof.
-- Focused mocked Phase 4b instruction harness: passed wire round-trip, Guide sequence/instruction creation, joinBaseline filtering, persisted Tourist consumption, duplicate suppression, gap-triggered full resync, contiguous-delta acceptance, stale-full rejection, new-session consumption reset and same-session Guide-log persistence.
-- The focused harness passed texluac -p and runtime assertions under the available Lua 5.3.6 texluac/texlua environment. It validates the focused Phase 4b logic only; it is not the canonical Lua 5.0.3 compiler check and not an in-game test.
+- Top-level local-declaration line count: 139, below Lua 5.0.3's 200-local top-level chunk limit. This is a structural count, not a compiler proof.
+- Focused mocked Phase 5a UI harness: passed texluac -p and runtime assertions under the available Lua 5.3.6 texluac/texlua environment. It covered Guide/Tourist visibility, !/? markers, row ordering, Tourist strike-through/fade/removal, session switching and persisted drag position.
+- Static review caught and fixed one implementation hygiene issue before checkpointing: the discarded relative frame returned by GetPoint() is now stored in a local variable rather than an undeclared global.
 
 ### Checks not actually runnable
-- Exact full-file texluac parser smoke check for the Phase 4b Git blob: not run in the executable shell. Repository content is available through the GitHub connector, but the connector-backed file is not materialized into the shell and the shell has no direct GitHub network access.
-- Canonical Lua 5.0.3 compiler check: not run / unavailable for the exact Phase 4b blob. The executable environment has gcc and Lua 5.3.6 texlua/texluac, but no materialized canonical tools/lua50 checker/source; no system Lua 5.0 compiler is present.
+- Exact full-file Lua 5.3.6 parser smoke check: not run for the committed pfQuest_Group.lua because GitHub connector-backed repository bytes are not materialized into the executable shell.
+- Canonical Lua 5.0.3 compiler check: not run / unavailable for the exact Phase 5a blob. The canonical Seraphic8x2244/VanillaTemplate tools/lua50 checker and vendored compiler source are visible through the GitHub connector, and the executable shell has cc/gcc, but those connector-backed checker/source files are not materialized into that shell with the addon source.
 - No in-game testing was performed, by plan.
 
 ### Earlier validation baseline
-- Phase 3's exact runtime previously passed the available Lua 5.3.6 full-file parser smoke check, structural/static scans and mocked tracker harness documented at its checkpoint.
-- Phase 4a's focused session harness passed under Lua 5.3.6 as documented at its checkpoint.
+- Phase 3 exact runtime previously passed the available Lua 5.3.6 full-file parser smoke check, structural/static scans and mocked tracker harness at its checkpoint.
+- Phase 4a focused session harness passed under Lua 5.3.6.
+- Phase 4b focused instruction harness passed wire/state/runtime assertions under Lua 5.3.6.
 - The canonical Lua 5.0.3 compiler pass remains outstanding from Phase 3 onward.
 
 ## Current Issues
-- Validation debt: the exact current Phase 4b runtime still needs the canonical Lua 5.0.3 compiler pass when the checker and addon source are executable in the same environment.
+- Validation debt: the exact current Phase 5a runtime still needs the canonical Lua 5.0.3 compiler pass when the checker and addon source are executable in the same environment.
 - Exact current full-file Lua 5.3.6 parser smoke remains unavailable because connector repository bytes are not materialized into the executable shell.
-- No known Phase 4b implementation defect is recorded at this checkpoint.
+- No known Phase 5a implementation defect is recorded at this checkpoint.
 
 ## Testing
 
@@ -156,7 +173,7 @@ Exact implementation commit: 84fa3c77e327407a066fa1d9c3a5e7d41f7e89d5.
 - Version/commit: None.
 - Passed: None.
 - Failed: None.
-- Not tested: all Phase 1–4b in-game behaviour.
+- Not tested: all Phase 1–5a in-game behaviour.
 
 ### Next Runtime Test
 - Per the agreed staged plan, no intermediate in-game test is scheduled.
@@ -168,17 +185,16 @@ Exact implementation commit: 84fa3c77e327407a066fa1d9c3a5e7d41f7e89d5.
 3. Phase 3 — Group Progress UI: complete at e3b988309054eb86a3ad39953bf5a39332168e83.
 4. Phase 4a — Guide/Tourist mode/session foundation: complete at b7655c8bd7d7108b38ad19f271a456f9bcad78d4.
 5. Phase 4b — Guide/Tourist instruction behaviour: complete at 84fa3c77e327407a066fa1d9c3a5e7d41f7e89d5.
-6. Phase 5a — Guide/Tourist instruction-window presentation: next. Build the compact movable Guide/Tourist window on the existing Phase 4a/4b state owners, render Blizzard-style yellow !/? instruction rows, and implement Tourist completion strike-through/fade/removal presentation. No disparity UI/state in 5a.
-7. Phase 5b — Quest-disparity presentation/controls: deferred until Phase 5a is cleanly checkpointed. Add Guide missing-quest disparity rows plus hidden disparity handling and Show Hidden using the existing Phase 2 quest state and the Phase 5a window; do not add another session/instruction owner.
+6. Phase 5a — Guide/Tourist instruction-window presentation: complete at 5c142f5174d8d0d30ea544e09958bd43466e83fe.
+7. Phase 5b — Quest-disparity presentation/controls: next. Add Guide missing-quest disparity rows plus hidden disparity handling and Show Hidden using the existing Phase 2 quest state and Phase 5a window; do not add another session/instruction owner.
 8. Phase 6 — Integration hardening / test build: deferred; run whole-system audit, remaining protocol robustness work and final available checks, then provide the first broad in-game test plan.
 
 Each coding phase ends with available static/compiler checks, a clean commit checkpoint and an updated handoff. Runtime behaviour remains untested until Phase 6 unless the user explicitly changes that plan.
 
 ## Deferred / Out of Scope
-- Phase 5a has not started and is the next active scope.
-- Phase 5b disparity work is explicitly deferred until Phase 5a is completed and checkpointed.
+- Phase 5b is the next active scope; no Phase 5b code has started.
 - Phase 6 integration hardening and broad in-game testing remain deferred.
-- No in-game testing was performed in Phase 4b.
+- No in-game testing was performed in Phase 5a.
 
 ## Release / Promotion Notes
 - dev_rulebook.md and DEV_PROGRESS.md must never be present on main.
@@ -187,4 +203,4 @@ Each coding phase ends with available static/compiler checks, a clean commit che
 - External/runtime prerequisite: pfQuest.
 
 ## Exact Next Step
-Begin Phase 5a — Guide/Tourist instruction-window presentation only from the current dev handoff after verifying the actual branch head against this file. Use the existing Phase 4a session owner and Phase 4b instructions component/state/events. Implement the compact movable Guide/Tourist window, Blizzard-style yellow !/? instruction rows, and Tourist completion strike-through/fade/removal presentation. Do not implement quest-disparity rows, hidden disparity handling or Show Hidden until Phase 5b; do not introduce another Guide/Tourist session/instruction owner, do not modify dev_rulebook.md, and do not perform in-game testing yet.
+Begin Phase 5b — quest-disparity presentation/controls only from the current dev handoff after verifying the actual branch head against this file. Build on the completed Phase 5a window and existing Phase 2 remote quest state. Implement Guide missing-quest disparity rows, hidden disparity handling and Show Hidden. Do not alter the Phase 4a session owner or Phase 4b instruction owner, do not reimplement the Phase 5a instruction window, do not modify dev_rulebook.md, and do not perform in-game testing yet.
