@@ -13,6 +13,8 @@ local MAX_CHUNKS = 64
 local INCOMING_TIMEOUT = 30
 
 local frame = CreateFrame("Frame")
+local questScanFrame = CreateFrame("Frame")
+questScanFrame:Hide()
 local initialized = false
 local playerName = nil
 local bootId = nil
@@ -1243,6 +1245,7 @@ local function ScheduleQuestScan(delay)
   if questScanAt == 0 or nextAt < questScanAt then
     questScanAt = nextAt
   end
+  questScanFrame:Show()
 end
 
 local function InstallQuestActionHooks()
@@ -1421,6 +1424,7 @@ local function ScanQuestState()
 
   questScanPending = false
   questScanAt = 0
+  questScanFrame:Hide()
   ClearStalePendingActions()
   nextQuests = ScanCurrentQuests()
 
@@ -3871,8 +3875,9 @@ frame:SetScript("OnEvent", function()
   end
 end)
 
-frame:SetScript("OnUpdate", function()
+questScanFrame:SetScript("OnUpdate", function()
   if not initialized or not questScanPending then
+    questScanFrame:Hide()
     return
   end
 
