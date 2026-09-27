@@ -1,12 +1,13 @@
 # Development Progress
 
 ## Current
-- Branch: `dev`
-- Version: `0.1.1-dev` from `pfQuest_Group.toc`.
-- Latest addon-affecting development commit: `d83669c6a476a5a7521a3308102a267c2e79a668` — Phase 2 quest-state engine.
+- Branch: `dev`.
+- Version: `0.1.2-dev` from `pfQuest_Group.toc`.
+- Latest addon-affecting development commit: `e3b988309054eb86a3ad39953bf5a39332168e83` — Phase 3 Group Progress UI.
+- Handoff checkpoint: the current `dev` head carrying this status file; always verify the actual remote branch head before resuming.
 - Stable baseline: None; `main` is repository bootstrap only, not a runtime release.
 - Goal: Implement the agreed v1 addon across staged development chats, then perform the first broad in-game test on the integrated build.
-- Current scope boundary: Phase 2 is complete. Phase 3 has not started. No intermediate in-game testing is planned before the Phase 6 integrated test build.
+- Current scope boundary: Phase 3 is complete. Phase 4 has not started. No intermediate in-game testing is planned before the Phase 6 integrated test build.
 
 ## Current Design / Development Contract
 
@@ -51,12 +52,15 @@
 - No Group Progress tracker/UI code or Guide/Tourist UI/behaviour was added in Phase 2.
 
 ### Group Quest Progress
-- Only current party members with compatible `pfQuest_Group` participate; maximum four remote players.
-- Use actual class icons for remote players and class-coloured player names where names are shown.
-- Binary objectives (`0/1`, `1/1`) remain on the existing objective line and append compact remote status as class icon + `✓` or `✗`.
-- Multi-count objectives expand vertically with one additional row per compatible remote player.
-- Vertical expansion is preferred over horizontally compressing up to five numeric progress values.
-- Implementation remains Phase 3 work; no tracker UI has started.
+- Phase 3 is implemented by post-processing pfQuest's existing tracker; pfQuest source is not modified.
+- Only current party members with compatible `pfQuest_Group` participate; maximum four remote players, displayed in party-slot order.
+- Quest matching consumes the Phase 2 quest-state owner: numeric `questID` first, title fallback.
+- Remote players use the Blizzard class-icon atlas. Player names shown on count rows are class-coloured.
+- Binary objectives (`0/1`, `1/1`) remain on the existing objective line and append one compact class icon + `✓`/`✗` pair per compatible remote player.
+- Multi-count objectives expand vertically with one additional class-icon/name/progress row per compatible remote player.
+- A compatible peer without the matching count quest/objective displays `--` rather than a false numeric value; a missing binary objective displays `✗`.
+- Group UI regions are reused/hidden as peers change. Tracker button height and overall tracker layout are recalculated after local/remote quest-state or party/peer churn.
+- Integration wraps `pfQuest.tracker.ButtonEvent`, rewires already-created tracker buttons and leaves future buttons on the wrapped handler. Group Progress remains independent of Guide/Tourist mode.
 
 ### Guide / Tourist
 - Modes: Off, Guide, Tourist. A Tourist follows one specific Guide.
@@ -103,6 +107,8 @@
 - `746265a4561fedcb924bba729aef22458984d994` — implement Phase 1 foundation/protocol.
 - `c2bed9de66d40f2c2bc24cb1922d50b4839a73c7` — checkpoint Phase 1 handoff.
 - `d83669c6a476a5a7521a3308102a267c2e79a668` — implement Phase 2 quest-state engine.
+- `a0a53ca04f844ef28258684f9e96ff53cb71ba76` — checkpoint Phase 2 handoff.
+- `e3b988309054eb86a3ad39953bf5a39332168e83` — implement Phase 3 Group Progress UI.
 
 ## Completed / User-Verified
 - Repository and initial feature/design direction were confirmed by the user.
@@ -114,21 +120,22 @@
 - Phase 2 local quest/objective normalization with quest-ID fallback/migration.
 - Phase 2 event-driven accept/remove/turn-in/progress detection with NPC ID/name context fallback.
 - Phase 2 `quests` component full snapshot, deltas, peer revision tracking, gap recovery/full resync and public local/remote state accessors.
-- Group Progress tracker/UI and all Guide/Tourist behaviour/UI remain unimplemented.
+- Phase 3 pfQuest tracker integration for compatible party peers, including binary class-icon + ✓/✗ status, vertically expanded count rows with class-coloured names/progress, tracker relayout and group-churn cleanup.
+- All Guide/Tourist behaviour/UI remains unimplemented.
 
 ## Static / Automated Checks
-Performed against the exact Phase 2 runtime blob `11f750f0af31e7d2b46fde924837274c73bb9d4a` committed by `d83669c6a476a5a7521a3308102a267c2e79a668`:
-- Pre-write handoff verification: `dev` was exactly `c2bed9de66d40f2c2bc24cb1922d50b4839a73c7` with 0 commits ahead/behind before Phase 2 changes.
-- Exact-byte verification: local checked `pfQuest_Group.lua` hashes to Git blob `11f750f0af31e7d2b46fde924837274c73bb9d4a`.
+Performed against the exact Phase 3 runtime blob `707a0f40266c7c1d2902f01149cfccdef7336e20` and TOC version `0.1.2-dev` in implementation commit `e3b988309054eb86a3ad39953bf5a39332168e83`:
+- Pre-write handoff verification: `dev` was exactly `a0a53ca04f844ef28258684f9e96ff53cb71ba76`; that checkpoint is one documentation-only commit after the Phase 2 implementation and changes only `DEV_PROGRESS.md`.
+- Exact-byte verification: the locally checked `pfQuest_Group.lua` hashes with `git hash-object` to Git blob `707a0f40266c7c1d2902f01149cfccdef7336e20`.
 - `texluac -p` parser smoke check: passed. The available `texluac` is Lua 5.3.6 and is not treated as the canonical Lua 5.0.3 compiler check.
-- Static later-Lua/API scan: passed; no varargs `...`, `string.match`, `string.gmatch`, `table.unpack`, `select`, modern `C_` APIs or `RegisterAddonMessagePrefix`; top-level local declarations counted 84.
-- Phase 2 structural scan: passed expected quest component registration, quest events, all four action kinds and local/remote quest-state accessors.
-- Mocked Vanilla/pfQuest runtime harness: passed initial baseline suppression, counted progress update, accept with quest/NPC IDs, turn-in with NPC ID, title-only quest fallback, later title-to-ID migration without duplicate action, full-state reconstruction, contiguous delta application, revision-gap full-sync request/recovery and abandon classification. Harness result: `mocked_phase2_runtime: PASS`, local revision 10, 8 observed action transitions.
-- Canonical Lua 5.0.3 compiler check: **not run / unavailable in the executable environment**. VanillaTemplate's canonical checker and vendored source were verified through repository access, a C compiler is available, but those repository files are not mounted into the execution shell and direct shell/binary download access is blocked. The exact candidate therefore has parser/static/mock-runtime coverage but still carries a real Lua 5.0.3 compiler-check debt.
+- Static later-Lua/API scan: passed; no `string.match`, `string.gmatch`, `table.unpack`, `select(`, `RegisterAddonMessagePrefix` or modern `C_` APIs; top-level local declarations counted 110, below Lua 5.0.3's 200-local chunk limit.
+- Phase 3 structural/scope scan: passed class-atlas, binary-status, count-row and all five refresh-listener expectations. The candidate changes only `pfQuest_Group.lua` plus the required TOC version bump relative to the Phase 2 checkpoint; existing Guide/Tourist token count, `SetMode` definition count and protocol-prefix count are unchanged.
+- Mocked tracker/runtime harness: passed two-compatible-peer rendering, binary ✓/✗ state, class atlas use, class-coloured count rows, missing-count `--`, expanded layout sizing, compatible-peer churn cleanup and restoration of native two-objective height. Harness result: `mocked_phase3_runtime: PASS`.
+- Canonical Lua 5.0.3 compiler check: **not run / unavailable in the executable environment**. The canonical VanillaTemplate checker and vendored Lua 5.0.3 sources are readable through repository access and a C compiler is available, but connector repository files are not materialized into the execution shell and the shell has no direct GitHub network access. Do not treat this as a compiler pass.
 - No in-game testing was performed, by plan.
 
 ## Current Issues
-- Validation debt: the exact Phase 2 runtime still needs the canonical Lua 5.0.3 compiler pass when the VanillaTemplate checker is executable in the shell.
+- Validation debt: the exact Phase 3 runtime still needs the canonical Lua 5.0.3 compiler pass when the VanillaTemplate checker is executable in the shell.
 - No known implementation defect is recorded at this checkpoint.
 
 ## Testing
@@ -137,7 +144,7 @@ Performed against the exact Phase 2 runtime blob `11f750f0af31e7d2b46fde92483727
 - Version/commit: None.
 - Passed: None.
 - Failed: None.
-- Not tested: All Phase 1–2 in-game behaviour.
+- Not tested: All Phase 1–3 in-game behaviour.
 
 ### Next Runtime Test
 - Per the agreed staged plan, no intermediate in-game test is scheduled. The first broad in-game test remains the integrated Phase 6 build.
@@ -145,7 +152,7 @@ Performed against the exact Phase 2 runtime blob `11f750f0af31e7d2b46fde92483727
 ## Planned / Next Work
 1. **Phase 1 — Foundation / protocol:** complete at `746265a4561fedcb924bba729aef22458984d994`.
 2. **Phase 2 — Quest-state engine:** complete at `d83669c6a476a5a7521a3308102a267c2e79a668`.
-3. **Phase 3 — Group Progress UI:** pfQuest tracker integration, binary class-icon + ✓/✗ statuses, expanded multi-count rows, class colours/icons, layout and group churn handling.
+3. **Phase 3 — Group Progress UI:** complete at `e3b988309054eb86a3ad39953bf5a39332168e83`.
 4. **Phase 4 — Guide/Tourist behaviour:** commands/modes, pairing, join baseline, accept/hand-in instructions, automatic Tourist completion, persistence/reset rules.
 5. **Phase 5 — Guide/Tourist UI + disparity:** compact window, Blizzard !/?, strike-through/fade, missing-quest rows, hide/Show Hidden, layout/persistence.
 6. **Phase 6 — Integration hardening / test build:** whole-system audit, stale/duplicate/order handling, SavedVariables/protocol robustness, final static/compiler checks, then one broad in-game test plan.
@@ -153,10 +160,10 @@ Performed against the exact Phase 2 runtime blob `11f750f0af31e7d2b46fde92483727
 Each coding phase ends with available static/compiler checks, a clean commit checkpoint and an updated handoff. Runtime behaviour remains untested until Phase 6 unless the user changes that plan explicitly.
 
 ## Deferred / Out of Scope
-- Phase 3 Group Progress UI is the next phase and has not started.
-- All Guide/Tourist behaviour and UI remains deferred to Phases 4–5.
+- All Phase 4 Guide/Tourist behaviour remains deferred and has not started.
+- All Phase 5 Guide/Tourist UI/disparity work remains deferred.
 - Phase 6 integration hardening and broad in-game testing remain deferred.
-- No in-game testing was performed in Phase 2.
+- No in-game testing was performed in Phase 3.
 
 ## Release / Promotion Notes
 - `dev_rulebook.md` and `DEV_PROGRESS.md` must never be present on `main`.
@@ -165,4 +172,4 @@ Each coding phase ends with available static/compiler checks, a clean commit che
 - External/runtime prerequisite: pfQuest (`## Dependencies: pfQuest`).
 
 ## Exact Next Step
-Begin **Phase 3 — Group Progress UI** from the Phase 2 implementation at `d83669c6a476a5a7521a3308102a267c2e79a668`. First verify the current `dev` handoff against the actual branch head, then integrate the agreed Group Progress presentation into pfQuest's tracker using the Phase 2 local/remote quest-state owner. Implement binary class-icon + ✓/✗ status on the objective line and vertical per-player rows for multi-count objectives, with class colours/icons and group churn handling. Stop before Phase 4 Guide/Tourist behaviour. No in-game testing yet.
+Begin **Phase 4 — Guide/Tourist behaviour** from the Phase 3 implementation at `e3b988309054eb86a3ad39953bf5a39332168e83`. First verify the current `dev` handoff against the actual branch head, then implement only the documented Phase 4 commands/modes, Guide/Tourist pairing, join baseline, accept/hand-in instruction state, automatic Tourist completion and persistence/reset rules. Stop before Phase 5 Guide/Tourist UI/disparity work. No in-game testing yet.
