@@ -6,7 +6,7 @@
 - Latest addon-affecting development commit: fb3f8f3bcf46b0372303db590d4f68694aba97af — align local and remote binary Group Progress status inline with the objective label.
 - Handoff checkpoint: the current dev head carrying this status file; always verify the actual remote branch head before resuming.
 - Stable baseline: None. main remains exactly bootstrap commit 4c5c63f074923266566c36c51ce2718d0060166f and is not a runtime release.
-- Goal: reconcile the first broad in-game validation of the integrated Phase 1–6 test build, diagnose and fix only demonstrated defects, then decide release/promotion readiness.
+- Goal: complete and reconcile the broad in-game validation of the integrated Phase 1–6 test build, diagnose and fix only demonstrated defects, then decide release/promotion readiness.
 - Scope boundary: Phase 6 code hardening is complete. Broad runtime testing found the Vanilla addon-WHISPER transport defect plus Group Progress presentation defects around peer filtering and binary status rendering. 0.1.13-dev runtime confirms local binary replacement and remote class/status rendering now work; the remaining demonstrated defect was awkward right-edge justification. 0.1.14-dev changes only binary status positioning to inline flow and awaits focused retest; no unrelated feature work or architecture changes are authorized.
 
 ## Current Design / Development Contract
@@ -124,6 +124,9 @@
 - 0.1.12-dev screenshot result: remote PFQG class icon plus red incomplete/cross texture is visibly rendering on quests the peer has. Local `1/1` and `0/1` text remained unchanged on other binary objectives, demonstrating that local conversion was wrongly gated on `questPeers` being non-empty.
 - 0.1.13-dev screenshot result: local binary replacement works and remote class/status renders correctly; the remaining visible defect was right-edge justification.
 - Follow-up after the 0.1.14-dev inline-layout handoff: the user reports their own local binary symbols are now in the correct place. Remote-member presentation still needs subjective fine-tuning, but that polish is explicitly deferred until after broad functional validation.
+- Partial broad matrix on 0.1.14-dev confirms startup, solo reload, 2-player discovery, one-sided and sequential grouped reloads, relog recovery, local binary conversion, normal count preservation, tracker collapse/expand, peer binary status/no-quest filtering, Group Progress in Off mode, basic Off/Guide/Tourist lifecycle, Guide instruction ordering/turn-in creation, same-quest accept+turn-in sequencing, completion presentation, and window move/reload persistence in the limited sample tested.
+- No ChatThrottleLib `unknown addon chat type` recurrence was noticed during this sample. This is positive runtime evidence but not an exhaustive transport stress result.
+- Guide ACCEPT/TURNIN instruction creation passed, but NPC-name presentation remains unverified. The current instruction row renderer shows only quest title; `npcName` is still carried in instruction state when resolvable.
 
 ### Implemented / Awaiting Runtime Test
 - 0.1.9+ delta: all addon transport uses the Vanilla-supported PARTY addon channel; no four-argument addon-WHISPER send remains.
@@ -160,7 +163,7 @@ Current addon-affecting retest commit: fb3f8f3bcf46b0372303db590d4f68694aba97af.
 ### Checks Not Actually Runnable
 - Exact full-file Lua 5.3.6 parser smoke: not run against the committed pfQuest_Group.lua blob because GitHub connector-backed repository bytes are not materialized into the executable container.
 - Canonical Lua 5.0.3 compiler check: not run / unavailable against the exact Phase 6 blob. Seraphic8x2244/VanillaTemplate main at 6980e95476a72c47a461f7c78ce9e4f649c829f contains the canonical tools/lua50 checker and vendored Lua 5.0.3 source, and the executable environment has a working C compiler, but the private connector-backed checker/source and addon blob are not mounted into that executable environment.
-- No in-game testing has been performed.
+- Broad in-game testing is in progress on the exact current addon build; automated/compiler limitations above remain separate from the user runtime results.
 
 ### Current Issues / Validation Debt
 - The 0.1.8 runtime transport defect is fixed in 0.1.9+: there is now exactly one SendAddonMessage call and it uses the three-argument PARTY form. Focused in-game retest is still required.
@@ -177,18 +180,22 @@ Current addon-affecting retest commit: fb3f8f3bcf46b0372303db590d4f68694aba97af.
 ## Testing
 
 ### Last Runtime Test
-- Version/commit: 0.1.14-dev / fb3f8f3bcf46b0372303db590d4f68694aba97af (follow-up report against the current addon build context).
-- Passed/appears good: local binary `0/1` / `1/1` replacement works and the user's own complete/incomplete symbols are now positioned correctly; earlier testing also showed basic Guide/Tourist behavior working and remote class/status rendering functioning.
+- Version/commit: 0.1.14-dev / fb3f8f3bcf46b0372303db590d4f68694aba97af.
+- Sample size: limited 2-player/solo pass; many matrix cases remain untested.
+- PASS: 1, 2, 3, 5, 6, 7, 8, 11, 12, 13, 15, 17, 20, 22, 30, 32, 33, 34, 39, 43, 44, 45, 52, 75, 76.
+- PASS with qualification: 4 — no ChatThrottleLib recurrence noticed, but not deliberately stress-triggered; 31 — remote Group Progress presentation is functional but visual polish is deferred; 43/44 — instruction behavior passed, but NPC-name presentation was not observed and remains a focused presentation check rather than a confirmed state-sync defect.
+- UNTESTED/SKIP: 9, 10, 14, 16, 18, 19, 21, 23-29, 35-38, 40-42, 46-51, 53-74, 77-91.
+- 76 was reported as "res" and is recorded as PASS under the likely intended "yes"; correct this if that was not intended.
+- No new confirmed functional defect was demonstrated by this partial matrix.
 - Deferred polish: exact remote-member binary presentation/spacing will be fine-tuned later and is not a current functional blocker.
-- Not yet reconciled: full communications/reload recovery, exhaustive quest-state synchronization, count objectives, multi-peer behavior, instruction baseline/consumption/recovery, disparities, party churn, persistence, Off cleanup, and the remaining broad-test matrix.
 
 ### Next Runtime Test
-Run the full broad runtime matrix on 0.1.14-dev / fb3f8f3bcf46b0372303db590d4f68694aba97af. Cover startup/error monitoring, party discovery and PARTY transport, local/remote quest-state synchronization, binary and count Group Progress behavior, Guide/Tourist pairing and instruction lifecycle, disparity controls, reload/restart and leave/rejoin recovery, UI persistence, Off cleanup, and multi-peer behavior where available. Record PASS / FAIL / SKIP plus concise notes for every numbered case.
+Continue the same numbered matrix on 0.1.14-dev / fb3f8f3bcf46b0372303db590d4f68694aba97af, prioritizing currently untested functional coverage rather than repeating existing passes. Highest-value next cases: 21, 23-26 (remote live quest/count updates); 36-38, 40-41 (session edge/Off behavior); 42, 46-51 (instruction baseline and consumption); 53-62 (Guide/Tourist reload/rejoin persistence); 63-74 (disparities); 77-80 (remaining window/mode cleanup); 81-88 (recovery/stress). Optional protocol cases 89-91 may remain SKIP if impractical. Keep remote-member tracker visual fine-tuning deferred.
 
 ## Planned / Next Work
-1. User performs the full numbered 0.1.14-dev broad runtime matrix.
-2. Fix only defects demonstrated by that retest, with normal version discipline.
-3. Reconcile the remaining broad-test results point by point.
+1. User continues the untested portions of the numbered 0.1.14-dev broad runtime matrix.
+2. Fix only defects demonstrated by runtime results, with normal version discipline.
+3. Reconcile remaining untested/qualified cases point by point; do not turn presentation preferences into blocking defects unless the user chooses to address them.
 4. After a known-good runtime state exists, review release/promotion readiness separately; do not treat development checks as a runtime test.
 
 ## Deferred / Out of Scope
@@ -203,4 +210,4 @@ Run the full broad runtime matrix on 0.1.14-dev / fb3f8f3bcf46b0372303db590d4f68
 - External/runtime prerequisite: pfQuest.
 
 ## Exact Next Step
-Run the supplied numbered broad runtime matrix on 0.1.14-dev / fb3f8f3bcf46b0372303db590d4f68694aba97af and report PASS / FAIL / SKIP with notes per case. Keep remote-member presentation fine-tuning deferred. Do not begin unrelated feature work or promote to main before the matrix is reconciled.
+Continue the untested numbered cases on 0.1.14-dev / fb3f8f3bcf46b0372303db590d4f68694aba97af, especially remote live updates, instruction baseline/consumption, Guide/Tourist reload/rejoin persistence, disparities, and recovery stress. Report PASS / FAIL / SKIP with notes. Keep remote-member presentation fine-tuning deferred and do not promote to main before the broad matrix is sufficiently reconciled.
