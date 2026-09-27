@@ -181,6 +181,8 @@ Current addon-affecting retest commit: c74a0da565d412ad118466faaff1640e21d8096c.
 - No obvious later-Lua syntax/API blacklist hit is present in the current source.
 - Canonical Lua 5.0.3 compiler check remains not run against 0.1.16-dev: the connected GitHub source is not mounted in the executable environment, and direct network cloning from the executable environment is unavailable.
 - The 0.1.16 reverse-completion delta is not yet user-tested. The 0.1.14 partial broad-matrix results remain the last runtime baseline and must not be rewritten as tests of protocol v2.
+- New performance report during testing: with the client otherwise around 120 FPS, moving the mouse anywhere on screen can drop below 100 FPS with severe frametime disturbance; stationary mouse returns to the cap. Direct source inspection found no PFQG global mouse-movement hook, only the Guide/Tourist window as mouse-enabled plus two lightweight OnUpdate handlers. This symptom is therefore not yet localized to PFQG. Before changing addon code, compare mouse polling/report rate at 125/250 Hz and perform an A/B run with PFQG disabled but pfQuest still enabled.
+- Separate from the mouse-specific symptom, the current Vanilla PARTY transport still has a known fan-out inefficiency: logically targeted recovery packets are PARTY broadcasts without an encoded recipient, so non-target PFQG peers can process them. This is a concrete optimization candidate, but it has not yet been changed because it does not explain a stutter that occurs only while the mouse moves.
 
 ## Testing
 
