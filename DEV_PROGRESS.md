@@ -2,12 +2,12 @@
 
 ## Current
 - Branch: dev.
-- Version: 0.1.13-dev from pfQuest_Group.toc.
-- Latest addon-affecting development commit: a840dfa7b45918e202ed10038ca5a9cc77d56ab9 — make local binary quest status replacement unconditional on peer quest ownership, while keeping remote class-icon/status rendering peer-quest scoped.
+- Version: 0.1.14-dev from pfQuest_Group.toc.
+- Latest addon-affecting development commit: fb3f8f3bcf46b0372303db590d4f68694aba97af — align local and remote binary Group Progress status inline with the objective label.
 - Handoff checkpoint: the current dev head carrying this status file; always verify the actual remote branch head before resuming.
 - Stable baseline: None. main remains exactly bootstrap commit 4c5c63f074923266566c36c51ce2718d0060166f and is not a runtime release.
 - Goal: reconcile the first broad in-game validation of the integrated Phase 1–6 test build, diagnose and fix only demonstrated defects, then decide release/promotion readiness.
-- Scope boundary: Phase 6 code hardening is complete. Broad runtime testing found the Vanilla addon-WHISPER transport defect plus Group Progress presentation defects around peer filtering and binary status rendering. The 0.1.12 screenshot proved remote class icon/incomplete status renders, but local binary `0/1` / `1/1` remained because local replacement incorrectly depended on at least one peer having the quest. That logic is fixed in 0.1.13-dev and awaits focused retest; no unrelated feature work or architecture changes are authorized.
+- Scope boundary: Phase 6 code hardening is complete. Broad runtime testing found the Vanilla addon-WHISPER transport defect plus Group Progress presentation defects around peer filtering and binary status rendering. 0.1.13-dev runtime confirms local binary replacement and remote class/status rendering now work; the remaining demonstrated defect was awkward right-edge justification. 0.1.14-dev changes only binary status positioning to inline flow and awaits focused retest; no unrelated feature work or architecture changes are authorized.
 
 ## Current Design / Development Contract
 
@@ -56,7 +56,7 @@
 - The addon post-processes pfQuest's existing tracker; pfQuest source remains untouched.
 - Only compatible current party peers are displayed, in party-slot order.
 - Numeric questID is matched first and remains authoritative; title fallback is unresolved-ID compatibility only.
-- Binary objective conversion is always active for the local player: pfQuest's terminal numeric `0/1` / `1/1`-style token is removed and replaced by a local complete/incomplete texture even if no compatible peer has that quest. Compatible peers who have the tracked quest append class icon plus complete/incomplete status; peers without the quest append nothing. The overlay is independent of Guide/Tourist mode, and the original pfQuest text/color is retained for restoration. Status marks use Vanilla-safe Blizzard textures rather than Unicode font glyphs.
+- Binary objective conversion is always active for the local player: pfQuest's terminal numeric `0/1` / `1/1`-style token is removed and replaced by a local complete/incomplete texture even if no compatible peer has that quest. Binary rows flow inline as objective label -> local status -> remote class/status pairs. Compatible peers who have the tracked quest append class icon plus complete/incomplete status; peers without the quest append nothing. The overlay is independent of Guide/Tourist mode, and the original pfQuest text/color is retained for restoration. Status marks use Vanilla-safe Blizzard textures rather than Unicode font glyphs.
 - A compatible PFQG peer who does not have the tracked quest contributes no class icon/status for that quest.
 - Count objectives add one class-icon/name/progress row per compatible peer who has the tracked quest; a missing matching objective within an otherwise matched quest displays --.
 - Reusable tracker regions are hidden/restored as peers change and tracker dimensions are recalculated.
@@ -109,6 +109,7 @@
 - 2affbf36a4435fec245c58a04a21740686a7d3f8 — strip pfQuest's terminal binary `0/1` / `1/1` token while the Group Progress binary overlay is active; version 0.1.11-dev.
 - 6419463902225f4672eb1a398bd34a79ae8406a3 — replace Unicode `✓` / `✗` font glyphs with Blizzard `UI-CheckBox-Check` / `UI-GroupLoot-Pass-Up` textures; version 0.1.12-dev.
 - a840dfa7b45918e202ed10038ca5a9cc77d56ab9 — always render local binary complete/incomplete status, independent of whether any peer has the quest; version 0.1.13-dev.
+- fb3f8f3bcf46b0372303db590d4f68694aba97af — move binary local/remote status from right-edge justification to inline placement after the objective label; version 0.1.14-dev.
 
 ## Validation State
 
@@ -120,14 +121,16 @@
 - Group Progress also showed/was specified to show PFQG peer status only when that peer has the tracked quest; peers without the quest must be omitted.
 - Follow-up runtime feedback on 0.1.10-dev: the binary tick/cross overlay was present but pfQuest's native `0/1` or `1/1` count text remained visible on the same objective row.
 - Follow-up runtime feedback after the text fix: the expected binary tick/cross mark itself was not visible. Inspection showed the mark was a literal Unicode `✓` / `✗` in `GameFontNormal`, which is not reliable on the Vanilla client font set.
-- 0.1.12-dev screenshot result: remote PFQG class icon plus red incomplete/cross texture is visibly rendering on quests the peer has. Local `1/1` and `0/1` text remains unchanged on other binary objectives, demonstrating that local conversion was wrongly gated on `questPeers` being non-empty.
+- 0.1.12-dev screenshot result: remote PFQG class icon plus red incomplete/cross texture is visibly rendering on quests the peer has. Local `1/1` and `0/1` text remained unchanged on other binary objectives, demonstrating that local conversion was wrongly gated on `questPeers` being non-empty.
+- 0.1.13-dev screenshot result: local binary replacement now works and remote class/status still renders correctly. The remaining visible defect is layout: status markers are right-anchored to the tracker edge, leaving an excessive gap after short objective labels.
 
 ### Implemented / Awaiting Runtime Test
 - 0.1.9+ delta: all addon transport uses the Vanilla-supported PARTY addon channel; no four-argument addon-WHISPER send remains.
 - 0.1.10+ delta: Group Progress filters compatible peers per tracked quest before creating binary/count status regions, so peers without that quest are omitted while the overlay remains mode-independent.
 - 0.1.11+ delta: in the binary branch only, Group Progress strips a terminal numeric fraction from the saved pfQuest objective text before rendering peer status. Multi-count objectives remain on the existing count-row path and the untouched base text is restored whenever the overlay is not applicable.
 - 0.1.12+ delta: binary status marks are textures, not font glyphs. Complete uses `Interface\\Buttons\\UI-CheckBox-Check` tinted green; incomplete uses `Interface\\Buttons\\UI-GroupLoot-Pass-Up` tinted red.
-- 0.1.13-dev delta: local binary rendering no longer returns early when there are zero compatible peers or zero peers with the quest. A local status texture is always reserved/rendered for binary objectives; remote class-icon/status loops remain filtered through matched remote quest ownership.
+- 0.1.13+ delta: local binary rendering no longer returns early when there are zero compatible peers or zero peers with the quest. A local status texture is always reserved/rendered for binary objectives; remote class-icon/status loops remain filtered through matched remote quest ownership.
+- 0.1.14-dev delta: binary status anchors are inline. The local status is positioned immediately after the rendered objective text width; remote class/status pairs follow the local status in party order. Count-objective layout is unchanged.
 - Integrated Phase 1 foundation/protocol.
 - Phase 2 local/remote quest-state engine.
 - Phase 3 Group Progress tracker integration.
@@ -138,7 +141,7 @@
 
 ### Static / Automated Checks — Exact Phase 6 Addon State
 Exact original Phase 6 test commit: bfe9b578802bf87ed418cb3c329684acfe787825.
-Current addon-affecting retest commit: a840dfa7b45918e202ed10038ca5a9cc77d56ab9.
+Current addon-affecting retest commit: fb3f8f3bcf46b0372303db590d4f68694aba97af.
 - pfQuest_Group.lua blob: 2aeb9ed756936f27d3c69f341fa8acf437782182.
 - locales/enUS.lua blob: 0122994a3bd10ef5d0202dc6794d0c7bd32c7655 (unchanged from Phase 5b).
 - pfQuest_Group.toc blob: 0a19ef766fb6453a2967bb8ed91a7ec574f563e7.
@@ -163,7 +166,8 @@ Current addon-affecting retest commit: a840dfa7b45918e202ed10038ca5a9cc77d56ab9.
 - The Group Progress no-quest status defect/requirement is fixed in 0.1.10+ by filtering peers through the matched remote quest before rendering status. Focused in-game retest is still required.
 - The binary objective text collision is fixed in 0.1.11+ by removing only the terminal numeric fraction in the binary overlay branch; the underlying captured pfQuest text is not destroyed. Focused in-game retest is still required.
 - The invisible binary mark defect is fixed in 0.1.12+ by replacing literal Unicode marks with Vanilla-era Blizzard textures; the screenshot confirms the remote red incomplete/cross texture is visible.
-- The 0.1.12 local binary replacement gating defect is fixed in 0.1.13-dev: local binary status no longer depends on any peer having the quest. Focused in-game retest is still required.
+- The 0.1.12 local binary replacement gating defect is fixed and user-verified in 0.1.13-dev: local binary status no longer depends on any peer having the quest.
+- The 0.1.13 binary-row justification defect is fixed in 0.1.14-dev by placing status inline after the objective label rather than against the tracker edge. Focused in-game retest is still required.
 - Static triage excludes the Lua 5.0.3 200-local cap as the reported error source; current top-level pressure remains 144.
 - No obvious later-Lua syntax/API blacklist hit is present in the current source.
 - Canonical Lua 5.0.3 compiler check remains not run against 0.1.10-dev: the connected GitHub source is not mounted in the executable environment, and direct network cloning from the executable environment is unavailable.
@@ -179,10 +183,10 @@ Current addon-affecting retest commit: a840dfa7b45918e202ed10038ca5a9cc77d56ab9.
 - Not yet reconciled: exhaustive instruction/recovery paths, disparities, reload/restart recovery, party churn, window persistence, Off cleanup, and the remainder of Group Progress.
 
 ### Next Runtime Test
-Run 0.1.13-dev / a840dfa7b45918e202ed10038ca5a9cc77d56ab9. Verify: (1) local binary objectives always replace `0/1` / `1/1` with visible incomplete/complete textures even when no peer has the quest; (2) remote class icon/status still appears only for PFQG peers who have the quest; (3) multi-count objectives such as `3/10` remain unchanged; (4) party discovery/sync and reload/recovery produce no ChatThrottleLib `unknown addon chat type` error; (5) Guide/Tourist basic behavior still works.
+Run 0.1.14-dev / fb3f8f3bcf46b0372303db590d4f68694aba97af. Verify: (1) binary rows read naturally as objective label -> local complete/incomplete status -> remote class/status pairs, with no large right-edge gap; (2) local `0/1` / `1/1` replacement remains correct; (3) remote class/status still appears only for PFQG peers who have the quest; (4) multi-count objectives such as `3/10` remain unchanged; (5) party discovery/sync and reload/recovery produce no ChatThrottleLib `unknown addon chat type` error; (6) Guide/Tourist basic behavior still works.
 
 ## Planned / Next Work
-1. User performs the focused 0.1.13-dev retest for unconditional local binary status replacement, peer-scoped remote status, communications, and basic Guide/Tourist behavior.
+1. User performs the focused 0.1.14-dev retest for inline binary-row layout, while rechecking peer-scoped remote status, communications, and basic Guide/Tourist behavior.
 2. Fix only defects demonstrated by that retest, with normal version discipline.
 3. Reconcile the remaining broad-test results point by point.
 4. After a known-good runtime state exists, review release/promotion readiness separately; do not treat development checks as a runtime test.
@@ -199,4 +203,4 @@ Run 0.1.13-dev / a840dfa7b45918e202ed10038ca5a9cc77d56ab9. Verify: (1) local bin
 - External/runtime prerequisite: pfQuest.
 
 ## Exact Next Step
-Test 0.1.13-dev / a840dfa7b45918e202ed10038ca5a9cc77d56ab9 in game. First verify that local binary `0/1` / `1/1` rows become incomplete/complete textures even on quests no peer has, while remote class-icon/status remains limited to peers who have the quest. Then recheck communications/reload and basic Guide/Tourist behavior. Do not begin unrelated feature work or promote to main before this retest is reconciled.
+Test 0.1.14-dev / fb3f8f3bcf46b0372303db590d4f68694aba97af in game. First verify that binary rows are visually inline rather than right-justified, while local replacement and peer-scoped remote class/status remain correct. Then recheck communications/reload and basic Guide/Tourist behavior. Do not begin unrelated feature work or promote to main before this retest is reconciled.
