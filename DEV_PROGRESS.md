@@ -7,7 +7,7 @@
 - Handoff checkpoint: the current dev head carrying this status file; always verify the actual remote branch head before resuming.
 - Stable baseline: None; main is still exactly repository bootstrap commit 4c5c63f074923266566c36c51ce2718d0060166f and is not a runtime release.
 - Goal: Implement the agreed v1 addon across staged development chats, then perform the first broad in-game test on the integrated Phase 6 build.
-- Current scope boundary: Phases 1–4b are complete. Phase 5 has not started. Phase 5 owns Guide/Tourist presentation and disparity UI only. No intermediate in-game testing is planned before Phase 6.
+- Current scope boundary: Phases 1–4b are complete. Phase 5 is split into Phase 5a (Guide/Tourist instruction-window presentation) and Phase 5b (quest-disparity presentation/controls). Phase 5a is next; Phase 5b must not be started in the same development chat unless Phase 5a has first been cleanly checkpointed. No intermediate in-game testing is planned before Phase 6.
 
 ## Current Design / Development Contract
 
@@ -87,11 +87,12 @@
 - Public behaviour/state hooks for later Phase 5 presentation are Addon.GetGuideInstructions(), Addon.GetTouristInstructions(), GUIDE_INSTRUCTION_CREATED, GUIDE_INSTRUCTIONS_CHANGED, TOURIST_INSTRUCTION_COMPLETED and TOURIST_INSTRUCTIONS_CHANGED.
 - Phase 4b adds no Guide/Tourist window, Blizzard !/? presentation, strike-through/fade, disparity rows, hide controls or Show Hidden.
 
-### Phase 5 / Disparity Boundary
-- Phase 5 owns all Guide/Tourist presentation.
-- The compact movable window, Blizzard yellow !/? rows, automatic completion presentation, strike-through/fade removal, missing-quest disparity rows, hidden disparity controls and Show Hidden are all unimplemented.
-- Current quest disparity is separate from the instruction baseline and may show quests accepted before a Tourist joined.
-- Phase 5 must consume the Phase 4a/4b state and events rather than introducing another Guide/Tourist session or instruction owner.
+### Phase 5 Presentation Boundary / Split
+- Phase 5 owns all Guide/Tourist presentation and is deliberately split into two coding phases so instruction presentation and disparity behaviour can be reviewed/checkpointed independently.
+- Phase 5a — Guide/Tourist instruction-window presentation: implement the compact movable Guide/Tourist window, render Guide/Tourist instruction rows using Blizzard-style yellow !/? markers, consume the existing Phase 4b instruction state/events, and implement Tourist completion strike-through/fade/removal presentation. Do not implement disparity rows, hidden disparity state/controls or Show Hidden in Phase 5a.
+- Phase 5b — Quest-disparity presentation/controls: build on the completed Phase 5a window and existing Phase 2 remote quest state to show Guide missing-quest disparity rows, plus hidden disparity handling and Show Hidden. Current quest disparity is separate from the instruction baseline and may show quests accepted before a Tourist joined.
+- Both Phase 5a and 5b are presentation/disparity work only. They must consume the Phase 4a/4b state and events rather than introducing another Guide/Tourist session or instruction owner.
+- Phase 5a must end in a valid self-contained UI state even if Phase 5b does not exist yet.
 
 ## Recent Relevant Commits
 - 4c5c63f074923266566c36c51ce2718d0060166f — initialize main with repository README only.
@@ -114,7 +115,7 @@
 - Phase 3 Group Progress tracker integration for compatible party peers.
 - Phase 4a Off/Guide/Tourist commands, Guide session lifecycle, automatic pairing and fixed Tourist join baseline.
 - Phase 4b Guide ACCEPT/TURNIN instruction creation, persistence, component synchronization, Tourist baseline filtering, matching/consumption, and duplicate/stale/gap recovery.
-- All Phase 5 Guide/Tourist UI/disparity behaviour remains unimplemented.
+- Phase 5a and Phase 5b remain unimplemented; Phase 5a is the next coding phase.
 
 ## Static / Automated Checks
 
@@ -167,13 +168,15 @@ Exact implementation commit: 84fa3c77e327407a066fa1d9c3a5e7d41f7e89d5.
 3. Phase 3 — Group Progress UI: complete at e3b988309054eb86a3ad39953bf5a39332168e83.
 4. Phase 4a — Guide/Tourist mode/session foundation: complete at b7655c8bd7d7108b38ad19f271a456f9bcad78d4.
 5. Phase 4b — Guide/Tourist instruction behaviour: complete at 84fa3c77e327407a066fa1d9c3a5e7d41f7e89d5.
-6. Phase 5 — Guide/Tourist UI + disparity: next. Build presentation only on the existing Phase 4a/4b session/instruction/quest-state owners: compact movable window, Blizzard !/? instruction rows, completion strike-through/fade behaviour, missing-quest disparity rows and hide/Show Hidden handling.
-7. Phase 6 — Integration hardening / test build: deferred; run whole-system audit, remaining protocol robustness work and final available checks, then provide the first broad in-game test plan.
+6. Phase 5a — Guide/Tourist instruction-window presentation: next. Build the compact movable Guide/Tourist window on the existing Phase 4a/4b state owners, render Blizzard-style yellow !/? instruction rows, and implement Tourist completion strike-through/fade/removal presentation. No disparity UI/state in 5a.
+7. Phase 5b — Quest-disparity presentation/controls: deferred until Phase 5a is cleanly checkpointed. Add Guide missing-quest disparity rows plus hidden disparity handling and Show Hidden using the existing Phase 2 quest state and the Phase 5a window; do not add another session/instruction owner.
+8. Phase 6 — Integration hardening / test build: deferred; run whole-system audit, remaining protocol robustness work and final available checks, then provide the first broad in-game test plan.
 
 Each coding phase ends with available static/compiler checks, a clean commit checkpoint and an updated handoff. Runtime behaviour remains untested until Phase 6 unless the user explicitly changes that plan.
 
 ## Deferred / Out of Scope
-- All Phase 5 Guide/Tourist UI/disparity work remains deferred and has not started.
+- Phase 5a has not started and is the next active scope.
+- Phase 5b disparity work is explicitly deferred until Phase 5a is completed and checkpointed.
 - Phase 6 integration hardening and broad in-game testing remain deferred.
 - No in-game testing was performed in Phase 4b.
 
@@ -184,4 +187,4 @@ Each coding phase ends with available static/compiler checks, a clean commit che
 - External/runtime prerequisite: pfQuest.
 
 ## Exact Next Step
-Begin Phase 5 — Guide/Tourist UI + disparity from the current dev handoff after verifying the actual branch head against this file. Use the existing Phase 4a session owner, Phase 4b instructions component/state/events and Phase 2 quest-state data. Implement presentation/disparity only: compact movable Guide/Tourist window, Blizzard yellow !/? instruction rows, Tourist completion strike-through/fade removal, Guide missing-quest disparity rows, hidden disparity handling and Show Hidden. Do not introduce another Guide/Tourist session/instruction owner, do not modify dev_rulebook.md, and do not perform in-game testing yet.
+Begin Phase 5a — Guide/Tourist instruction-window presentation only from the current dev handoff after verifying the actual branch head against this file. Use the existing Phase 4a session owner and Phase 4b instructions component/state/events. Implement the compact movable Guide/Tourist window, Blizzard-style yellow !/? instruction rows, and Tourist completion strike-through/fade/removal presentation. Do not implement quest-disparity rows, hidden disparity handling or Show Hidden until Phase 5b; do not introduce another Guide/Tourist session/instruction owner, do not modify dev_rulebook.md, and do not perform in-game testing yet.
