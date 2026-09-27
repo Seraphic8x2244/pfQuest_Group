@@ -3,6 +3,7 @@ local ADDON_VERSION = GetAddOnMetadata(ADDON_NAME, "Version")
 
 pfQuest_Group = pfQuest_Group or {}
 local Addon = pfQuest_Group
+local L = pfQuest_Group_L or {}
 
 local PROTOCOL_PREFIX = "PFQGROUP"
 local PROTOCOL_VERSION = 1
@@ -201,6 +202,9 @@ local function NewSessionId()
 end
 
 local function NormalizeSession(session)
+  local baseline
+  local actionSeq
+
   if type(session) ~= "table" then
     session = {}
   end
@@ -210,32 +214,67 @@ local function NormalizeSession(session)
   end
 
   session.revision = tonumber(session.revision) or 0
+  if session.revision < 0 then
+    session.revision = 0
+  else
+    session.revision = math.floor(session.revision)
+  end
 
   if type(session.hiddenDisparities) ~= "table" then
     session.hiddenDisparities = {}
+  end
+
+  baseline = tonumber(session.joinBaseline)
+  if baseline and baseline >= 0 then
+    baseline = math.floor(baseline)
+  else
+    baseline = nil
+  end
+
+  actionSeq = tonumber(session.guideActionSeq)
+  if actionSeq and actionSeq >= 0 then
+    actionSeq = math.floor(actionSeq)
+  else
+    actionSeq = 0
   end
 
   if session.mode == "OFF" then
     session.guideName = nil
     session.guideSessionId = nil
     session.joinBaseline = nil
+    session.guideActionSeq = nil
     session.hiddenDisparities = {}
   elseif session.mode == "GUIDE" then
     session.guideName = nil
     session.joinBaseline = nil
-    if not session.guideSessionId or session.guideSessionId == "" then
+    session.guideActionSeq = actionSeq
+    if type(session.guideSessionId) ~= "string" or session.guideSessionId == "" then
       session.guideSessionId = NewSessionId()
+      session.guideActionSeq = 0
     end
   elseif session.mode == "TOURIST" then
+    session.guideActionSeq = nil
     session.hiddenDisparities = {}
-    if session.guideName == "" then
+
+    if type(session.guideName) == "string" then
+      session.guideName = Trim(session.guideName)
+    else
       session.guideName = nil
     end
-    if session.guideSessionId == "" then
+
+    if not session.guideName or session.guideName == "" then
+      session.mode = "OFF"
+      session.guideName = nil
       session.guideSessionId = nil
-    end
-    if session.joinBaseline == "" then
       session.joinBaseline = nil
+    else
+      if type(session.guideSessionId) ~= "string" or session.guideSessionId == "" then
+        session.guideSessionId = nil
+      end
+      session.joinBaseline = baseline
+      if not session.guideSessionId then
+        session.joinBaseline = nil
+      end
     end
   end
 
@@ -1866,8 +1905,57 @@ local function SessionSnapshot()
     revision = session.revision,
     guide = session.guideName,
     session = session.guideSessionId,
-    baseline = session.joinBaseline
+    baseline = session.joinBaseline,
+    action = session.guideActionSeq
   })
+end
+
+local function BroadcastSessionDelta(target)
+  return Addon.SendDelta("session", SessionSnapshot(), target)
+end
+
+local function ReconcileTouristPairing(sender)
+  local session = Addon.db and Addon.db.session
+  local guideKey
+  local peer
+  local remoteSession
+  local baseline
+
+  if not session or session.mode ~= "TOURIST" or not session.guideName then
+    return false
+  end
+
+  if sender and NormalizeName(sender) ~= NormalizeName(session.guideName) then
+    return false
+  end
+
+  guideKey = NormalizeName(session.guideName)
+  peer = guideKey and peers[guideKey]
+  if not peer or not peer.compatible or not peer.session then
+    return false
+  end
+
+  remoteSession = peer.session
+  if remoteSession.mode == "GUIDE" and remoteSession.guideSessionId then
+    baseline = tonumber(remoteSession.guideActionSeq) or 0
+    if baseline < 0 then
+      baseline = 0
+    else
+      baseline = math.floor(baseline)
+    end
+
+    if session.guideSessionId ~= remoteSession.guideSessionId or session.joinBaseline == nil then
+      return Addon.SetTouristSession(session.guideName, remoteSession.guideSessionId, baseline)
+    end
+
+    return true
+  end
+
+  if session.guideSessionId or session.joinBaseline ~= nil then
+    return Addon.ClearTouristSession()
+  end
+
+  return false
 end
 
 local function ApplyRemoteSession(sender, payload)
@@ -1876,6 +1964,10 @@ local function ApplyRemoteSession(sender, payload)
   local senderKey = NormalizeName(sender)
   local peer = senderKey and peers[senderKey]
   local revision
+  local guideName
+  local guideSessionId
+  local joinBaseline
+  local guideActionSeq
 
   if not peer then
     return
@@ -1886,23 +1978,59 @@ local function ApplyRemoteSession(sender, payload)
   end
 
   revision = tonumber(values.revision) or 0
+  if revision < 0 then
+    revision = 0
+  else
+    revision = math.floor(revision)
+  end
+
   if peer.session and peer.session.revision and revision < peer.session.revision then
     return
+  end
+
+  guideName = values.guide ~= "" and values.guide or nil
+  guideSessionId = values.session ~= "" and values.session or nil
+  joinBaseline = tonumber(values.baseline)
+  guideActionSeq = tonumber(values.action)
+
+  if joinBaseline and joinBaseline >= 0 then
+    joinBaseline = math.floor(joinBaseline)
+  else
+    joinBaseline = nil
+  end
+
+  if guideActionSeq and guideActionSeq >= 0 then
+    guideActionSeq = math.floor(guideActionSeq)
+  else
+    guideActionSeq = 0
+  end
+
+  if mode == "OFF" then
+    guideName = nil
+    guideSessionId = nil
+    joinBaseline = nil
+    guideActionSeq = nil
+  elseif mode == "GUIDE" then
+    guideName = nil
+    joinBaseline = nil
+  else
+    guideActionSeq = nil
+    if not guideSessionId then
+      joinBaseline = nil
+    end
   end
 
   peer.session = {
     mode = mode,
     revision = revision,
-    guideName = values.guide ~= "" and values.guide or nil,
-    guideSessionId = values.session ~= "" and values.session or nil,
-    joinBaseline = values.baseline ~= "" and values.baseline or nil
+    guideName = guideName,
+    guideSessionId = guideSessionId,
+    joinBaseline = joinBaseline,
+    guideActionSeq = guideActionSeq
   }
 
   Emit("REMOTE_SESSION_CHANGED", sender, peer.session)
-end
-
-local function BroadcastSessionDelta(target)
-  return Addon.SendDelta("session", SessionSnapshot(), target)
+  ReconcileTouristPairing(sender)
 end
 
 function Addon.RegisterListener(eventName, handler)
@@ -1990,6 +2118,7 @@ function Addon.GetSession()
     guideName = source.guideName,
     guideSessionId = source.guideSessionId,
     joinBaseline = source.joinBaseline,
+    guideActionSeq = source.guideActionSeq,
     hiddenDisparities = source.hiddenDisparities
   }
 end
@@ -1997,6 +2126,7 @@ end
 function Addon.SetMode(mode, guideName)
   local session
   local changed = false
+  local normalizedGuide
 
   if not Addon.db then
     return false
@@ -2007,41 +2137,58 @@ function Addon.SetMode(mode, guideName)
     return false
   end
 
-  if mode == "TOURIST" and (not guideName or guideName == "") then
-    return false
+  if mode == "TOURIST" then
+    guideName = Trim(guideName)
+    normalizedGuide = NormalizeName(guideName)
+    if not normalizedGuide or normalizedGuide == NormalizeName(playerName) then
+      return false
+    end
+
+    if party[normalizedGuide] and party[normalizedGuide].name then
+      guideName = party[normalizedGuide].name
+    end
   end
 
   session = Addon.db.session
 
   if mode == "OFF" then
-    if session.mode ~= "OFF" or session.guideName or session.guideSessionId or session.joinBaseline then
+    if session.mode ~= "OFF" or session.guideName or session.guideSessionId or session.joinBaseline ~= nil or session.guideActionSeq ~= nil then
       changed = true
     end
     session.mode = "OFF"
     session.guideName = nil
     session.guideSessionId = nil
     session.joinBaseline = nil
+    session.guideActionSeq = nil
     session.hiddenDisparities = {}
   elseif mode == "GUIDE" then
     if session.mode ~= "GUIDE" then
       changed = true
       session.guideSessionId = NewSessionId()
+      session.guideActionSeq = 0
       session.hiddenDisparities = {}
     elseif not session.guideSessionId then
       changed = true
       session.guideSessionId = NewSessionId()
+      session.guideActionSeq = 0
+    elseif session.guideActionSeq == nil then
+      changed = true
+      session.guideActionSeq = 0
     end
     session.mode = "GUIDE"
     session.guideName = nil
     session.joinBaseline = nil
   else
-    if session.mode ~= "TOURIST" or NormalizeName(session.guideName) ~= NormalizeName(guideName) then
+    if session.mode ~= "TOURIST" or NormalizeName(session.guideName) ~= normalizedGuide then
       changed = true
       session.guideSessionId = nil
       session.joinBaseline = nil
+    elseif session.guideName ~= guideName then
+      changed = true
     end
     session.mode = "TOURIST"
     session.guideName = guideName
+    session.guideActionSeq = nil
     session.hiddenDisparities = {}
   end
 
@@ -2051,27 +2198,38 @@ function Addon.SetMode(mode, guideName)
     Emit("SESSION_CHANGED", Addon.GetSession())
   end
 
+  if mode == "TOURIST" then
+    ReconcileTouristPairing()
+  end
+
   return true
 end
 
 function Addon.SetTouristSession(guideName, guideSessionId, joinBaseline)
   local session
+  local baseline
 
   if not Addon.db or not guideName or guideName == "" or not guideSessionId or guideSessionId == "" then
     return false
   end
+
+  baseline = tonumber(joinBaseline)
+  if not baseline or baseline < 0 then
+    return false
+  end
+  baseline = math.floor(baseline)
 
   session = Addon.db.session
   if session.mode ~= "TOURIST" or NormalizeName(session.guideName) ~= NormalizeName(guideName) then
     return false
   end
 
-  if session.guideSessionId == guideSessionId and session.joinBaseline == joinBaseline then
+  if session.guideSessionId == guideSessionId and session.joinBaseline ~= nil then
     return true
   end
 
   session.guideSessionId = guideSessionId
-  session.joinBaseline = joinBaseline
+  session.joinBaseline = baseline
   session.revision = session.revision + 1
   BroadcastSessionDelta()
   Emit("SESSION_CHANGED", Addon.GetSession())
@@ -2090,7 +2248,7 @@ function Addon.ClearTouristSession()
     return false
   end
 
-  if not session.guideSessionId and not session.joinBaseline then
+  if not session.guideSessionId and session.joinBaseline == nil then
     return true
   end
 
@@ -2100,6 +2258,82 @@ function Addon.ClearTouristSession()
   BroadcastSessionDelta()
   Emit("SESSION_CHANGED", Addon.GetSession())
   return true
+end
+
+local function TrackGuideAction(actionType)
+  local session = Addon.db and Addon.db.session
+
+  if not session or session.mode ~= "GUIDE" then
+    return
+  end
+
+  if actionType ~= "ACCEPT" and actionType ~= "TURNIN" then
+    return
+  end
+
+  session.guideActionSeq = (tonumber(session.guideActionSeq) or 0) + 1
+  session.revision = session.revision + 1
+  BroadcastSessionDelta()
+  Emit("SESSION_CHANGED", Addon.GetSession())
+end
+
+local function SessionStatusText()
+  local session = Addon.GetSession()
+
+  if not session or session.mode == "OFF" then
+    return L.STATUS_OFF or "Mode: Off."
+  end
+
+  if session.mode == "GUIDE" then
+    return L.STATUS_GUIDE or "Mode: Guide."
+  end
+
+  if session.guideSessionId and session.joinBaseline ~= nil then
+    return string.format(L.STATUS_TOURIST_PAIRED or "Mode: Tourist - following %s (paired).", SafeString(session.guideName))
+  end
+
+  return string.format(L.STATUS_TOURIST_WAITING or "Mode: Tourist - following %s (waiting for an active Guide session).", SafeString(session.guideName))
+end
+
+local function PrintSessionText(text)
+  if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
+    DEFAULT_CHAT_FRAME:AddMessage("|cffffd100pfQuest_Group:|r " .. SafeString(text))
+  end
+end
+
+local function HandleSlashCommand(message)
+  local text = Trim(message)
+  local command = ""
+  local argument = ""
+  local splitAt
+
+  if text ~= "" then
+    splitAt = string.find(text, "%s")
+    if splitAt then
+      command = string.lower(string.sub(text, 1, splitAt - 1))
+      argument = Trim(string.sub(text, splitAt + 1))
+    else
+      command = string.lower(text)
+    end
+  end
+
+  if command == "off" then
+    Addon.SetMode("OFF")
+    PrintSessionText(SessionStatusText())
+  elseif command == "guide" then
+    Addon.SetMode("GUIDE")
+    PrintSessionText(SessionStatusText())
+  elseif command == "tourist" then
+    if argument == "" or not Addon.SetMode("TOURIST", argument) then
+      PrintSessionText(L.TOURIST_REQUIRES_GUIDE or "Tourist mode requires another player name.")
+    else
+      PrintSessionText(SessionStatusText())
+    end
+  elseif command == "status" then
+    PrintSessionText(SessionStatusText())
+  else
+    PrintSessionText(L.COMMAND_HELP or "Usage: /pfqgroup off | guide | tourist <player> | status")
+  end
 end
 
 Addon.name = ADDON_NAME
@@ -2112,12 +2346,17 @@ Addon.party = party
 Addon.RegisterStateComponent("session", SessionSnapshot, ApplyRemoteSession, ApplyRemoteSession)
 Addon.RegisterStateComponent("quests", QuestSnapshot, ApplyRemoteQuestFull, ApplyRemoteQuestDelta)
 
+Addon.RegisterListener("LOCAL_QUEST_ACTION", TrackGuideAction)
 Addon.RegisterListener("LOCAL_QUEST_STATE_CHANGED", RefreshGroupProgress)
 Addon.RegisterListener("REMOTE_QUEST_STATE_CHANGED", RefreshGroupProgress)
 Addon.RegisterListener("PEER_STATUS", RefreshGroupProgress)
 Addon.RegisterListener("PEER_LEFT", RefreshGroupProgress)
 Addon.RegisterListener("PARTY_CHANGED", RefreshGroupProgress)
 
+
+SLASH_PFQUESTGROUP1 = "/pfqgroup"
+SLASH_PFQUESTGROUP2 = "/pfqg"
+SlashCmdList["PFQUESTGROUP"] = HandleSlashCommand
 
 frame:RegisterEvent("ADDON_LOADED")
 frame:RegisterEvent("PLAYER_ENTERING_WORLD")
