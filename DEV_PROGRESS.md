@@ -2,12 +2,12 @@
 
 ## Current
 - Branch: dev.
-- Version: 0.1.8-dev from pfQuest_Group.toc.
-- Latest addon-affecting development commit: bfe9b578802bf87ed418cb3c329684acfe787825 — Phase 6 integration/state-recovery hardening.
+- Version: 0.1.10-dev from pfQuest_Group.toc.
+- Latest addon-affecting development commit: a736701f8bb26af2309a415b6885aa7cce52e313 — broad-test Group Progress peer-quest filtering, on top of the Vanilla addon-message transport fix.
 - Handoff checkpoint: the current dev head carrying this status file; always verify the actual remote branch head before resuming.
 - Stable baseline: None. main remains exactly bootstrap commit 4c5c63f074923266566c36c51ce2718d0060166f and is not a runtime release.
 - Goal: reconcile the first broad in-game validation of the integrated Phase 1–6 test build, diagnose and fix only demonstrated defects, then decide release/promotion readiness.
-- Scope boundary: Phase 6 code hardening is complete. The broad runtime test has begun and exposed at least one Lua error on the exact 0.1.8-dev test build; no unrelated feature work or architecture changes are authorized.
+- Scope boundary: Phase 6 code hardening is complete. The broad runtime test found two concrete defects on 0.1.8-dev: invalid Vanilla addon-WHISPER transport and Group Progress showing status for PFQG peers who do not have the tracked quest. Both are fixed on dev and await focused retest; no unrelated feature work or architecture changes are authorized.
 
 ## Current Design / Development Contract
 
@@ -33,7 +33,7 @@
 ### Protocol / Peer State
 - Protocol prefix: PFQGROUP; protocol version: 1; SavedVariables schema: 1.
 - Only actual current party members participate; discovery scans party1 through party4.
-- Transport remains native Vanilla SendAddonMessage over PARTY and targeted WHISPER.
+- Transport remains native Vanilla SendAddonMessage over PARTY. WoW 1.12 SendAddonMessage does not support WHISPER; logical directed recovery validates the requested party peer but uses the PARTY addon channel.
 - Wire types remain HELLO (H), full-state request (R), full snapshot (F), and component delta (D).
 - State synchronization remains component-based through RegisterStateComponent, SendDelta, and RequestFullSync.
 - Registered synchronized components remain exactly session, quests, and instructions.
@@ -56,8 +56,9 @@
 - The addon post-processes pfQuest's existing tracker; pfQuest source remains untouched.
 - Only compatible current party peers are displayed, in party-slot order.
 - Numeric questID is matched first and remains authoritative; title fallback is unresolved-ID compatibility only.
-- Binary objectives append class icon plus check/cross status per compatible peer.
-- Count objectives add one class-icon/name/progress row per compatible peer; a missing matching count objective displays --.
+- Binary objectives append class icon plus check/cross status for compatible peers who currently have the tracked quest; the overlay is independent of Guide/Tourist mode.
+- A compatible PFQG peer who does not have the tracked quest contributes no class icon/status for that quest.
+- Count objectives add one class-icon/name/progress row per compatible peer who has the tracked quest; a missing matching objective within an otherwise matched quest displays --.
 - Reusable tracker regions are hidden/restored as peers change and tracker dimensions are recalculated.
 
 ### Guide / Tourist Session and Instructions
@@ -103,15 +104,21 @@
 - 5c142f5174d8d0d30ea544e09958bd43466e83fe — final Phase 5a instruction-window state.
 - 6193dc5be9aaaefb85aebe5c711bb946560416b4 — Phase 5b disparity presentation/controls.
 - bfe9b578802bf87ed418cb3c329684acfe787825 — Phase 6 integration/state-recovery hardening.
+- 5a9de26b4978bb943cef371cc27b5886e74a2884 — replace invalid Vanilla addon-message WHISPER transport with PARTY transport; version 0.1.9-dev.
+- a736701f8bb26af2309a415b6885aa7cce52e313 — hide Group Progress status for compatible peers without the tracked quest; version 0.1.10-dev.
 
 ## Validation State
 
 ### Completed / User-Verified
 - Repository, product direction, and staged development plan were confirmed by the user.
-- Broad in-game testing has begun on 0.1.8-dev / bfe9b578802bf87ed418cb3c329684acfe787825.
-- The user reports a Lua error during that test. The exact error text/line/stack has not yet been supplied, so the defect is not yet localized and no runtime path is being marked passed on the basis of this report alone.
+- Broad in-game testing began on 0.1.8-dev / bfe9b578802bf87ed418cb3c329684acfe787825.
+- Basic Guide/Tourist behavior appears to work in that run; this is a partial runtime result, not exhaustive validation of every session/instruction/recovery path.
+- The reported Lua error is localized to aux-addon's ChatThrottleLib rejecting pfQuest_Group's SendAddonMessage(..., "WHISPER", target) path as an unknown addon chat type. WoW 1.12 addon messages support PARTY/RAID/GUILD/BATTLEGROUND; addon WHISPER was added later.
+- Group Progress also showed/was specified to show PFQG peer status only when that peer has the tracked quest; peers without the quest must be omitted.
 
 ### Implemented / Awaiting Runtime Test
+- 0.1.10-dev delta: all addon transport uses the Vanilla-supported PARTY addon channel; no four-argument addon-WHISPER send remains.
+- 0.1.10-dev delta: Group Progress filters compatible peers per tracked quest before creating binary/count status regions, so peers without that quest are omitted while the overlay remains mode-independent.
 - Integrated Phase 1 foundation/protocol.
 - Phase 2 local/remote quest-state engine.
 - Phase 3 Group Progress tracker integration.
@@ -121,7 +128,8 @@
 - Phase 6 boot/full-state/quest-readiness/numeric-identity/instruction-recovery hardening.
 
 ### Static / Automated Checks — Exact Phase 6 Addon State
-Exact addon-affecting commit: bfe9b578802bf87ed418cb3c329684acfe787825.
+Exact original Phase 6 test commit: bfe9b578802bf87ed418cb3c329684acfe787825.
+Current addon-affecting retest commit: a736701f8bb26af2309a415b6885aa7cce52e313.
 - pfQuest_Group.lua blob: 2aeb9ed756936f27d3c69f341fa8acf437782182.
 - locales/enUS.lua blob: 0122994a3bd10ef5d0202dc6794d0c7bd32c7655 (unchanged from Phase 5b).
 - pfQuest_Group.toc blob: 0a19ef766fb6453a2967bb8ed91a7ec574f563e7.
@@ -133,7 +141,7 @@ Exact addon-affecting commit: bfe9b578802bf87ed418cb3c329684acfe787825.
 - Ownership check: exactly one session component registration, one quests component registration, one instructions component registration, one Addon.SetMode definition, and one Guide/Tourist window initializer.
 - UI structural count is unchanged from Phase 5b: 5 CreateFrame, 5 CreateFontString, and 3 CreateTexture call sites.
 - Static later-Lua/API scan passed for the exact committed source: no string.match, string.gmatch, table.unpack, select(, RegisterAddonMessagePrefix, C_QuestLog, C_ChatInfo, or C_Timer tokens.
-- Token-level local scan of the exact committed source: 144 actual top-level locals, all uniquely named, leaving 56 below Lua 5.0.3's 200-local top-level chunk limit. The highest scanned inner-function local/parameter/loop-variable pressure is about 25. This excludes the 200-local cap as the likely cause of the reported runtime error, but remains a static scan rather than a canonical Lua 5.0.3 compiler proof.
+- Token-level local scan of the original 0.1.8 source found 144 actual top-level locals. The 0.1.9 transport change renames one top-level local function without changing that count, and the 0.1.10 tracker change adds only one inner-function local; current top-level pressure therefore remains 144, leaving 56 below Lua 5.0.3's 200-local top-level chunk limit. The affected tracker function remains far below 200 locals.
 - Focused Phase 6 mocked integration harness passed texluac -p and runtime assertions under the available Lua 5.3.6 texluac/texlua environment. Coverage: session-first full snapshots; first-known/restarted boot invalidation and recovery; quest readiness/revision handling; numeric-ID-authoritative matching; cross-session instruction-full rejection; missed-instruction cursor resync; instruction validation before cursor mutation; instruction-delta-before-session-delta ordering.
 
 ### Checks Not Actually Runnable
@@ -142,28 +150,29 @@ Exact addon-affecting commit: bfe9b578802bf87ed418cb3c329684acfe787825.
 - No in-game testing has been performed.
 
 ### Current Issues / Validation Debt
-- Runtime failure observed: the user reports a Lua error on 0.1.8-dev / bfe9b578802bf87ed418cb3c329684acfe787825 during the broad test. Exact error text/line/stack is still needed before changing addon code.
-- Static triage does not indicate the Lua 5.0.3 200-local cap: the exact source has 144 top-level locals; the largest scanned inner-function local pressure is about 25.
-- No obvious later-Lua syntax/API blacklist hit was found in the exact source, and the registered QUEST_WATCH_UPDATE / QUEST_FINISHED events are valid Vanilla-era events.
-- The exact current runtime still lacks the canonical Lua 5.0.3 compiler pass because of connector/executable-environment separation.
-- The exact current full file also lacks an executable-environment Lua 5.3.6 parser smoke for the same reason.
-- No addon-affecting fix has been made yet because the demonstrated runtime failure has not been localized.
+- The 0.1.8 runtime transport defect is fixed in 0.1.9+: there is now exactly one SendAddonMessage call and it uses the three-argument PARTY form. Focused in-game retest is still required.
+- The Group Progress no-quest status defect/requirement is fixed in 0.1.10-dev by filtering peers through the matched remote quest before rendering status. Focused in-game retest is still required.
+- Static triage excludes the Lua 5.0.3 200-local cap as the reported error source; current top-level pressure remains 144.
+- No obvious later-Lua syntax/API blacklist hit is present in the current source.
+- Canonical Lua 5.0.3 compiler check remains not run against 0.1.10-dev: the connected GitHub source is not mounted in the executable environment, and direct network cloning from the executable environment is unavailable.
+- No release/promotion decision should be made until the 0.1.10-dev runtime retest confirms these fixes and the remaining broad-test points are reconciled.
 
 ## Testing
 
 ### Last Runtime Test
 - Version/commit: 0.1.8-dev / bfe9b578802bf87ed418cb3c329684acfe787825.
-- Passed: no point is being marked passed yet from the available report.
-- Failed: at least one Lua error occurred during the broad in-game test; exact error text/line/stack not yet supplied.
-- Not yet reconciled: the remaining broad-test points (startup/discovery, Group Progress, Guide/Tourist pairing, instructions, disparities, reload/recovery, party churn, window persistence, Off cleanup) until the user's point-by-point results are available.
+- Passed/appears good: basic Guide/Tourist behavior appeared to work during the run.
+- Failed: addon communications hit `Interface\\AddOns\\aux-addon\\libs\\ChatThrottleLib.lua:261: unknown addon chat type`, localized to pfQuest_Group using addon-message WHISPER, which is unsupported in WoW 1.12.
+- Failed/behavior correction: Group Progress must not render a PFQG peer's class icon/status when that peer does not have the tracked quest.
+- Not yet reconciled: exhaustive instruction/recovery paths, disparities, reload/restart recovery, party churn, window persistence, Off cleanup, and the remainder of Group Progress.
 
 ### Next Runtime Test
-First capture the exact Lua error text, file/line and stack from the 0.1.8-dev / bfe9b578802bf87ed418cb3c329684acfe787825 run. Localize and fix only that demonstrated defect with normal version discipline, then resume/repeat the affected broad-test point before continuing release-readiness evaluation.
+Run 0.1.10-dev / a736701f8bb26af2309a415b6885aa7cce52e313. Verify: (1) party discovery/sync and reload/recovery produce no ChatThrottleLib `unknown addon chat type` error; (2) Guide/Tourist basic behavior still works; (3) the pfQuest tracker tick/cross overlay remains active independent of mode for compatible peers who have the quest; (4) a compatible PFQG peer without the tracked quest shows no class icon/status for that quest.
 
 ## Planned / Next Work
-1. Obtain the exact Lua error text/file/line/stack from the user's 0.1.8-dev broad test.
-2. Localize and fix only the demonstrated defect, with a required dev version bump for any addon-affecting revision.
-3. Re-test the affected runtime path, then reconcile the rest of the broad-test results point by point.
+1. User performs the focused 0.1.10-dev retest for communications, basic Guide/Tourist behavior, and Group Progress peer filtering.
+2. Fix only defects demonstrated by that retest, with normal version discipline.
+3. Reconcile the remaining broad-test results point by point.
 4. After a known-good runtime state exists, review release/promotion readiness separately; do not treat development checks as a runtime test.
 
 ## Deferred / Out of Scope
@@ -178,4 +187,4 @@ First capture the exact Lua error text, file/line and stack from the 0.1.8-dev /
 - External/runtime prerequisite: pfQuest.
 
 ## Exact Next Step
-Capture the exact Lua error text, file/line and stack from the broad test of 0.1.8-dev (addon-affecting commit bfe9b578802bf87ed418cb3c329684acfe787825). Do not change addon code until that demonstrated failure is localized; do not begin unrelated feature work or promote to main.
+Test 0.1.10-dev / a736701f8bb26af2309a415b6885aa7cce52e313 in game, starting with communications/reload, Guide/Tourist, and pfQuest tracker peer-status filtering. Do not begin unrelated feature work or promote to main before this retest is reconciled.
