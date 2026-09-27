@@ -35,6 +35,14 @@ local pendingAccept = nil
 local pendingTurnin = nil
 local pendingAbandon = nil
 local touristPendingInstructions = {}
+local guideTouristUI = {
+  frame = nil,
+  title = nil,
+  rows = {},
+  completing = {},
+  completionDuration = 0.9,
+  sessionKey = nil
+}
 
 local function SafeString(value)
   if value == nil then
@@ -384,6 +392,41 @@ local function NormalizeInstructionStore(store, session)
   return store
 end
 
+local function NormalizeUIState(state)
+  local validPoints = {
+    TOPLEFT = true,
+    TOP = true,
+    TOPRIGHT = true,
+    LEFT = true,
+    CENTER = true,
+    RIGHT = true,
+    BOTTOMLEFT = true,
+    BOTTOM = true,
+    BOTTOMRIGHT = true
+  }
+  local window
+
+  if type(state) ~= "table" then
+    state = {}
+  end
+
+  if type(state.guideWindow) ~= "table" then
+    state.guideWindow = {}
+  end
+
+  window = state.guideWindow
+  if not validPoints[window.point] then
+    window.point = "CENTER"
+  end
+  if not validPoints[window.relativePoint] then
+    window.relativePoint = window.point
+  end
+  window.x = tonumber(window.x) or 0
+  window.y = tonumber(window.y) or 0
+
+  return state
+end
+
 local function InitializeDatabase()
   if type(pfQuest_GroupDB) ~= "table" then
     pfQuest_GroupDB = {}
@@ -392,6 +435,7 @@ local function InitializeDatabase()
   pfQuest_GroupDB.schema = DB_SCHEMA_VERSION
   pfQuest_GroupDB.session = NormalizeSession(pfQuest_GroupDB.session)
   pfQuest_GroupDB.instructions = NormalizeInstructionStore(pfQuest_GroupDB.instructions, pfQuest_GroupDB.session)
+  pfQuest_GroupDB.ui = NormalizeUIState(pfQuest_GroupDB.ui)
   touristPendingInstructions = {}
   Addon.db = pfQuest_GroupDB
 end
@@ -2783,6 +2827,275 @@ local function HandleInstructionQuestAction(actionType, quest, context)
   Emit("TOURIST_INSTRUCTIONS_CHANGED", Addon.GetTouristInstructions())
 end
 
+
+local function GuideTouristInstructionText(instruction)
+  if instruction and instruction.questTitle and instruction.questTitle ~= "" then
+    return instruction.questTitle
+  end
+
+  return string.format(L.QUEST_ID_FALLBACK or "Quest %d", tonumber(instruction and instruction.questID) or 0)
+end
+
+local function EnsureGuideTouristRow(index)
+  local row = guideTouristUI.rows[index]
+
+  if row then
+    return row
+  end
+
+  row = {}
+  row.frame = CreateFrame("Frame", nil, guideTouristUI.frame)
+  row.frame:SetWidth(264)
+  row.frame:SetHeight(20)
+
+  row.marker = row.frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+  row.marker:SetPoint("LEFT", row.frame, "LEFT", 0, 0)
+  row.marker:SetWidth(18)
+  row.marker:SetHeight(20)
+  row.marker:SetJustifyH("CENTER")
+  row.marker:SetTextColor(1, 0.82, 0)
+
+  row.text = row.frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+  row.text:SetPoint("LEFT", row.marker, "RIGHT", 4, 0)
+  row.text:SetWidth(238)
+  row.text:SetHeight(20)
+  row.text:SetJustifyH("LEFT")
+  row.text:SetTextColor(1, 1, 1)
+
+  row.strike = row.frame:CreateTexture(nil, "OVERLAY")
+  row.strike:SetPoint("LEFT", row.text, "LEFT", 0, 0)
+  row.strike:SetHeight(1)
+  row.strike:SetTexture(1, 0.82, 0)
+  row.strike:Hide()
+
+  guideTouristUI.rows[index] = row
+  return row
+end
+
+local function SaveGuideTouristWindowPosition()
+  local state
+  local point
+  local relativePoint
+  local x
+  local y
+
+  if not Addon.db or not guideTouristUI.frame then
+    return
+  end
+
+  Addon.db.ui = NormalizeUIState(Addon.db.ui)
+  state = Addon.db.ui.guideWindow
+  point, _, relativePoint, x, y = guideTouristUI.frame:GetPoint()
+  state.point = point or "CENTER"
+  state.relativePoint = relativePoint or state.point
+  state.x = tonumber(x) or 0
+  state.y = tonumber(y) or 0
+end
+
+local function RefreshGuideTouristWindow()
+  local session = Addon.GetSession()
+  local instructions
+  local display = {}
+  local present = {}
+  local sessionKey
+  local index
+  local seq
+  local completion
+  local row
+  local entry
+  local title
+
+  if not guideTouristUI.frame then
+    return
+  end
+
+  if not session or session.mode == "OFF" then
+    guideTouristUI.completing = {}
+    guideTouristUI.sessionKey = nil
+    for index = 1, table.getn(guideTouristUI.rows) do
+      guideTouristUI.rows[index].frame:Hide()
+    end
+    guideTouristUI.frame:Hide()
+    return
+  end
+
+  sessionKey = session.mode .. ":" .. SafeString(session.guideName) .. ":" .. SafeString(session.guideSessionId)
+  if guideTouristUI.sessionKey ~= sessionKey then
+    guideTouristUI.completing = {}
+    guideTouristUI.sessionKey = sessionKey
+  end
+
+  if session.mode == "GUIDE" then
+    title = L.WINDOW_TITLE_GUIDE or "Guide"
+    instructions = Addon.GetGuideInstructions()
+  else
+    title = string.format(L.WINDOW_TITLE_TOURIST or "Tourist: %s", SafeString(session.guideName))
+    instructions = Addon.GetTouristInstructions()
+  end
+
+  guideTouristUI.title:SetText(title)
+
+  for index = 1, table.getn(instructions) do
+    entry = {
+      instruction = instructions[index],
+      completing = false
+    }
+    table.insert(display, entry)
+    present[tonumber(instructions[index].seq) or 0] = true
+  end
+
+  if session.mode == "TOURIST" then
+    for seq, completion in pairs(guideTouristUI.completing) do
+      if not present[seq] then
+        table.insert(display, {
+          instruction = completion.instruction,
+          completing = true,
+          completion = completion
+        })
+      end
+    end
+  end
+
+  table.sort(display, function(left, right)
+    return (tonumber(left.instruction and left.instruction.seq) or 0) < (tonumber(right.instruction and right.instruction.seq) or 0)
+  end)
+
+  for index = 1, table.getn(display) do
+    entry = display[index]
+    row = EnsureGuideTouristRow(index)
+    row.seq = tonumber(entry.instruction and entry.instruction.seq) or 0
+    row.frame:ClearAllPoints()
+    row.frame:SetPoint("TOPLEFT", guideTouristUI.frame, "TOPLEFT", 8, -28 - ((index - 1) * 20))
+    row.marker:SetText(entry.instruction and entry.instruction.actionType == "ACCEPT" and "!" or "?")
+    row.text:SetText(GuideTouristInstructionText(entry.instruction))
+    row.frame:SetAlpha(1)
+
+    if entry.completing then
+      row.strike:SetWidth(math.min(row.text:GetStringWidth(), 238))
+      row.strike:Show()
+      entry.completion.row = row
+    else
+      row.strike:Hide()
+    end
+
+    row.frame:Show()
+  end
+
+  for index = table.getn(display) + 1, table.getn(guideTouristUI.rows) do
+    guideTouristUI.rows[index].frame:Hide()
+  end
+
+  guideTouristUI.frame:SetHeight(34 + (table.getn(display) * 20))
+  guideTouristUI.frame:Show()
+end
+
+local function HandleTouristInstructionCompleted(instruction)
+  local session = Addon.GetSession()
+  local seq = tonumber(instruction and instruction.seq)
+
+  if not session or session.mode ~= "TOURIST" or not seq then
+    return
+  end
+
+  guideTouristUI.completing[seq] = {
+    instruction = CopyInstruction(instruction),
+    started = GetTime(),
+    row = nil
+  }
+  RefreshGuideTouristWindow()
+end
+
+local function UpdateGuideTouristCompletion()
+  local now
+  local seq
+  local completion
+  local elapsed
+  local alpha
+  local changed = false
+
+  if not guideTouristUI.frame or not next(guideTouristUI.completing) then
+    return
+  end
+
+  now = GetTime()
+  for seq, completion in pairs(guideTouristUI.completing) do
+    elapsed = now - (tonumber(completion.started) or now)
+    if elapsed >= guideTouristUI.completionDuration then
+      guideTouristUI.completing[seq] = nil
+      changed = true
+    elseif completion.row and completion.row.seq == seq then
+      if elapsed <= 0.25 then
+        alpha = 1
+      else
+        alpha = 1 - ((elapsed - 0.25) / (guideTouristUI.completionDuration - 0.25))
+        if alpha < 0 then
+          alpha = 0
+        end
+      end
+      completion.row.frame:SetAlpha(alpha)
+    end
+  end
+
+  if changed then
+    RefreshGuideTouristWindow()
+  end
+end
+
+local function InitializeGuideTouristWindow()
+  local state
+
+  if guideTouristUI.frame or not Addon.db then
+    return
+  end
+
+  Addon.db.ui = NormalizeUIState(Addon.db.ui)
+  state = Addon.db.ui.guideWindow
+
+  guideTouristUI.frame = CreateFrame("Frame", "pfQuest_GroupGuideTouristFrame", UIParent)
+  guideTouristUI.frame:SetWidth(280)
+  guideTouristUI.frame:SetHeight(34)
+  guideTouristUI.frame:SetFrameStrata("DIALOG")
+  guideTouristUI.frame:SetMovable(true)
+  guideTouristUI.frame:EnableMouse(true)
+  guideTouristUI.frame:RegisterForDrag("LeftButton")
+  guideTouristUI.frame:SetBackdrop({
+    bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+    edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+    tile = true,
+    tileSize = 16,
+    edgeSize = 12,
+    insets = {
+      left = 3,
+      right = 3,
+      top = 3,
+      bottom = 3
+    }
+  })
+  guideTouristUI.frame:SetBackdropColor(0, 0, 0, 0.9)
+  guideTouristUI.frame:SetBackdropBorderColor(0.45, 0.45, 0.45, 1)
+  guideTouristUI.frame:SetPoint(state.point, UIParent, state.relativePoint, state.x, state.y)
+
+  guideTouristUI.title = guideTouristUI.frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+  guideTouristUI.title:SetPoint("TOPLEFT", guideTouristUI.frame, "TOPLEFT", 10, -9)
+  guideTouristUI.title:SetPoint("TOPRIGHT", guideTouristUI.frame, "TOPRIGHT", -10, -9)
+  guideTouristUI.title:SetHeight(16)
+  guideTouristUI.title:SetJustifyH("LEFT")
+  guideTouristUI.title:SetTextColor(1, 0.82, 0)
+
+  guideTouristUI.frame:SetScript("OnDragStart", function()
+    guideTouristUI.frame:StartMoving()
+  end)
+  guideTouristUI.frame:SetScript("OnDragStop", function()
+    guideTouristUI.frame:StopMovingOrSizing()
+    SaveGuideTouristWindowPosition()
+  end)
+  guideTouristUI.frame:SetScript("OnUpdate", function()
+    UpdateGuideTouristCompletion()
+  end)
+
+  RefreshGuideTouristWindow()
+end
+
 local function SessionStatusText()
   local session = Addon.GetSession()
 
@@ -2859,6 +3172,10 @@ Addon.RegisterListener("REMOTE_QUEST_STATE_CHANGED", RefreshGroupProgress)
 Addon.RegisterListener("PEER_STATUS", RefreshGroupProgress)
 Addon.RegisterListener("PEER_LEFT", RefreshGroupProgress)
 Addon.RegisterListener("PARTY_CHANGED", RefreshGroupProgress)
+Addon.RegisterListener("SESSION_CHANGED", RefreshGuideTouristWindow)
+Addon.RegisterListener("GUIDE_INSTRUCTIONS_CHANGED", RefreshGuideTouristWindow)
+Addon.RegisterListener("TOURIST_INSTRUCTIONS_CHANGED", RefreshGuideTouristWindow)
+Addon.RegisterListener("TOURIST_INSTRUCTION_COMPLETED", HandleTouristInstructionCompleted)
 
 
 SLASH_PFQUESTGROUP1 = "/pfqgroup"
@@ -2884,6 +3201,7 @@ frame:SetScript("OnEvent", function()
     InitializeDatabase()
     InstallQuestActionHooks()
     InstallGroupProgressTracker()
+    InitializeGuideTouristWindow()
     initialized = true
     RefreshParty()
     return
