@@ -3209,7 +3209,38 @@ end
 local function GuideTouristInstructionText(instruction)
   local text
   local marker = instruction and instruction.actionType == "ACCEPT" and "!" or "?"
-  local npcName = SafeString(instruction and instruction.npcName)
+  local npcName = Trim(SafeString(instruction and instruction.npcName))
+  local shortNPC = npcName
+  local initials = ""
+  local startAt
+  local spaceAt
+  local word
+  local lastWord
+
+  if string.len(npcName) > 18 then
+    startAt = 1
+    while startAt <= string.len(npcName) do
+      spaceAt = string.find(npcName, " ", startAt)
+      if not spaceAt then
+        lastWord = string.sub(npcName, startAt)
+        break
+      end
+
+      word = string.sub(npcName, startAt, spaceAt - 1)
+      if word ~= "" then
+        initials = initials .. string.sub(word, 1, 1) .. "."
+      end
+
+      startAt = spaceAt + 1
+      while startAt <= string.len(npcName) and string.sub(npcName, startAt, startAt) == " " do
+        startAt = startAt + 1
+      end
+    end
+
+    if initials ~= "" and lastWord and lastWord ~= "" then
+      shortNPC = initials .. " " .. lastWord
+    end
+  end
 
   if instruction and instruction.questTitle and instruction.questTitle ~= "" then
     text = instruction.questTitle
@@ -3217,11 +3248,11 @@ local function GuideTouristInstructionText(instruction)
     text = string.format(L.QUEST_ID_FALLBACK or "Quest %d", tonumber(instruction and instruction.questID) or 0)
   end
 
-  if npcName ~= "" then
-    return string.format(L.INSTRUCTION_WITH_NPC or "%s (%s) %s", npcName, marker, text)
+  if shortNPC ~= "" then
+    return string.format(L.INSTRUCTION_WITH_NPC or "%s |cffffd100%s|r %s", shortNPC, marker, text)
   end
 
-  return string.format(L.INSTRUCTION_WITHOUT_NPC or "(%s) %s", marker, text)
+  return string.format(L.INSTRUCTION_WITHOUT_NPC or "|cffffd100%s|r %s", marker, text)
 end
 
 local function GuideInstructionAllTouristsComplete(session, instruction)
@@ -3591,6 +3622,7 @@ local function RefreshGuideTouristWindow()
     row.frame:SetPoint("TOPLEFT", guideTouristUI.frame, "TOPLEFT", 8, -28 - ((index - 1) * 20))
     row.frame:SetAlpha(1)
     row.marker:SetTextColor(1, 0.82, 0)
+    row.marker:SetWidth(18)
     row.text:SetTextColor(1, 1, 1)
     row.text:SetWidth(238)
     row.strike:Hide()
@@ -3620,6 +3652,7 @@ local function RefreshGuideTouristWindow()
     else
       row.seq = tonumber(entry.instruction and entry.instruction.seq) or 0
       row.marker:SetText("")
+      row.marker:SetWidth(0)
       row.text:SetText(GuideTouristInstructionText(entry.instruction))
 
       if session.mode == "TOURIST" and not entry.completing then
