@@ -2104,6 +2104,10 @@ local function ApplyGroupProgressToButton(button, captureBase)
   local localClassName
   local localClassToken
   local localName
+  local heldNeed
+  local heldRows
+  local heldIndex
+  local heldParticipant
 
   if not button then
     return
@@ -2154,7 +2158,59 @@ local function ApplyGroupProgressToButton(button, captureBase)
       objective:SetPoint("TOPLEFT", 20, -fontSize * lineCount - 6)
 
       required = tonumber(localObjective.required) or 1
-      if required <= 1 then
+      heldNeed = Addon.FindGroupHoldNeed and Addon.FindGroupHoldNeed(localQuest, objectiveIndex) or nil
+
+      if heldNeed then
+        objective:SetText("|cffffffff- " .. SafeString(localObjective.text) .. "|r")
+        objective:SetTextColor(1, 1, 1)
+        objective:SetPoint("TOPRIGHT", -10, -fontSize * lineCount - 6)
+
+        row = EnsureCountGroupRow(button, objectiveIndex, 0)
+        lineCount = lineCount + 1
+
+        row.icon:ClearAllPoints()
+        row.icon:SetPoint("TOPLEFT", button, "TOPLEFT", 32, -fontSize * lineCount - 6)
+        row.icon:SetWidth(iconSize)
+        row.icon:SetHeight(iconSize)
+        SetGroupClassIcon(row.icon, localClassToken)
+        row.icon:Show()
+
+        row.text:ClearAllPoints()
+        row.text:SetPoint("TOPLEFT", button, "TOPLEFT", 44, -fontSize * lineCount - 6)
+        row.text:SetPoint("TOPRIGHT", button, "TOPRIGHT", -10, -fontSize * lineCount - 6)
+        CopyGroupTrackerFont(objective, row.text, fontSize)
+        row.text:SetText(
+          "|cff" .. GroupClassColorHex(localClassToken) .. SafeString(localName) .. ":|r "
+          .. Addon.GroupHoldProgressText(localObjective)
+        )
+        row.text:SetTextColor(1, 1, 1)
+        row.text:Show()
+
+        heldRows = Addon.GetGroupHoldParticipantRows(heldNeed)
+        for heldIndex = 1, table.getn(heldRows) do
+          heldParticipant = heldRows[heldIndex]
+          row = EnsureCountGroupRow(button, objectiveIndex, heldIndex)
+          lineCount = lineCount + 1
+
+          row.icon:ClearAllPoints()
+          row.icon:SetPoint("TOPLEFT", button, "TOPLEFT", 32, -fontSize * lineCount - 6)
+          row.icon:SetWidth(iconSize)
+          row.icon:SetHeight(iconSize)
+          SetGroupClassIcon(row.icon, heldParticipant.classToken)
+          row.icon:Show()
+
+          row.text:ClearAllPoints()
+          row.text:SetPoint("TOPLEFT", button, "TOPLEFT", 44, -fontSize * lineCount - 6)
+          row.text:SetPoint("TOPRIGHT", button, "TOPRIGHT", -10, -fontSize * lineCount - 6)
+          CopyGroupTrackerFont(objective, row.text, fontSize)
+          row.text:SetText(
+            "|cff" .. GroupClassColorHex(heldParticipant.classToken) .. SafeString(heldParticipant.name) .. ":|r "
+            .. Addon.GroupHoldProgressText(heldParticipant.objective)
+          )
+          row.text:SetTextColor(1, 1, 1)
+          row.text:Show()
+        end
+      elseif required <= 1 then
         objective:SetText(string.gsub(objective.pfqGroupBaseText or objective:GetText() or "", "%s*[%d]+%s*/%s*[%d]+%s*$", ""))
 
         remoteStatusWidth = table.getn(peersInOrder) * pairWidth
@@ -2673,6 +2729,39 @@ function Addon.BuildGroupHoldNeeds()
   end)
 
   return output
+end
+
+function Addon.FindGroupHoldNeed(quest, objectiveIndex)
+  local needs = Addon.groupHoldNeeds or {}
+  local index
+  local need
+  local localID
+  local needID
+  local matches
+
+  objectiveIndex = tonumber(objectiveIndex)
+  if not quest or not objectiveIndex then
+    return nil
+  end
+
+  localID = tonumber(quest.questID)
+  for index = 1, table.getn(needs) do
+    need = needs[index]
+    if need and tonumber(need.objectiveIndex) == objectiveIndex and need.quest then
+      needID = tonumber(need.quest.questID)
+      if localID and needID then
+        matches = localID == needID
+      else
+        matches = SafeString(quest.title) ~= "" and SafeString(quest.title) == SafeString(need.quest.title)
+      end
+
+      if matches then
+        return need
+      end
+    end
+  end
+
+  return nil
 end
 
 function Addon.GetGroupHoldParticipantRows(need)
@@ -4558,6 +4647,17 @@ end
 local function GuideInstructionAllTouristsComplete(session, instruction)
   local seq = tonumber(instruction and instruction.seq)
   local store = Addon.db and Addon.db.instructions
+  local guideKey
+  local eligible = 0
+  local completed = 0
+  local partyIndex
+  local unit
+  local name
+  local normalized
+  local member
+  local peer
+  local remoteSession
+  local completionState
 
   if not session
     or session.mode ~= "GUIDE"
@@ -4568,7 +4668,49 @@ local function GuideInstructionAllTouristsComplete(session, instruction)
     return false
   end
 
-  return store.guideCompleted and store.guideCompleted[seq] and true or false
+  if store.guideCompleted and store.guideCompleted[seq] then
+    return true
+  end
+
+  -- Fresh schema-2+ instructions have a fixed durable eligibility cohort.
+  -- Only historical rows whose eligibility could not be reconstructed use
+  -- the legacy live-party completion fallback.
+  if store.guideEligibilityKnown and store.guideEligibilityKnown[seq] then
+    return false
+  end
+
+  guideKey = NormalizeName(playerName)
+  for partyIndex = 1, 4 do
+    unit = "party" .. partyIndex
+    if UnitExists(unit) then
+      name = UnitName(unit)
+      normalized = NormalizeName(name)
+      member = normalized and party[normalized]
+      peer = normalized and peers[normalized]
+      remoteSession = peer and peer.session
+
+      if member
+        and peer
+        and peer.compatible
+        and remoteSession
+        and remoteSession.mode == "TOURIST"
+        and NormalizeName(remoteSession.guideName) == guideKey
+        and remoteSession.guideSessionId == session.guideSessionId
+        and remoteSession.joinBaseline ~= nil
+        and seq > remoteSession.joinBaseline then
+        eligible = eligible + 1
+        completionState = peer.instructionCompletions
+        if completionState
+          and completionState.sessionId == session.guideSessionId
+          and completionState.consumed
+          and completionState.consumed[seq] then
+          completed = completed + 1
+        end
+      end
+    end
+  end
+
+  return eligible > 0 and completed == eligible
 end
 
 local function GuideDisparityKey(peerName, quest)
