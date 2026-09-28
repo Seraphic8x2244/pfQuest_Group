@@ -2,11 +2,11 @@
 
 ## Current
 - Branch: dev.
-- Version: 0.1.23-dev from pfQuest_Group.toc.
-- Latest addon-affecting development commit: 3674229c012e6a6eab7c93d87542661d08b9b545 — harden the count-objective player-row redesign introduced in 0.1.22-dev, including self-first rows and per-player pfQuest-derived count colours.
+- Version: 0.1.24-dev from pfQuest_Group.toc.
+- Latest addon-affecting development commit: 01ec7eec406ecf3a9960149aac80dbbdcb653deb — 0.1.24-dev dormant persisted Guide lifecycle plus schema-2 durable Guide-side instruction eligibility/acknowledgement/completion persistence.
 - Handoff checkpoint: the current dev head carrying this status file; always verify the actual remote branch head before resuming.
 - Stable baseline: None. main remains exactly bootstrap commit 4c5c63f074923266566c36c51ce2718d0060166f and is not a runtime release.
-- Goal: implement the newly accepted Guide lifecycle/completion semantics and PFQG group-held objective tracking on top of 0.1.23-dev, then runtime-validate those changes together with the still-pending Tourist Done/NPC/count-row work before resuming the broad matrix.
+- Goal: implement PFQG group-held objective tracking on top of the completed 0.1.24-dev dormant/durable Guide lifecycle slice, then runtime-validate both slices together with the still-pending Tourist Done/NPC/count-row work before resuming the broad matrix.
 - Scope boundary: the user explicitly requested post-Phase-6 refinements through the existing owners: Guide reverse-completion feedback (0.1.16+), Tourist manual Done for stale already-completed instructions (0.1.18+), instruction NPC presentation (0.1.19-0.1.21), count-objective Group Progress redesign (0.1.22-0.1.23), dormant persisted Guide sessions, durable Guide-side instruction completion, and PFQG-owned group-held objective/map tracking after a local player finishes. Other remote-member/binary tracker polish remains deferred unless explicitly requested.
 
 ## Current Design / Development Contract
@@ -31,7 +31,7 @@
 - Group Progress is independent of Guide/Tourist mode.
 
 ### Protocol / Peer State
-- Protocol prefix: PFQGROUP; protocol version: 2; SavedVariables schema: 1. Protocol v2 is deliberate because Tourist -> Guide instruction-completion acknowledgements extend the instructions-component wire semantics; v1 peers are rejected rather than silently behaving as non-acknowledging Tourists.
+- Protocol prefix: PFQGROUP; protocol version: 2; SavedVariables schema: 2. Protocol v2 remains sufficient because Tourist full/delta instruction-completion payloads already carry the durable consumed set; schema 2 adds only Guide-local persisted eligibility/acknowledgement/completion metadata. v1 peers remain rejected.
 - Only actual current party members participate; discovery scans party1 through party4.
 - Transport remains native Vanilla SendAddonMessage over PARTY. WoW 1.12 SendAddonMessage does not support WHISPER; logical directed recovery validates the requested party peer but uses the PARTY addon channel.
 - Wire types remain HELLO (H), full-state request (R), full snapshot (F), and component delta (D).
@@ -87,12 +87,12 @@
 - Tourist consumed sequence state remains persisted in the Phase 4b instruction store. Under protocol v2 a Tourist sends an idempotent completion delta when consuming a step and includes the consumed set in its instructions full snapshot, so missed acknowledgements can recover through the existing full-state path without a new scheduler or component.
 - Guide completion is derived only for Tourists paired to the same Guide session whose fixed joinBaseline is below that instruction sequence; Tourists who joined after the step do not block it. When all currently eligible paired Tourists have acknowledged the step, the Guide row uses the existing strike/fade/removal presentation. Acknowledgements seen by unrelated PARTY peers are ignored.
 
-### Accepted Guide Lifecycle / Durable Completion Semantics — Not Yet Implemented
-- Persisted Guide mode/session should remain stored across logout/reload so the group can resume, but the Guide presentation should be dormant whenever no Tourist bound to that same Guide session is currently present. In the dormant state the Guide window should not appear and new Guide instructions should not be generated. When a matching Tourist rejoins, the existing persisted session should wake, synchronize, and continue rather than creating a fresh Guide session.
+### Dormant Guide Lifecycle / Durable Completion — Implemented in 0.1.24-dev, Runtime Untested
+- Persisted Guide mode/session remains stored across logout/reload, but Guide presentation is now runtime-dormant whenever no Tourist bound to that same Guide session is currently present. The Guide window hides and Guide ACCEPT/TURNIN instruction creation is suppressed while dormant; a matching Tourist reuses/wakes the existing persisted session rather than creating a new one.
 - The current behavior observed by the user is the defect motivating this change: logging in solo restored active Guide mode with a very large old instruction list; when Gaia later joined the party, synchronization caused many rows to cross off. The resume/synchronization behavior is desirable, but the solo-active presentation is not.
-- Tourist completion acknowledgements remain durable per Tourist. In addition, once every Tourist who was eligible for a particular instruction has acknowledged it, the Guide must persist that instruction as completed for that Guide session. A completed Guide instruction must never reappear after reload, logout, party breakup, or regrouping within the same Guide session.
-- Eligibility for permanent Guide completion must be based on the Tourists who were eligible for that instruction, not merely Tourists currently online/present at the moment completion is evaluated. A temporarily offline eligible Tourist must not disappear from the requirement and cause premature completion. Late joiners whose fixed joinBaseline is at/after the instruction remain ineligible and must not block it.
-- Keep Phase 4a as session owner and Phase 4b as instruction/completion owner. The implementation may require persisted Guide-side eligibility/completion metadata and possibly a protocol/schema revision; decide that deliberately after inspecting current wire/store shapes rather than deriving permanent completion from transient current-party membership.
+- Tourist completion acknowledgements remain durable per Tourist. Guide-side schema-2 instruction metadata now persists each new instruction's fixed eligible Tourist cohort, per-Tourist acknowledgements, and derived completed state. Completed Guide instructions are filtered from Guide UI/full instruction snapshots so they do not reappear within the same Guide session.
+- Eligibility for permanent Guide completion is frozen when each new instruction is created from the durable Guide participant roster plus current matching Tourists. Temporarily offline eligible Tourists remain in that frozen cohort; explicit unpairing affects future instructions only; late joiners are not retroactively added.
+- Ownership remains unchanged: Phase 4a owns session identity/pairing and Phase 4b owns instruction/completion state. Protocol stays v2; SavedVariables schema is now 2 for Guide-local Phase-4b metadata. Conservative migration note: schema-1 historical instructions have no recoverable authoritative Guide roster while old eligible Tourists remain offline, so those legacy rows may accumulate provable eligibility/acks on rejoin but are intentionally not permanently finalized from incomplete reconstructed membership; fresh schema-2 instructions are authoritative.
 
 ### Guide / Tourist Window and Disparities
 - The existing compact movable Phase 5 window is the only Guide/Tourist presentation window and is shown only in Guide/Tourist mode.
@@ -267,6 +267,7 @@ Exact addon-affecting commit: 3674229c012e6a6eab7c93d87542661d08b9b545 (feature 
 ## Testing
 
 ### Latest Runtime Result
+- 0.1.24-dev / 01ec7eec406ecf3a9960149aac80dbbdcb653deb implementation checkpoint: dormant Guide UI/instruction suppression and schema-2 durable Guide eligibility/ack/completion persistence are committed. Protocol remains v2. This is code/static review only; no new in-game PASS is claimed yet. The canonical vendored Lua 5.0.3 checker is not mounted in the current executable environment and the container cannot resolve GitHub, so no canonical full-file compiler pass was run in this chat.
 - 0.1.23-dev follow-up observation before formal C/R matrix validation: the Guide logged in solo with persisted Guide mode active and a very large historical instruction list visible. When Gaia rejoined the party, synchronization resumed correctly and many already-completed rows crossed off. Treat `resume where we left off` as desirable, but the solo-visible/active Guide presentation as a demonstrated behavior to change via dormant Guide semantics; do not mark additional canonical matrix items PASS from this observation alone.
 - Version/commit: 0.1.17-dev / 4df6d0b9c1c3682e5077eaaab6b191f445aa3c16.
 - User A/B result: the mouse-movement frametime regression is resolved for PFQG; enabled frametime now feels no worse than disabled with pfQuest left enabled.
@@ -440,15 +441,15 @@ R10. **UNTESTED — Instruction NPC-name presentation.** On 0.1.21-dev create ne
 
 
 ### Next Implementation / Runtime Sequence
-1. Starting from 0.1.23-dev, inspect current Phase 4a/4b persistence and protocol wire/store shapes and implement dormant persisted Guide sessions plus durable Guide-side instruction completion without replacing existing owners.
+1. 0.1.24-dev implements dormant persisted Guide sessions and durable Guide-side completion without replacing Phase 4a/4b ownership; runtime validation is still pending.
 2. Add PFQG group-hold tracking as a separate supplemental presentation layer: shared tracker retention plus PFQG-owned objective map/minimap nodes/tooltips driven by relevant participant progress. Do not falsify local WoW/pfQuest completion.
 3. Keep the linked `Mrs Dalson's Diary` / `Outhouse` / `Locked Cabinet` anomaly deferred as a separate upstream/special-case investigation.
 4. After implementation, runtime-test dormant/wake behavior, no instruction generation while dormant, durable completion across reload/regroup/offline eligible Tourists, group-held tracker/map/minimap/tooltips, then run the still-pending C1-C5 and R8-R10 checks before returning to the broad matrix.
 
 ## Planned / Next Work
-1. Implement dormant persisted Guide semantics and durable Guide-side completion first, preserving Phase 4a/4b ownership and explicitly resolving whether protocol/schema changes are required.
-2. Implement PFQG-owned group-hold objective tracking across tracker + world map + minimap + PFQG supplemental tooltips, using real synchronized participant progress and retaining only objectives somebody relevant still needs.
-3. Runtime-test the new lifecycle/completion/group-hold behavior together with pending C1-C5 and R8-R10.
+1. Implement PFQG-owned group-hold objective tracking across tracker + world map + minimap + PFQG supplemental tooltips, using real synchronized/last-known relevant participant progress and retaining only objectives somebody relevant still needs.
+2. Runtime-test 0.1.24-dev dormant/wake behavior and durable Guide completion together with the new group-hold slice and pending C1-C5/R8-R10 checks.
+3. Fix only demonstrated defects with normal version discipline, then continue the remaining protocol-v2/broad-matrix gaps.
 4. Fix only demonstrated defects with normal version discipline, then continue the remaining protocol-v2/broad-matrix gaps.
 5. Keep the linked three-quest anomaly and unrelated binary/remote visual polish deferred until the above path is stable.
 6. After a known-good runtime state exists, review release/promotion readiness separately; do not treat development checks as a runtime test.
@@ -466,4 +467,4 @@ R10. **UNTESTED — Instruction NPC-name presentation.** On 0.1.21-dev create ne
 - External/runtime prerequisite: pfQuest.
 
 ## Exact Next Step
-From 0.1.23-dev / 3674229c012e6a6eab7c93d87542661d08b9b545, first inspect the existing session/instruction persisted stores and wire formats and implement: (a) persisted Guide session dormant with no window/new instructions until a matching Tourist is present, and (b) permanent Guide-side completion once every Tourist eligible for that instruction has durably acknowledged it, without letting an offline eligible Tourist disappear from the requirement. Then stage the PFQG group-hold tracker/map/minimap/tooltip layer. Keep the three linked-quest anomalies deferred.
+From 0.1.24-dev / 01ec7eec406ecf3a9960149aac80dbbdcb653deb, implement the Phase-2-owned persisted last-known relevant participant quest state and PFQG supplemental group-hold presentation: retain only remotely unfinished objectives after local completion, render supplemental shared tracker rows, PFQG-owned world-map/minimap objective nodes, and group-aware PFQG tooltips; keep the presentation dormant when no relevant participant is present and never falsify local WoW/pfQuest completion. Then runtime-test dormant/durable completion plus group-hold behavior. Keep the Mrs Dalson's Diary / Outhouse / Locked Cabinet investigation deferred.
