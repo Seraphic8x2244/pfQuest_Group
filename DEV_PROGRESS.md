@@ -2,12 +2,12 @@
 
 ## Current
 - Branch: dev.
-- Version: 0.1.26-dev from pfQuest_Group.toc.
-- Latest addon-affecting development commit: 4b1b1bb17b0cfbfc9e1f9864e343745f351454fa — 0.1.26-dev restores legacy Guide wake completion for pre-durable rows and renders locally-complete group-held native objectives with the group-held player-row treatment instead of the legacy binary icon strip.
+- Version: 0.1.27-dev from pfQuest_Group.toc.
+- Latest addon-affecting development commit: 1f03df4124f2e28e63c6d1ed6cab3204665a0fb5 — 0.1.27-dev persists successfully recovered pre-durable Guide completions and retires the legacy binary tick/cross strip in favor of the same objective-heading + per-player progress-row system used by count objectives.
 - Handoff checkpoint: the current dev head carrying this status file; always verify the actual remote branch head before resuming.
 - Stable baseline: None. main remains exactly bootstrap commit 4c5c63f074923266566c36c51ce2718d0060166f and is not a runtime release.
-- Goal: retest the two demonstrated 0.1.25 runtime regressions on 0.1.26-dev first, then continue the dormant/durable + GH1-GH9 cycle and pending C1-C5/R8-R10 checks.
-- Scope boundary: the user explicitly requested post-Phase-6 refinements through the existing owners: Guide reverse-completion feedback (0.1.16+), Tourist manual Done for stale already-completed instructions (0.1.18+), instruction NPC presentation (0.1.19-0.1.21), count-objective Group Progress redesign (0.1.22-0.1.23), dormant persisted Guide sessions, durable Guide-side instruction completion, and PFQG-owned group-held objective/map tracking after a local player finishes. The 0.1.26 tracker change is limited to objectives that are actually in PFQG group-hold state; unrelated binary tracker polish remains deferred.
+- Goal: runtime-verify 0.1.27 legacy-completion permanence and the unified binary/count tracker presentation, then continue dormant/durable + GH1-GH9 and pending C1-C5/R8-R10 checks.
+- Scope boundary: the user explicitly requested post-Phase-6 refinements through the existing owners: Guide reverse-completion feedback, Tourist manual Done, instruction NPC presentation, unified per-player Group Progress rows for both binary and count objectives, dormant/durable Guide sessions, and PFQG-owned group-held objective/map tracking. The old binary tick/cross + remote icon-column presentation is intentionally retired as of 0.1.27-dev.
 
 ## Current Design / Development Contract
 
@@ -56,12 +56,12 @@
 - The addon post-processes pfQuest's existing tracker; pfQuest source remains untouched.
 - Only compatible current party peers are displayed, in party-slot order.
 - Numeric questID is matched first and remains authoritative; title fallback is unresolved-ID compatibility only.
-- Binary objective conversion is always active for the local player: pfQuest's terminal numeric `0/1` / `1/1`-style token is removed and replaced by a local complete/incomplete texture even if no compatible peer has that quest. Binary rows flow inline as objective label -> local status -> remote class/status pairs. Compatible peers who have the tracked quest append class icon plus complete/incomplete status; peers without the quest append nothing. The overlay is independent of Guide/Tourist mode, and the original pfQuest text/color is retained for restoration. Status marks use Vanilla-safe Blizzard textures rather than Unicode font glyphs.
-- A compatible PFQG peer who does not have the tracked quest contributes no class icon/status for that quest.
-- Count objectives render the objective label as a heading with no inline personal fraction, then add a self row first followed by one row per compatible peer who has the tracked quest in party order. Each row keeps the class icon, renders `PlayerName:` in that player's class colour (including self), and renders `current/required` using the same pfQuest objective colour rule for that player's own progress (`pfMap.tooltip:GetColor(current, required)` brightened by 0.2 and clamped). A missing matching objective within an otherwise matched remote quest displays grey `--`.
-- Reusable tracker regions are hidden/restored as peers change and tracker dimensions are recalculated.
+- Binary and count objectives now share one presentation system. The native inline progress fraction is replaced by an objective heading, then a self row first followed by one row per compatible peer who has the tracked quest. Binary objectives therefore show per-player `0/1` or `1/1` progress instead of the retired local tick/cross plus remote class/status columns.
+- Every player row keeps the class icon, renders `PlayerName:` in that player's class colour, and renders `current/required` using the same pfQuest progress-colour rule for that player's own state (`pfMap.tooltip:GetColor(current, required)` brightened by 0.2 and clamped). A missing matching objective within an otherwise matched remote quest displays grey `--`.
+- A compatible PFQG peer who does not have the tracked quest contributes no row for that quest. Group Progress remains independent of Guide/Tourist mode.
+- Reusable tracker row regions are hidden/restored as peers change and tracker dimensions are recalculated.
 
-### PFQG Group-Hold Tracking — Implemented in 0.1.25-dev; 0.1.26 native-row correction awaiting retest
+### PFQG Group-Hold Tracking — Implemented in 0.1.25-dev; 0.1.26 native-row correction user-verified, broader GH matrix pending
 - WoW/pfQuest remains authoritative for the local player's real quest progress. Group hold never writes local questState progress/completion, Blizzard quest state, pfQuest's PFQUEST node namespace, or personal turn-in state.
 - Phase 2 now persists a session-scoped groupHold cache keyed by the active Guide session. It stores last-known ready quest snapshots for relevant same-session participants plus local seen/tracked quest identity. Live peer state is still ephemeral; a temporary disconnect leaves the last-known group-hold snapshot intact so offline unfinished participants continue to count.
 - Relevant membership is derived from the existing Phase 4a relationship: a Guide holds for Tourists bound to that Guide/session; a Tourist holds for the selected Guide and same-session sibling Tourists. Explicit session/unpair changes remove that participant from the cache; changing/leaving the local Guide session resets the cache.
@@ -91,12 +91,12 @@
 - Tourist consumed sequence state remains persisted in the Phase 4b instruction store. Under protocol v2 a Tourist sends an idempotent completion delta when consuming a step and includes the consumed set in its instructions full snapshot, so missed acknowledgements can recover through the existing full-state path without a new scheduler or component.
 - Guide completion is derived only for Tourists paired to the same Guide session whose fixed joinBaseline is below that instruction sequence; Tourists who joined after the step do not block it. When all currently eligible paired Tourists have acknowledged the step, the Guide row uses the existing strike/fade/removal presentation. Acknowledgements seen by unrelated PARTY peers are ignored.
 
-### Dormant Guide Lifecycle / Durable Completion — Implemented in 0.1.24-dev; 0.1.26 legacy-wake correction awaiting retest
+### Dormant Guide Lifecycle / Durable Completion — Implemented in 0.1.24-dev; 0.1.27 legacy-completion permanence awaiting retest
 - Persisted Guide mode/session remains stored across logout/reload, but Guide presentation is now runtime-dormant whenever no Tourist bound to that same Guide session is currently present. The Guide window hides and Guide ACCEPT/TURNIN instruction creation is suppressed while dormant; a matching Tourist reuses/wakes the existing persisted session rather than creating a new one.
 - The current behavior observed by the user is the defect motivating this change: logging in solo restored active Guide mode with a very large old instruction list; when Gaia later joined the party, synchronization caused many rows to cross off. The resume/synchronization behavior is desirable, but the solo-active presentation is not.
 - Tourist completion acknowledgements remain durable per Tourist. Guide-side schema-2 instruction metadata now persists each new instruction's fixed eligible Tourist cohort, per-Tourist acknowledgements, and derived completed state. Completed Guide instructions are filtered from Guide UI/full instruction snapshots so they do not reappear within the same Guide session.
 - Eligibility for permanent Guide completion is frozen when each new instruction is created from the durable Guide participant roster plus current matching Tourists. Temporarily offline eligible Tourists remain in that frozen cohort; explicit unpairing affects future instructions only; late joiners are not retroactively added.
-- Ownership remains unchanged: Phase 4a owns session identity/pairing and Phase 4b owns instruction/completion state. Protocol stays v2. Durable Guide completion fields were introduced in schema 2; the current SavedVariables schema is 3 only because 0.1.25 adds the separate Phase-2 group-hold cache. Fresh schema-2+ instructions remain authoritative and use only their frozen durable eligibility cohort. Schema-1 historical instructions still have no recoverable authoritative historical roster, so 0.1.26 restores the pre-durable live-party completion predicate for those legacy rows after current Tourist completion state synchronizes; that fallback is presentation/recovery only and does not weaken durable completion rules for fresh rows.
+- Ownership remains unchanged: Phase 4a owns session identity/pairing and Phase 4b owns instruction/completion state. Protocol stays v2. Fresh schema-2+ instructions remain authoritative and use only their frozen durable eligibility cohort. Schema-1 historical instructions have no recoverable authoritative historical roster; 0.1.26 restored live-party recovery for them, and 0.1.27 now persists a legacy row as completed once that recovery successfully observes every currently eligible same-session Tourist complete. Persisted completed markers are restored during normalization, so recovered rows should not replay after leave/rejoin, reload, or relog.
 
 ### Guide / Tourist Window and Disparities
 - The existing compact movable Phase 5 window is the only Guide/Tourist presentation window and is shown only in Guide/Tourist mode.
@@ -119,6 +119,7 @@
 - No Phase 4a/4b/2/5 owner was replaced or duplicated.
 
 ## Recent Relevant Commits
+- 1f03df4124f2e28e63c6d1ed6cab3204665a0fb5 — 0.1.27-dev persist recovered legacy Guide completion and migrate binary objectives to unified per-player progress rows.
 - 4b1b1bb17b0cfbfc9e1f9864e343745f351454fa — 0.1.26-dev fix for legacy Guide wake completion fallback and group-held native objective presentation.
 - e168712cccb9959646491073393df1639e00a5d5 — 0.1.25-dev persisted PFQG group-held tracker/map/minimap/tooltip guidance with schema-3 Phase-2 last-known state.
 - 01ec7eec406ecf3a9960149aac80dbbdcb653deb — 0.1.24-dev dormant persisted Guide lifecycle and durable Guide-side completion metadata.
@@ -149,6 +150,9 @@
 ## Validation State
 
 ### Completed / User-Verified
+- 0.1.26-dev runtime: after the Tourist rejoins the persisted session, the Guide historical backlog again crosses off/removes as completion state synchronizes. This confirms the live legacy recovery fallback works.
+- 0.1.26-dev runtime also exposed that recovered legacy completion was not durable: leaving and rejoining caused the full historical list to appear and cross off again. 0.1.27 targets that demonstrated persistence gap.
+- 0.1.26-dev held-objective tracker treatment is user-accepted as clean/intuitive: objective heading plus per-player progress rows. The user explicitly requested that the older binary `0/1`/tick-cross mechanic be migrated to this same presentation globally; 0.1.27 implements that migration.
 - Repository, product direction, and staged development plan were confirmed by the user.
 - Broad in-game testing began on 0.1.8-dev / bfe9b578802bf87ed418cb3c329684acfe787825.
 - Basic Guide/Tourist behavior appears to work in that run; this is a partial runtime result, not exhaustive validation of every session/instruction/recovery path.
@@ -164,6 +168,8 @@
 - Guide ACCEPT/TURNIN instruction creation passed, but NPC-name presentation remains unverified. The current instruction row renderer shows only quest title; `npcName` is still carried in instruction state when resolvable.
 
 ### Implemented / Awaiting Runtime Test
+- 0.1.27-dev legacy completion permanence: a successful pre-durable live recovery now writes `guideCompleted[seq]`, and normalization preserves stored completed markers for valid records in the same Guide session. Fresh durable instructions continue to use fixed eligibility snapshots and do not use this fallback.
+- 0.1.27-dev unified tracker rows: the dedicated binary texture/column machinery and status-width accounting are removed. Binary objectives now flow through the same reusable `pfqGroupRows` path as count objectives: objective heading, self row, then matched party rows with class icon/name and per-player numeric progress colour.
 - 0.1.26-dev regression fix: for pre-durable Guide instructions with unknown historical eligibility only, Guide completion presentation again evaluates currently paired same-session Tourists and their synchronized persisted consumed sets. Fresh schema-2+ instructions still use the fixed durable cohort and are not affected by this fallback.
 - 0.1.26-dev held-native tracker fix: when a locally-complete objective is actively held for a relevant participant, the visible native tracker objective uses the same objective-heading + self/participant row treatment as group hold, so the old local tick + remote class icon + cross strip is not shown for that held objective. Supplemental PFQG rows remain the fallback after pfQuest removes the native objective row.
 - 0.1.23-dev count-objective redesign: numeric objectives now show only `- Objective Name` on the objective line. Under it, self appears first and compatible peers follow in party order as `PlayerName: current/required`; names are class-coloured for every player including self, and each numeric progress value uses pfQuest's own `pfMap.tooltip:GetColor(current, required)` rule (with the same +0.2 brightness) based on that player's progress. Existing class icons are retained. Remote matched quests with no equivalent objective still show grey `--`. Binary objective behavior is unchanged.
@@ -262,24 +268,33 @@ Exact addon-affecting commit: 4b1b1bb17b0cfbfc9e1f9864e343745f351454fa.
 - No new top-level local was added; expected top-level pressure remains 154, leaving 46 below Lua 5.0.3's 200-local top-level chunk limit.
 - Canonical Lua 5.0.3 full-file compiler pass was not run: the GitHub connector source/checker is not mounted in the executable container and that container cannot resolve GitHub. Do not treat the static checks as a compiler or in-game pass.
 
+### Static / Automated Checks — 0.1.27-dev Unified Tracker / Legacy Persistence Delta
+Exact addon-affecting commit: 1f03df4124f2e28e63c6d1ed6cab3204665a0fb5.
+- Version discipline: passed; 0.1.26-dev -> 0.1.27-dev in the addon-affecting commit.
+- Protocol/state ownership unchanged: protocol v2, SavedVariables schema 3, and exactly three synchronized components (session/quests/instructions).
+- Transport unchanged: exactly one `SendAddonMessage` call remains.
+- Retired binary presentation artifacts are absent from the exact source: no `EnsureLocalBinaryStatus`, `EnsureBinaryGroupStatus`, `pfqGroupLocalBinary`, `pfqGroupBinary`, `pfqGroupStatusWidth`, tick texture, or cross texture remains.
+- Binary/count presentation now shares one `EnsureGroupProgressRow` constructor; matched peer filtering and party order are unchanged.
+- Legacy completion persistence is limited to successful unknown-eligibility live recovery; stored completed markers are restored only for valid records in the same Guide session.
+- Group-hold map ownership is unchanged and the source still contains no `SearchQuestID` call.
+- Later-Lua/API blacklist scan found no `string.match`, `string.gmatch`, `table.unpack`, `RegisterAddonMessagePrefix`, `C_QuestLog`, `C_ChatInfo`, `C_Timer`, or `goto` token.
+- Expected top-level local pressure is 152, 48 below Lua 5.0.3's 200-local chunk limit.
+- Canonical Lua 5.0.3 full-file compiler pass was not run because the connector-backed addon/checker files are not mounted in the executable environment.
+
 ### Checks Not Actually Runnable
 - Exact full-file Lua 5.3.6 parser smoke: not run against the committed pfQuest_Group.lua blob because GitHub connector-backed repository bytes are not materialized into the executable container.
 - Canonical Lua 5.0.3 compiler check: not run / unavailable against the exact Phase 6 blob. Seraphic8x2244/VanillaTemplate main at 6980e95476a72c47a461f7c78ce9e4f649c829f contains the canonical tools/lua50 checker and vendored Lua 5.0.3 source, and the executable environment has a working C compiler, but the private connector-backed checker/source and addon blob are not mounted into that executable environment.
 - Broad in-game testing is in progress on the exact current addon build; automated/compiler limitations above remain separate from the user runtime results.
 
 ### Current Issues / Validation Debt
-- Demonstrated 0.1.25 Guide-wake regression: after the persisted Tourist rejoined, the Guide window showed the large historical instruction backlog instead of replaying the earlier live completion reconciliation. Root cause: pre-durable rows were deliberately non-finalizable and the 0.1.24 durable path removed the old live-party completion fallback. 0.1.26 restores that fallback only for rows whose durable eligibility is unknown; runtime retest is pending.
-- Demonstrated 0.1.25 held-binary tracker regression: the top-left tracker showed a local tick followed by the Tourist Paladin class icon and remote cross on a locally-complete objective that was being held for the Tourist. 0.1.26 routes an actively held native objective through the group-held player-row presentation instead of the legacy binary icon strip; runtime retest is pending.
-- Protocol version did not change across this regression: 0.1.24/0.1.25/0.1.26 remain protocol v2. Schema 3 is only local SavedVariables state. A 0.1.24 Tourist is wire-compatible, but both clients should be updated to the exact 0.1.26 build for the retest so version skew is removed as a confounder.
-- The 0.1.8 runtime transport defect is fixed in 0.1.9+: there is now exactly one SendAddonMessage call and it uses the three-argument PARTY form. Focused in-game retest is still required.
-- The Group Progress no-quest status defect/requirement is fixed in 0.1.10+ by filtering peers through the matched remote quest before rendering status. Focused in-game retest is still required.
-- The binary objective text collision is fixed in 0.1.11+ by removing only the terminal numeric fraction in the binary overlay branch; the underlying captured pfQuest text is not destroyed. Focused in-game retest is still required.
-- The invisible binary mark defect is fixed in 0.1.12+ by replacing literal Unicode marks with Vanilla-era Blizzard textures; the screenshot confirms the remote red incomplete/cross texture is visible.
-- The 0.1.12 local binary replacement gating defect is fixed and user-verified in 0.1.13-dev: local binary status no longer depends on any peer having the quest.
-- The 0.1.13 binary-row justification defect is fixed and locally user-verified in 0.1.14-dev by placing the local status inline after the objective label. Remote-member presentation polish is deferred.
-- Static triage excludes the Lua 5.0.3 200-local cap as the reported error source; expected current top-level pressure is 154.
+- 0.1.26 live legacy Guide recovery is user-verified, but completion was demonstrated not to persist across leave/rejoin; 0.1.27 persists successful recovered completion and requires runtime verification across leave/rejoin, reload, and relog.
+- The 0.1.25 held-native tick/class-icon/cross regression is fixed and user-accepted in 0.1.26. The old binary icon-strip mechanic itself is now intentionally retired in 0.1.27 and replaced globally by per-player progress rows; the new binary presentation is runtime-untested.
+- Protocol remains v2 and SavedVariables schema remains 3; 0.1.27 changes only local persistence/presentation. Both clients should use the exact 0.1.27 build for retest.
+- The existing no-quest filtering rule remains: peers without the tracked quest must not contribute a row.
+- Historical binary icon-strip fixes from 0.1.11-0.1.14 remain useful validation history, but their presentation path no longer exists in 0.1.27 and must not be treated as validation of the new row layout.
+- Static triage excludes the Lua 5.0.3 200-local cap as the reported error source; expected current top-level pressure is 152 after removing the two retired binary helper functions.
 - No obvious later-Lua syntax/API blacklist hit is present in the current source.
-- Canonical Lua 5.0.3 compiler check remains not run against the exact 0.1.26-dev source: the connected GitHub source/checker is not mounted in the executable environment, and the executable container cannot resolve GitHub.
+- Canonical Lua 5.0.3 compiler check remains not run against the exact 0.1.27-dev source: the connected GitHub source/checker is not mounted in the executable environment, and the executable container cannot resolve GitHub.
 - Protocol-v2 reverse-completion now has partial user runtime validation on 0.1.17-dev: after both players logged in on characters with persisted Guide/Tourist modes while initially ungrouped, forming the party re-established the Guide/Tourist relationship and the Guide UI retroactively strike/fade/removed two steps the Tourist had completed previously. This demonstrates persisted completion state recovering through regroup/full-state synchronization. Live one-Tourist completion, two-Tourist gating, late-join gating, and the focused recovery variants remain separately untested unless explicitly covered below.
 - Demonstrated 0.1.17 stale-instruction defect: when the Guide later ACCEPTs/TURNINs a quest action the Tourist had already performed before the instruction existed, the Tourist has no future matching local quest event to consume that instruction, leaving a permanent Tourist row and therefore a permanent Guide row. 0.1.18-dev addresses this with explicit Tourist Done acknowledgement; runtime validation is pending.
 - Demonstrated instruction-presentation defect: Tourist rows were not showing NPC names even though `npcName` is already carried in instruction state when resolvable; the shared formatter discarded that field and returned only the quest title. 0.1.19-dev renders the stored NPC name when available; runtime validation is pending.
@@ -291,6 +306,7 @@ Exact addon-affecting commit: 4b1b1bb17b0cfbfc9e1f9864e343745f351454fa.
 ## Testing
 
 ### Latest Runtime Result
+- 0.1.26-dev runtime: Guide legacy rows clear correctly again after the Tourist rejoins and synchronization settles, but the result is not permanent; leaving/rejoining makes the historical list replay its strike/fade removal. The held-objective tracker row treatment looks correct and was explicitly preferred by the user. 0.1.27-dev / 1f03df4124f2e28e63c6d1ed6cab3204665a0fb5 persists recovered legacy completion and generalizes that clean row treatment to all binary objectives. No 0.1.27 runtime PASS is claimed yet.
 - 0.1.25-dev user runtime screenshot after the persisted Tourist rejoined demonstrated two regressions: the Guide window remained populated with a large historical instruction backlog, and a locally-complete held binary objective in the top-left tracker rendered as local tick + Paladin class icon + remote cross. The Tourist had not yet been updated to the latest addon build, but protocol remained v2 and the older build was still wire-compatible, so neither behavior is being attributed to a protocol-version mismatch. 0.1.26-dev / 4b1b1bb17b0cfbfc9e1f9864e343745f351454fa targets both observed failures; no runtime PASS is claimed yet.
 - 0.1.25-dev / e168712cccb9959646491073393df1639e00a5d5 implementation checkpoint: Phase-2 persisted last-known relevant participant quest state and PFQG supplemental group-hold tracker/world-map/minimap/tooltips are committed. Static ownership guards confirm protocol remains v2, schema is 3, synchronized components remain exactly session/quests/instructions, the group-hold block does not call SearchQuestID, does not write local questState completion/progress, and uses only the PFQGROUP map namespace. This is not an in-game PASS.
 - 0.1.24-dev / 01ec7eec406ecf3a9960149aac80dbbdcb653deb implementation checkpoint: dormant Guide UI/instruction suppression and schema-2 durable Guide eligibility/ack/completion persistence are committed. Protocol remains v2. This is code/static review only; no new in-game PASS is claimed yet. The canonical vendored Lua 5.0.3 checker is not mounted in the current executable environment and the container cannot resolve GitHub, so no canonical full-file compiler pass was run in this chat.
@@ -326,9 +342,9 @@ Legend: `PASS` = user runtime pass; `PASS-Q` = runtime pass with qualification; 
 10. **UNTESTED / SKIP-eligible — Optional 3-player party.** No message storms/errors; all compatible peers synchronize.
 
 #### B. Local pfQuest tracker behavior
-11. **PASS — Binary objective at 0/1.** Native binary count is replaced by the local incomplete symbol.
-12. **PASS — Binary objective reaches 1/1.** Native binary count is replaced by the local complete symbol.
-13. **PASS — Binary quest nobody else has.** Local symbol still appears; no remote class/status appears.
+11. **UNTESTED — Binary objective at 0/1 after 0.1.27 redesign.** Objective line should be heading-only; self row should show class/name plus coloured `0/1`. The prior PASS covered the retired incomplete-symbol layout.
+12. **UNTESTED — Binary objective reaches 1/1 after 0.1.27 redesign.** Self row should update to coloured `1/1` without tick/cross texture columns. The prior PASS covered the retired symbol layout.
+13. **UNTESTED — Binary quest nobody else has after 0.1.27 redesign.** Only the self row should appear; no remote player row should be fabricated. The prior PASS covered the retired symbol layout.
 14. **UNTESTED — Binary state changes live.** Incomplete -> complete should update without reload.
 15. **UNTESTED — Normal count objective after redesign.** Numeric progress must remain numeric, but the objective line now shows only the objective name and the local `PlayerName: current/required` row appears beneath it. The prior PASS covered the pre-0.1.22 layout and does not validate this redesign.
 16. **UNTESTED — Multiple objectives on one quest.** Binary/count objectives should coexist without row collisions.
@@ -337,9 +353,9 @@ Legend: `PASS` = user runtime pass; `PASS-Q` = runtime pass with qualification; 
 19. **UNTESTED — Switch pfQuest tracker mode away and back.** PFQG overlays should not remain on unrelated tracker content.
 
 #### C. Remote Group Progress
-20. **PASS — Peer has same binary quest, incomplete.** Peer class icon plus incomplete status appears.
-21. **UNTESTED — Peer completes that binary objective.** Remote status should update without reload.
-22. **PASS — Peer does not have the quest.** No class icon/status for that peer.
+20. **UNTESTED — Peer has same binary quest, incomplete after 0.1.27 redesign.** Peer row should follow self with class icon/name and coloured `0/1`; no separate cross/status column should exist. The prior PASS covered the retired icon-strip layout.
+21. **UNTESTED — Peer completes that binary objective.** Remote row should update to `1/1` without reload.
+22. **UNTESTED — Peer does not have the quest after 0.1.27 redesign.** No row should appear for that peer. The prior PASS covered the retired icon-strip layout.
 23. **UNTESTED — Peer accepts the quest while already grouped.** Class/status should begin appearing after synchronization.
 24. **UNTESTED — Peer abandons or turns in the quest.** Class/status should disappear.
 25. **UNTESTED — Peer has same count quest.** Objective heading should contain no inline count; self row appears first, then the peer row, retaining class icons with class-coloured `PlayerName:` labels and per-player coloured numeric progress.
@@ -467,7 +483,7 @@ R10. **UNTESTED — Instruction NPC-name presentation.** On 0.1.21-dev create ne
 
 
 ### Focused in-game group-hold matrix — awaiting user runtime results
-Pre-matrix 0.1.25 runtime defect: a locally-complete held binary objective remained on the native tracker but used the old tick/class-icon/cross strip. 0.1.26 changes only actively held objectives to the group-held player-row treatment; verify this regression first before continuing GH1-GH9.
+Pre-matrix held-native presentation regression: **PASS on 0.1.26-dev** by user observation; the objective now uses the preferred per-player row treatment rather than the old tick/class-icon/cross strip. GH1-GH9 remain separately untested unless explicitly marked below. 0.1.27 generalizes the same row presentation to ordinary binary objectives.
 GH1. **UNTESTED — Count objective local completion hold.** With Guide/Tourist paired on a tracked count objective such as Skeletal Fragments, let the local player reach the required count first while a relevant participant remains incomplete. Verify WoW/pfQuest still records the local objective as complete normally, while PFQG retains only the shared objective guidance.
 GH2. **UNTESTED — Supplemental tracker after native row disappears.** After the local native pfQuest objective row is removed, verify the PFQG tracker block remains with quest/objective heading, self first, then relevant participant rows with the expected class/progress colours and no duplicate native row.
 GH3. **UNTESTED — World-map/minimap held nodes.** Verify relevant PFQGROUP objective nodes remain on both world map and minimap after local completion, with no quest-start/giver/ender/turn-in markers resurrected.
@@ -479,22 +495,22 @@ GH8. **UNTESTED — Local turn-in/no falsification.** If practical, turn in loca
 GH9. **UNTESTED / SKIP-eligible — Ambiguous complex objective mapping.** If a held objective has multiple database sources that cannot be matched safely by localized objective text, verify PFQG prefers tracker-only guidance over showing unrelated map nodes. The deferred Mrs Dalson's Diary / Outhouse / Locked Cabinet chain is not a test target for this case.
 
 ### Next Implementation / Runtime Sequence
-1. Put both Guide and Tourist on exact 0.1.26-dev / 4b1b1bb17b0cfbfc9e1f9864e343745f351454fa, rejoin the same persisted session, allow full synchronization to settle, and verify the historical Guide backlog strike/fades away instead of remaining visible.
-2. On the same held binary objective pattern shown in the 0.1.25 screenshot, verify the native objective no longer shows local tick + Tourist class icon + cross; while held it should use objective heading + self/participant progress rows, then release normally when the final relevant participant finishes.
-3. Continue dormant/no-instruction, durable offline-eligible/late-joiner checks, then GH1-GH9.
-4. Run C1-C5 and R8-R10 in the same runtime cycle where practical.
+1. Put both Guide and Tourist on exact 0.1.27-dev / 1f03df4124f2e28e63c6d1ed6cab3204665a0fb5. Rejoin once so the historical legacy rows recover, then leave/rejoin again and reload/relog where practical; recovered completed rows must remain gone.
+2. Exercise an ordinary binary objective outside group-hold: objective heading only, self row with `0/1` or `1/1`, matched peer rows in party order, no tick/cross status column, and no row for a peer without the quest.
+3. Confirm the already-liked held-objective presentation remains unchanged under the unified row machinery.
+4. Continue dormant/no-instruction, durable offline-eligible/late-joiner checks, then GH1-GH9, C1-C5, and R8-R10 where practical.
 5. Fix only demonstrated defects with normal version discipline; keep Mrs Dalson's Diary / Outhouse / Locked Cabinet deferred.
 
 ## Planned / Next Work
-1. Install/run 0.1.25-dev in WoW with at least the existing Guide/Tourist pair and execute the focused dormant/durable + GH1-GH9 checks.
+1. Runtime-test exact 0.1.27-dev with the existing Guide/Tourist pair, prioritizing legacy-completion permanence and unified binary rows.
 2. Record exact PASS/FAIL observations in DEV_PROGRESS.md; do not upgrade untested matrix items from static evidence.
-3. Fix only demonstrated defects, bumping the dev version for every addon-affecting revision.
-4. Then continue pending C1-C5, R8-R10, and remaining broad protocol-v2 matrix gaps.
-5. Keep the three linked-quest anomaly and unrelated binary/remote visual polish deferred until this path is stable.
+3. Continue dormant/durable, GH1-GH9, C1-C5, R8-R10, and remaining broad protocol-v2 gaps.
+4. Fix only demonstrated defects, bumping the dev version for every addon-affecting revision.
+5. Keep the linked Mrs Dalson's Diary / Outhouse / Locked Cabinet anomaly deferred.
 6. After a known-good runtime state exists, review release/promotion readiness separately; do not treat development checks as a runtime test.
 
 ## Deferred / Out of Scope
-- New feature work beyond the agreed v1 Phase 1–6 scope.
+- New feature work beyond the currently agreed post-Phase-6 tracker/Guide refinements.
 - Release/promotion to main before broad runtime validation is complete or any validation debt is explicitly accepted.
 - dev_rulebook.md changes.
 - Investigation/fix for the linked `Mrs Dalson's Diary`, `Outhouse`, and `Locked Cabinet` tracking anomaly; user reports the behavior is already incorrect in pfQuest itself as well as PFQG, so handle separately from current tracker presentation work.
@@ -506,4 +522,4 @@ GH9. **UNTESTED / SKIP-eligible — Ambiguous complex objective mapping.** If a 
 - External/runtime prerequisite: pfQuest.
 
 ## Exact Next Step
-Install exact 0.1.26-dev / 4b1b1bb17b0cfbfc9e1f9864e343745f351454fa on both Guide and Tourist. Rejoin the persisted session and first verify the two demonstrated 0.1.25 regressions: historical Guide rows should reconcile/strike-fade after the Tourist completion snapshot settles, and an actively group-held native objective should use group-held self/participant rows rather than the old tick/class-icon/cross strip. If both pass, resume dormant/no-instruction + durable offline-eligible/late-joiner testing, then GH1-GH9, C1-C5, and R8-R10 where practical. Keep Mrs Dalson's Diary / Outhouse / Locked Cabinet deferred.
+Install exact 0.1.27-dev / 1f03df4124f2e28e63c6d1ed6cab3204665a0fb5 on both Guide and Tourist. First verify that legacy Guide rows recover once and then remain permanently gone across a second leave/rejoin plus reload/relog where practical. Then test an ordinary binary objective: heading-only objective line, self and matched-peer class/name rows with per-player `0/1` or `1/1`, no tick/cross column, and no row for peers without the quest. If those pass, resume dormant/durable, GH1-GH9, C1-C5, and R8-R10. Keep Mrs Dalson's Diary / Outhouse / Locked Cabinet deferred.
