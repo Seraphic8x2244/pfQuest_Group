@@ -181,7 +181,7 @@ Current addon-affecting retest commit: 4df6d0b9c1c3682e5077eaaab6b191f445aa3c16.
 - Static triage excludes the Lua 5.0.3 200-local cap as the reported error source; current top-level pressure is 152.
 - No obvious later-Lua syntax/API blacklist hit is present in the current source.
 - Canonical Lua 5.0.3 compiler check remains not run against 0.1.17-dev: the connected GitHub source is not mounted in the executable environment, and direct network cloning from the executable environment is unavailable.
-- The 0.1.16 reverse-completion delta is not yet user-tested. The 0.1.14 partial broad-matrix results remain the last runtime baseline and must not be rewritten as tests of protocol v2.
+- Protocol-v2 reverse-completion now has partial user runtime validation on 0.1.17-dev: after both players logged in on characters with persisted Guide/Tourist modes while initially ungrouped, forming the party re-established the Guide/Tourist relationship and the Guide UI retroactively strike/fade/removed two steps the Tourist had completed previously. This demonstrates persisted completion state recovering through regroup/full-state synchronization. Live one-Tourist completion, two-Tourist gating, late-join gating, and the focused recovery variants remain separately untested unless explicitly covered below.
 - Initial performance A/B on 0.1.16: with PFQG enabled, moving the mouse anywhere on screen dropped from about 120 FPS to below 100 with poor frametime; with PFQG disabled but pfQuest still enabled, mouse movement still dropped FPS (about 120 -> 80) but frametime felt substantially smoother.
 - 0.1.17-dev performance fix: the always-installed main quest-scan OnUpdate was replaced by a hidden worker frame that is shown only while a quest scan is actually pending and hides itself immediately when idle. Follow-up user A/B after updating and re-enabling PFQG reports that enabled frametime now feels no worse than disabled. Treat the idle quest-scan OnUpdate as a confirmed PFQG performance contributor and the 0.1.17 delta as user-verified for this symptom.
 - Separate from the mouse-specific symptom, the current Vanilla PARTY transport still has a known fan-out inefficiency: logically targeted recovery packets are PARTY broadcasts without an encoded recipient, so non-target PFQG peers can process them. This is a concrete optimization candidate, but it has not yet been changed because it does not explain a stutter that occurs only while the mouse moves.
@@ -191,7 +191,8 @@ Current addon-affecting retest commit: 4df6d0b9c1c3682e5077eaaab6b191f445aa3c16.
 ### Latest Runtime Result
 - Version/commit: 0.1.17-dev / 4df6d0b9c1c3682e5077eaaab6b191f445aa3c16.
 - User A/B result: the mouse-movement frametime regression is resolved for PFQG; enabled frametime now feels no worse than disabled with pfQuest left enabled.
-- This result validates the 0.1.17 performance delta only. It does not upgrade any untested broad-matrix or protocol-v2 reverse-completion item.
+- Additional 0.1.17 runtime result: both players logged in while initially ungrouped with persisted Guide/Tourist modes, then formed a party; the Guide/Tourist relationship resumed and two previously completed Tourist steps were retroactively strike/fade/removed on the Guide UI after synchronization.
+- This upgrades broad-matrix item 62 (both players relog/persisted session + fresh peer boot synchronization) to PASS and provides partial runtime validation of protocol-v2 completion recovery. It does not by itself prove the live one-Tourist or multi-Tourist completion cases.
 
 ### Last Broad-Matrix Runtime Test
 - Version/commit: 0.1.14-dev / fb3f8f3bcf46b0372303db590d4f68694aba97af.
@@ -277,7 +278,7 @@ Legend: `PASS` = user runtime pass; `PASS-Q` = runtime pass with qualification; 
 59. **UNTESTED — Tourist observes new Guide session.** Fresh pairing/baseline; old instructions should not replay.
 60. **UNTESTED — Guide temporarily leaves party and rejoins.** No stale/corrupt state or old instruction replay.
 61. **UNTESTED — Tourist temporarily leaves and rejoins.** No duplicated instructions or Lua errors.
-62. **UNTESTED — Both players relog.** Persisted local sessions plus fresh peer boots should settle correctly.
+62. **PASS — Both players relog.** On 0.1.17-dev both players logged in while initially ungrouped with persisted Guide/Tourist modes, then formed a party; the relationship resumed and synchronized state settled correctly. The Guide also recovered and retroactively completed two Tourist-finished steps.
 
 #### G. Disparities
 63. **UNTESTED — Guide and Tourist have identical quest logs.** No false missing rows.
@@ -343,6 +344,7 @@ R3. **UNTESTED — Two Tourists, all complete.** Continuing R2, after Tourist 2 
 R4. **UNTESTED — Late joiner.** Create a step while Tourist 1 is already paired, then pair Tourist 2 afterward. Tourist 1 completing the older step must be sufficient; late-joining Tourist 2 must not block it.
 R5. **UNTESTED — Recovery after Guide reload.** With two eligible Tourists, let Tourist 1 complete the step, reload the Guide and allow synchronization to settle, then let Tourist 2 complete it. The Guide row must then strike/fade/disappear, demonstrating recovered acknowledgement state where practical.
 R6. **UNTESTED — Error/replay/premature-completion guard.** Throughout R1-R5, record any PFQG Lua error, duplicate row, row reappearing after removal, repeated completion animation, or Guide completion before every eligible Tourist has finished.
+R7. **PASS — Offline/regroup completion recovery.** On 0.1.17-dev both characters logged in with persisted Guide/Tourist modes while initially ungrouped, then formed a party. Pairing resumed and the Guide UI retroactively strike/fade/removed two steps the Tourist had completed previously, confirming persisted consumed-step state can recover through regroup/full-state synchronization.
 
 
 ### Next Runtime Test
