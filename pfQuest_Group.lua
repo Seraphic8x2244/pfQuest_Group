@@ -3208,6 +3208,7 @@ end
 
 local function GuideTouristInstructionText(instruction)
   local text
+  local marker = instruction and instruction.actionType == "ACCEPT" and "!" or "?"
   local npcName = SafeString(instruction and instruction.npcName)
 
   if instruction and instruction.questTitle and instruction.questTitle ~= "" then
@@ -3217,10 +3218,10 @@ local function GuideTouristInstructionText(instruction)
   end
 
   if npcName ~= "" then
-    return string.format(L.INSTRUCTION_WITH_NPC or "%s - %s", text, npcName)
+    return string.format(L.INSTRUCTION_WITH_NPC or "%s (%s) %s", npcName, marker, text)
   end
 
-  return text
+  return string.format(L.INSTRUCTION_WITHOUT_NPC or "(%s) %s", marker, text)
 end
 
 local function GuideInstructionAllTouristsComplete(session, instruction)
@@ -3618,7 +3619,7 @@ local function RefreshGuideTouristWindow()
       end
     else
       row.seq = tonumber(entry.instruction and entry.instruction.seq) or 0
-      row.marker:SetText(entry.instruction and entry.instruction.actionType == "ACCEPT" and "!" or "?")
+      row.marker:SetText("")
       row.text:SetText(GuideTouristInstructionText(entry.instruction))
 
       if session.mode == "TOURIST" and not entry.completing then
