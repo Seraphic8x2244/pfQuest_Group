@@ -3207,11 +3207,20 @@ end
 
 
 local function GuideTouristInstructionText(instruction)
+  local text
+  local npcName = SafeString(instruction and instruction.npcName)
+
   if instruction and instruction.questTitle and instruction.questTitle ~= "" then
-    return instruction.questTitle
+    text = instruction.questTitle
+  else
+    text = string.format(L.QUEST_ID_FALLBACK or "Quest %d", tonumber(instruction and instruction.questID) or 0)
   end
 
-  return string.format(L.QUEST_ID_FALLBACK or "Quest %d", tonumber(instruction and instruction.questID) or 0)
+  if npcName ~= "" then
+    return string.format(L.INSTRUCTION_WITH_NPC or "%s - %s", text, npcName)
+  end
+
+  return text
 end
 
 local function GuideInstructionAllTouristsComplete(session, instruction)
