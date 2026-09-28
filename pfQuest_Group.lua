@@ -3107,6 +3107,39 @@ function Addon.ClearTouristSession()
   return true
 end
 
+local function CompleteTouristInstruction(seq)
+  local session = Addon.db and Addon.db.session
+  local instruction
+  local store
+
+  seq = tonumber(seq)
+  if not session
+    or session.mode ~= "TOURIST"
+    or not session.guideSessionId
+    or session.joinBaseline == nil
+    or not seq
+    or seq < 1 then
+    return false
+  end
+
+  seq = math.floor(seq)
+  instruction = touristPendingInstructions[seq]
+  if not instruction then
+    return false
+  end
+
+  Addon.db.instructions = NormalizeInstructionStore(Addon.db.instructions, session)
+  store = Addon.db.instructions
+  store.consumed[seq] = true
+  touristPendingInstructions[seq] = nil
+  Addon.SendDelta("instructions", EncodeInstructionCompletionWire("A", session.guideSessionId, {
+    [seq] = true
+  }), session.guideName)
+  Emit("TOURIST_INSTRUCTION_COMPLETED", CopyInstruction(instruction))
+  Emit("TOURIST_INSTRUCTIONS_CHANGED", Addon.GetTouristInstructions())
+  return true
+end
+
 local function HandleInstructionQuestAction(actionType, quest, context)
   local session = Addon.db and Addon.db.session
   local store
@@ -3169,15 +3202,7 @@ local function HandleInstructionQuestAction(actionType, quest, context)
     return
   end
 
-  Addon.db.instructions = NormalizeInstructionStore(Addon.db.instructions, session)
-  store = Addon.db.instructions
-  store.consumed[pendingSeq] = true
-  touristPendingInstructions[pendingSeq] = nil
-  Addon.SendDelta("instructions", EncodeInstructionCompletionWire("A", session.guideSessionId, {
-    [pendingSeq] = true
-  }), session.guideName)
-  Emit("TOURIST_INSTRUCTION_COMPLETED", CopyInstruction(instruction))
-  Emit("TOURIST_INSTRUCTIONS_CHANGED", Addon.GetTouristInstructions())
+  CompleteTouristInstruction(pendingSeq)
 end
 
 
@@ -3388,6 +3413,8 @@ local function EnsureGuideTouristRow(index)
   row.action:SetScript("OnClick", function()
     if row.disparityKey then
       SetGuideDisparityHidden(row.disparityKey, not row.disparityHidden)
+    elseif row.touristInstructionSeq then
+      CompleteTouristInstruction(row.touristInstructionSeq)
     end
   end)
   row.action:Hide()
@@ -3560,6 +3587,7 @@ local function RefreshGuideTouristWindow()
     row.action:Hide()
     row.disparityKey = nil
     row.disparityHidden = false
+    row.touristInstructionSeq = nil
 
     if entry.kind == "disparity" then
       disparity = entry.disparity
@@ -3583,6 +3611,13 @@ local function RefreshGuideTouristWindow()
       row.seq = tonumber(entry.instruction and entry.instruction.seq) or 0
       row.marker:SetText(entry.instruction and entry.instruction.actionType == "ACCEPT" and "!" or "?")
       row.text:SetText(GuideTouristInstructionText(entry.instruction))
+
+      if session.mode == "TOURIST" and not entry.completing then
+        row.touristInstructionSeq = row.seq
+        row.text:SetWidth(180)
+        row.action:SetText(L.INSTRUCTION_DONE or "Done")
+        row.action:Show()
+      end
 
       if entry.completing then
         row.strike:SetWidth(math.min(row.text:GetStringWidth(), 238))
