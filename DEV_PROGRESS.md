@@ -317,6 +317,34 @@ Legend: `PASS` = user runtime pass; `PASS-Q` = runtime pass with qualification; 
 91. **UNTESTED / SKIP-eligible — Duplicate-title / numeric quest-ID edge.** Numeric ID wins when both sides have it; no wrong quest match.
 
 
+
+### Supplemental Protocol-v2 Reverse-Completion Tests
+These checks were added after the original 91-point matrix because reverse Tourist -> Guide completion feedback was introduced later. They are tracked separately so the original matrix numbering remains stable.
+
+#### Assistant mocked/static reconciliation — 0.1.17-dev / 4df6d0b9c1c3682e5077eaaab6b191f445aa3c16
+- **PASS — Focused extracted-logic harness: 12/12 assertions.** This is mocked/static coverage under the available texluac/texlua environment, not an in-game test and not a canonical Lua 5.0.3 full-file compiler pass.
+- Covered behaviors:
+  - one eligible same-session Tourist completion satisfies the Guide-side completion predicate;
+  - with two eligible Tourists, one acknowledgement is insufficient and both acknowledgements satisfy completion;
+  - a Tourist whose fixed joinBaseline is at/after an older instruction does not block that instruction;
+  - zero eligible Tourists do not cause an instruction to auto-complete;
+  - a Tourist paired to another Guide is ignored;
+  - completion filtering rejects pre-baseline consumed sequences;
+  - completion filtering rejects sequences beyond the Guide cursor;
+  - completion filtering rejects wrong-session completion state;
+  - unrelated PARTY completion traffic is ignored rather than triggering recovery;
+  - eligible consumed state is retained only for known Guide instruction records.
+- Structural/static reconciliation also passed: protocol remains v2; exactly one instructions component registration remains; Tourist completion uses the existing instructions component; Guide-side feedback reuses the existing Guide/Tourist window; no new owner/component/window was introduced; the current source still has one `SendAddonMessage` call using PARTY transport; no later-Lua/API blacklist token was introduced by this feature.
+
+#### Focused in-game reverse-completion matrix — awaiting user runtime results
+R1. **UNTESTED — One Tourist.** Pair the Tourist before the Guide creates a step. When that Tourist completes the matching step, the Guide row must strike through, fade, then disappear.
+R2. **UNTESTED — Two Tourists, first completion.** Pair both Tourists before the Guide creates a step. After only Tourist 1 completes it, the Guide row must remain.
+R3. **UNTESTED — Two Tourists, all complete.** Continuing R2, after Tourist 2 completes the same step, the Guide row must strike/fade/disappear.
+R4. **UNTESTED — Late joiner.** Create a step while Tourist 1 is already paired, then pair Tourist 2 afterward. Tourist 1 completing the older step must be sufficient; late-joining Tourist 2 must not block it.
+R5. **UNTESTED — Recovery after Guide reload.** With two eligible Tourists, let Tourist 1 complete the step, reload the Guide and allow synchronization to settle, then let Tourist 2 complete it. The Guide row must then strike/fade/disappear, demonstrating recovered acknowledgement state where practical.
+R6. **UNTESTED — Error/replay/premature-completion guard.** Throughout R1-R5, record any PFQG Lua error, duplicate row, row reappearing after removal, repeated completion animation, or Guide completion before every eligible Tourist has finished.
+
+
 ### Next Runtime Test
 Continue runtime validation on 0.1.17-dev / 4df6d0b9c1c3682e5077eaaab6b191f445aa3c16. First test the protocol-v2 reverse-completion feature: one Tourist completion should strike/fade/remove the Guide row; with two Tourists the Guide row must remain until both eligible Tourists complete; a Tourist joining after an older step must not block it; reload/rejoin recovery should preserve acknowledgement where practical. Then continue the remaining broad-matrix gaps. Keep remote-member tracker presentation polish deferred.
 
