@@ -2,11 +2,11 @@
 
 ## Current
 - Branch: dev.
-- Version: 0.1.24-dev from pfQuest_Group.toc.
-- Latest addon-affecting development commit: 01ec7eec406ecf3a9960149aac80dbbdcb653deb — 0.1.24-dev dormant persisted Guide lifecycle plus schema-2 durable Guide-side instruction eligibility/acknowledgement/completion persistence.
+- Version: 0.1.25-dev from pfQuest_Group.toc.
+- Latest addon-affecting development commit: e168712cccb9959646491073393df1639e00a5d5 — 0.1.25-dev persisted PFQG group-held objective guidance across tracker + world/minimap nodes + PFQG tooltips, layered on the 0.1.24 dormant/durable Guide lifecycle.
 - Handoff checkpoint: the current dev head carrying this status file; always verify the actual remote branch head before resuming.
 - Stable baseline: None. main remains exactly bootstrap commit 4c5c63f074923266566c36c51ce2718d0060166f and is not a runtime release.
-- Goal: implement PFQG group-held objective tracking on top of the completed 0.1.24-dev dormant/durable Guide lifecycle slice, then runtime-validate both slices together with the still-pending Tourist Done/NPC/count-row work before resuming the broad matrix.
+- Goal: runtime-validate the completed 0.1.24 dormant/durable Guide lifecycle and 0.1.25 PFQG group-hold implementation together with the still-pending Tourist Done/NPC/count-row work, then fix only demonstrated defects before resuming the broad matrix.
 - Scope boundary: the user explicitly requested post-Phase-6 refinements through the existing owners: Guide reverse-completion feedback (0.1.16+), Tourist manual Done for stale already-completed instructions (0.1.18+), instruction NPC presentation (0.1.19-0.1.21), count-objective Group Progress redesign (0.1.22-0.1.23), dormant persisted Guide sessions, durable Guide-side instruction completion, and PFQG-owned group-held objective/map tracking after a local player finishes. Other remote-member/binary tracker polish remains deferred unless explicitly requested.
 
 ## Current Design / Development Contract
@@ -26,18 +26,18 @@
 - Keep the established one-main-Lua-file architecture unless concrete pressure justifies a deliberate split.
 - Phase 4a remains the sole Guide/Tourist session owner.
 - Phase 4b remains the sole Guide/Tourist instruction owner.
-- Phase 2 remains the sole quest-state owner.
+- Phase 2 remains the sole quest-state owner, including the persisted group-hold last-known participant quest cache introduced in 0.1.25-dev.
 - Phase 5 remains the sole Guide/Tourist window/disparity presentation architecture.
 - Group Progress is independent of Guide/Tourist mode.
 
 ### Protocol / Peer State
-- Protocol prefix: PFQGROUP; protocol version: 2; SavedVariables schema: 2. Protocol v2 remains sufficient because Tourist full/delta instruction-completion payloads already carry the durable consumed set; schema 2 adds only Guide-local persisted eligibility/acknowledgement/completion metadata. v1 peers remain rejected.
+- Protocol prefix: PFQGROUP; protocol version: 2; SavedVariables schema: 3. Protocol v2 remains sufficient: schema 2 introduced Guide-local durable instruction eligibility/acknowledgement/completion metadata without changing wire formats, and schema 3 adds only the local persisted Phase-2 group-hold cache. v1 peers remain rejected.
 - Only actual current party members participate; discovery scans party1 through party4.
 - Transport remains native Vanilla SendAddonMessage over PARTY. WoW 1.12 SendAddonMessage does not support WHISPER; logical directed recovery validates the requested party peer but uses the PARTY addon channel.
 - Wire types remain HELLO (H), full-state request (R), full snapshot (F), and component delta (D).
 - State synchronization remains component-based through RegisterStateComponent, SendDelta, and RequestFullSync.
 - Registered synchronized components remain exactly session, quests, and instructions.
-- Remote peer state is ephemeral and is removed when the player leaves the party.
+- Live remote peer state remains ephemeral and is removed when the player leaves the party. The Phase-2 group-hold cache separately persists last-known quest snapshots only for relevant members of the current Guide session so an offline unfinished Tourist cannot be mistaken for completion.
 - A newly established or changed peer boot id invalidates previously cached remote session/quest/instruction state. Compatible peers answer a newly established boot with HELLO plus full state and request the peer's full state, so both sides establish the boot boundary and current state.
 - Full snapshots apply the session component before dependent components. Unknown components continue to be ignored.
 
@@ -61,15 +61,19 @@
 - Count objectives render the objective label as a heading with no inline personal fraction, then add a self row first followed by one row per compatible peer who has the tracked quest in party order. Each row keeps the class icon, renders `PlayerName:` in that player's class colour (including self), and renders `current/required` using the same pfQuest objective colour rule for that player's own progress (`pfMap.tooltip:GetColor(current, required)` brightened by 0.2 and clamped). A missing matching objective within an otherwise matched remote quest displays grey `--`.
 - Reusable tracker regions are hidden/restored as peers change and tracker dimensions are recalculated.
 
-### Accepted PFQG Group-Hold Tracking — Not Yet Implemented
-- WoW/pfQuest must continue to record the local player's real quest progress normally. Do not falsify a local `15/15`, quest completion flag, quest log state, or turn-in state merely to keep shared guidance visible.
-- When the local player completes an objective/quest but at least one relevant Guide/Tourist participant still needs part of it, PFQG should maintain a supplemental `group hold` presentation until the relevant group is actually complete.
-- Group hold should preserve/recreate only useful objective guidance: PFQG's shared tracker objective block, world-map objective nodes, minimap objective nodes, and PFQG-owned tooltips for those held objective nodes. Do not resurrect Blizzard quest-log progress, quest-start/giver markers, or personal turn-in/completion state solely because another player is unfinished.
-- For multi-objective quests, retain only objectives that at least one relevant participant still needs rather than blindly restoring every objective node for the quest.
-- PFQG group-held tooltips should use the same visual language as the redesigned count tracker: objective heading, then self first and relevant Tourist rows in party/session order, class-coloured names, and per-player progress colours. They should not show a misleading personal `?`/complete state merely because the local player is finished.
-- Normal pfQuest nodes/tooltips may continue unchanged while they exist. Once pfQuest removes local objective nodes because the local player is complete, PFQG supplemental nodes become the group-aware representation.
-- A Tourist temporarily disconnecting must not be treated as group completion. Group-hold release needs durable completion semantics/last-known state sufficient to distinguish `offline but unfinished` from `finished`. While no relevant Tourist is present, the Guide/group-hold presentation may go dormant and resume on rejoin.
-- pfQuest source inspection confirms why a supplemental layer is preferable: pfQuest's quest queue deletes/rebuilds `PFQUEST` nodes from the local quest log, `SearchQuestID` skips objective-node generation when the local quest is complete, and map tooltips read local `GetQuestLogLeaderBoard` state. Its database search API accepts an addon metadata namespace, so investigate PFQG-owned supplemental nodes rather than fighting pfQuest's personal-state machinery.
+### PFQG Group-Hold Tracking — Implemented in 0.1.25-dev, Runtime Untested
+- WoW/pfQuest remains authoritative for the local player's real quest progress. Group hold never writes local questState progress/completion, Blizzard quest state, pfQuest's PFQUEST node namespace, or personal turn-in state.
+- Phase 2 now persists a session-scoped groupHold cache keyed by the active Guide session. It stores last-known ready quest snapshots for relevant same-session participants plus local seen/tracked quest identity. Live peer state is still ephemeral; a temporary disconnect leaves the last-known group-hold snapshot intact so offline unfinished participants continue to count.
+- Relevant membership is derived from the existing Phase 4a relationship: a Guide holds for Tourists bound to that Guide/session; a Tourist holds for the selected Guide and same-session sibling Tourists. Explicit session/unpair changes remove that participant from the cache; changing/leaving the local Guide session resets the cache.
+- Presentation is dormant whenever no relevant same-session participant is currently present. Rejoining a relevant participant wakes the same persisted hold state immediately, then fresh synchronized quest state replaces the last-known snapshot when available.
+- A held objective exists only when at least one persisted relevant participant still has that objective unfinished and the local equivalent is already done or no longer present. The quest must also have been locally seen and tracked during the same Guide session, preventing arbitrary remote quests from creating local guidance.
+- The supplemental tracker is a PFQG child region appended beneath pfQuest's normal tracker layout. It is shown only when pfQuest no longer has a visible native objective row for that held objective. It renders quest/objective headings, then self first and relevant participant rows using the existing class colours and pfQuest-derived progress colours.
+- World-map/minimap guidance uses the separate PFQGROUP pfMap namespace and only pfQuest's lower objective-source searches (mob, object, item, area trigger, zone). It deliberately never calls SearchQuestID, so it cannot recreate quest giver/start/end/turn-in nodes from another player's state.
+- Multi-objective map retention is conservative: PFQG first matches the specific unfinished objective text against localized objective source names from that quest; if no name match exists, it falls back only when exactly one candidate source exists across the relevant categories. Ambiguous complex objectives may therefore retain tracker guidance without a supplemental map node rather than showing a wrong node.
+- PFQG supplemental nodes bypass pfQuest's shared unified quest clustering cache and carry a private need key. pfMap.ShowTooltip is wrapped only for PFQGROUP metadata; every ordinary pfQuest tooltip delegates unchanged to the original implementation.
+- Group-held node/tooltips use the real quest/objective heading followed by self and relevant participant progress rows. If the local quest is no longer in the log, the self row shows grey -- rather than inventing a personal completion value.
+- When every persisted relevant participant's latest known state no longer needs an objective, that objective disappears from the supplemental tracker and PFQGROUP map namespace. Only objectives somebody relevant still needs are retained.
+- pfQuest source inspection remains the rationale for the supplemental layer: pfQuest's own quest queue deletes/rebuilds PFQUEST nodes from the local quest log, SearchQuestID filters through local GetQuestLogLeaderBoard state and stops on local completion, while the lower database search API accepts an independent addon namespace.
 
 ### Guide / Tourist Session and Instructions
 - Modes remain Off, Guide, and Tourist. Commands remain /pfqgroup off, /pfqgroup guide, /pfqgroup tourist <player>, /pfqgroup status; /pfqg is an alias.
@@ -92,7 +96,7 @@
 - The current behavior observed by the user is the defect motivating this change: logging in solo restored active Guide mode with a very large old instruction list; when Gaia later joined the party, synchronization caused many rows to cross off. The resume/synchronization behavior is desirable, but the solo-active presentation is not.
 - Tourist completion acknowledgements remain durable per Tourist. Guide-side schema-2 instruction metadata now persists each new instruction's fixed eligible Tourist cohort, per-Tourist acknowledgements, and derived completed state. Completed Guide instructions are filtered from Guide UI/full instruction snapshots so they do not reappear within the same Guide session.
 - Eligibility for permanent Guide completion is frozen when each new instruction is created from the durable Guide participant roster plus current matching Tourists. Temporarily offline eligible Tourists remain in that frozen cohort; explicit unpairing affects future instructions only; late joiners are not retroactively added.
-- Ownership remains unchanged: Phase 4a owns session identity/pairing and Phase 4b owns instruction/completion state. Protocol stays v2; SavedVariables schema is now 2 for Guide-local Phase-4b metadata. Conservative migration note: schema-1 historical instructions have no recoverable authoritative Guide roster while old eligible Tourists remain offline, so those legacy rows may accumulate provable eligibility/acks on rejoin but are intentionally not permanently finalized from incomplete reconstructed membership; fresh schema-2 instructions are authoritative.
+- Ownership remains unchanged: Phase 4a owns session identity/pairing and Phase 4b owns instruction/completion state. Protocol stays v2. Durable Guide completion fields were introduced in schema 2; the current SavedVariables schema is 3 only because 0.1.25 adds the separate Phase-2 group-hold cache. Conservative migration note: schema-1 historical instructions have no recoverable authoritative Guide roster while old eligible Tourists remain offline, so those legacy rows may accumulate provable eligibility/acks on rejoin but are intentionally not permanently finalized from incomplete reconstructed membership; fresh schema-2+ instructions are authoritative.
 
 ### Guide / Tourist Window and Disparities
 - The existing compact movable Phase 5 window is the only Guide/Tourist presentation window and is shown only in Guide/Tourist mode.
@@ -115,6 +119,8 @@
 - No Phase 4a/4b/2/5 owner was replaced or duplicated.
 
 ## Recent Relevant Commits
+- e168712cccb9959646491073393df1639e00a5d5 — 0.1.25-dev persisted PFQG group-held tracker/map/minimap/tooltip guidance with schema-3 Phase-2 last-known state.
+- 01ec7eec406ecf3a9960149aac80dbbdcb653deb — 0.1.24-dev dormant persisted Guide lifecycle and durable Guide-side completion metadata.
 - 4c5c63f074923266566c36c51ce2718d0060166f — repository bootstrap on main.
 - 746265a4561fedcb924bba729aef22458984d994 — Phase 1 foundation/protocol.
 - d83669c6a476a5a7521a3308102a267c2e79a668 — Phase 2 quest-state engine.
@@ -267,6 +273,7 @@ Exact addon-affecting commit: 3674229c012e6a6eab7c93d87542661d08b9b545 (feature 
 ## Testing
 
 ### Latest Runtime Result
+- 0.1.25-dev / e168712cccb9959646491073393df1639e00a5d5 implementation checkpoint: Phase-2 persisted last-known relevant participant quest state and PFQG supplemental group-hold tracker/world-map/minimap/tooltips are committed. Static ownership guards confirm protocol remains v2, schema is 3, synchronized components remain exactly session/quests/instructions, the group-hold block does not call SearchQuestID, does not write local questState completion/progress, and uses only the PFQGROUP map namespace. This is not an in-game PASS.
 - 0.1.24-dev / 01ec7eec406ecf3a9960149aac80dbbdcb653deb implementation checkpoint: dormant Guide UI/instruction suppression and schema-2 durable Guide eligibility/ack/completion persistence are committed. Protocol remains v2. This is code/static review only; no new in-game PASS is claimed yet. The canonical vendored Lua 5.0.3 checker is not mounted in the current executable environment and the container cannot resolve GitHub, so no canonical full-file compiler pass was run in this chat.
 - 0.1.23-dev follow-up observation before formal C/R matrix validation: the Guide logged in solo with persisted Guide mode active and a very large historical instruction list visible. When Gaia rejoined the party, synchronization resumed correctly and many already-completed rows crossed off. Treat `resume where we left off` as desirable, but the solo-visible/active Guide presentation as a demonstrated behavior to change via dormant Guide semantics; do not mark additional canonical matrix items PASS from this observation alone.
 - Version/commit: 0.1.17-dev / 4df6d0b9c1c3682e5077eaaab6b191f445aa3c16.
@@ -440,18 +447,29 @@ R9. **UNTESTED — Manual Done feeds back to Guide.** Continuing R8 with one eli
 R10. **UNTESTED — Instruction NPC-name presentation.** On 0.1.21-dev create new Guide ACCEPT/TURNIN instructions at a resolvable NPC and verify the Tourist row displays `NPC Name` + yellow `!/?` + `Quest Name`, without parentheses or a duplicate marker/gutter. Confirm a long NPC such as `Commander Ashlam Valorfist` displays as `C.A. Valorfist`, short NPC names remain intact, and unresolved-NPC instructions fall back cleanly to yellow `!/?` + quest text.
 
 
+### Focused in-game group-hold matrix — awaiting user runtime results
+GH1. **UNTESTED — Count objective local completion hold.** With Guide/Tourist paired on a tracked count objective such as Skeletal Fragments, let the local player reach the required count first while a relevant participant remains incomplete. Verify WoW/pfQuest still records the local objective as complete normally, while PFQG retains only the shared objective guidance.
+GH2. **UNTESTED — Supplemental tracker after native row disappears.** After the local native pfQuest objective row is removed, verify the PFQG tracker block remains with quest/objective heading, self first, then relevant participant rows with the expected class/progress colours and no duplicate native row.
+GH3. **UNTESTED — World-map/minimap held nodes.** Verify relevant PFQGROUP objective nodes remain on both world map and minimap after local completion, with no quest-start/giver/ender/turn-in markers resurrected.
+GH4. **UNTESTED — Group-aware held tooltip.** Hover a held node/source and verify the tooltip shows the real quest/objective heading plus self and relevant participant progress rows, not pfQuest's misleading local complete/? presentation.
+GH5. **UNTESTED — Multi-objective filtering.** On a quest with multiple objectives, complete one locally while another participant still needs only that objective. Verify PFQG retains only objective sources still needed by somebody relevant and does not blindly restore all quest nodes.
+GH6. **UNTESTED — Completion release.** Let the final relevant participant finish the held objective. Verify the supplemental tracker block and PFQGROUP map/minimap nodes disappear without altering the local quest log/pfQuest completion state.
+GH7. **UNTESTED — Offline unfinished durability + dormancy.** With a held objective active, disconnect/leave the relevant unfinished Tourist. Verify no premature completion/release is persisted, but the Guide/group-hold presentation goes dormant while no relevant participant is present. Rejoin the same Guide session and verify the hold resumes from last-known state until fresh synchronization settles.
+GH8. **UNTESTED — Local turn-in/no falsification.** If practical, turn in locally while another relevant participant still needs the tracked objective. Verify PFQG may keep supplemental group guidance but never recreates Blizzard quest state, PFQUEST nodes, or a personal turn-in state; when the local quest is absent, the self progress row may show grey -- rather than an invented completion value.
+GH9. **UNTESTED / SKIP-eligible — Ambiguous complex objective mapping.** If a held objective has multiple database sources that cannot be matched safely by localized objective text, verify PFQG prefers tracker-only guidance over showing unrelated map nodes. The deferred Mrs Dalson's Diary / Outhouse / Locked Cabinet chain is not a test target for this case.
+
 ### Next Implementation / Runtime Sequence
-1. 0.1.24-dev implements dormant persisted Guide sessions and durable Guide-side completion without replacing Phase 4a/4b ownership; runtime validation is still pending.
-2. Add PFQG group-hold tracking as a separate supplemental presentation layer: shared tracker retention plus PFQG-owned objective map/minimap nodes/tooltips driven by relevant participant progress. Do not falsify local WoW/pfQuest completion.
-3. Keep the linked `Mrs Dalson's Diary` / `Outhouse` / `Locked Cabinet` anomaly deferred as a separate upstream/special-case investigation.
-4. After implementation, runtime-test dormant/wake behavior, no instruction generation while dormant, durable completion across reload/regroup/offline eligible Tourists, group-held tracker/map/minimap/tooltips, then run the still-pending C1-C5 and R8-R10 checks before returning to the broad matrix.
+1. Runtime-test 0.1.25-dev as the combined implementation checkpoint: dormant/wake Guide behavior, no new instructions while dormant, durable Guide completion across reload/regroup/offline eligible Tourists, and GH1-GH9 group-hold behavior.
+2. Run the still-pending C1-C5 count-objective tracker checks and R8-R10 Tourist Done/NPC presentation checks in the same runtime cycle where practical.
+3. Fix only demonstrated defects with normal version discipline; do not broaden scope from static speculation.
+4. Keep the linked Mrs Dalson's Diary / Outhouse / Locked Cabinet anomaly deferred as a separate upstream/special-case investigation.
 
 ## Planned / Next Work
-1. Implement PFQG-owned group-hold objective tracking across tracker + world map + minimap + PFQG supplemental tooltips, using real synchronized/last-known relevant participant progress and retaining only objectives somebody relevant still needs.
-2. Runtime-test 0.1.24-dev dormant/wake behavior and durable Guide completion together with the new group-hold slice and pending C1-C5/R8-R10 checks.
-3. Fix only demonstrated defects with normal version discipline, then continue the remaining protocol-v2/broad-matrix gaps.
-4. Fix only demonstrated defects with normal version discipline, then continue the remaining protocol-v2/broad-matrix gaps.
-5. Keep the linked three-quest anomaly and unrelated binary/remote visual polish deferred until the above path is stable.
+1. Install/run 0.1.25-dev in WoW with at least the existing Guide/Tourist pair and execute the focused dormant/durable + GH1-GH9 checks.
+2. Record exact PASS/FAIL observations in DEV_PROGRESS.md; do not upgrade untested matrix items from static evidence.
+3. Fix only demonstrated defects, bumping the dev version for every addon-affecting revision.
+4. Then continue pending C1-C5, R8-R10, and remaining broad protocol-v2 matrix gaps.
+5. Keep the three linked-quest anomaly and unrelated binary/remote visual polish deferred until this path is stable.
 6. After a known-good runtime state exists, review release/promotion readiness separately; do not treat development checks as a runtime test.
 
 ## Deferred / Out of Scope
@@ -467,4 +485,4 @@ R10. **UNTESTED — Instruction NPC-name presentation.** On 0.1.21-dev create ne
 - External/runtime prerequisite: pfQuest.
 
 ## Exact Next Step
-From 0.1.24-dev / 01ec7eec406ecf3a9960149aac80dbbdcb653deb, implement the Phase-2-owned persisted last-known relevant participant quest state and PFQG supplemental group-hold presentation: retain only remotely unfinished objectives after local completion, render supplemental shared tracker rows, PFQG-owned world-map/minimap objective nodes, and group-aware PFQG tooltips; keep the presentation dormant when no relevant participant is present and never falsify local WoW/pfQuest completion. Then runtime-test dormant/durable completion plus group-hold behavior. Keep the Mrs Dalson's Diary / Outhouse / Locked Cabinet investigation deferred.
+From 0.1.25-dev / e168712cccb9959646491073393df1639e00a5d5, runtime-test the combined dormant Guide + durable completion + PFQG group-hold implementation. Prioritize: solo Guide dormancy/no instruction creation, same-session wake, offline eligible Tourist completion gating across reload/regroup, Skeletal Fragments-style local-first count completion with retained tracker/world-map/minimap/tooltips, objective-only filtering, release when the final relevant participant finishes, and no local WoW/pfQuest state falsification. Then run pending C1-C5 and R8-R10 where practical. Keep Mrs Dalson's Diary / Outhouse / Locked Cabinet deferred.
