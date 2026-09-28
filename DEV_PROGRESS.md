@@ -150,6 +150,7 @@
 ## Validation State
 
 ### Completed / User-Verified
+- 0.1.27-dev screenshot/runtime: unified binary presentation is visually correct for a completed shared binary objective. The tracker shows the objective heading with separate class-icon/name rows for self and the matched peer, both at `1/1`, with no legacy tick/cross/status column. User explicitly reports the result is clean.
 - 0.1.26-dev runtime: after the Tourist rejoins the persisted session, the Guide historical backlog again crosses off/removes as completion state synchronizes. This confirms the live legacy recovery fallback works.
 - 0.1.26-dev runtime also exposed that recovered legacy completion was not durable: leaving and rejoining caused the full historical list to appear and cross off again. 0.1.27 targets that demonstrated persistence gap.
 - 0.1.26-dev held-objective tracker treatment is user-accepted as clean/intuitive: objective heading plus per-player progress rows. The user explicitly requested that the older binary `0/1`/tick-cross mechanic be migrated to this same presentation globally; 0.1.27 implements that migration.
@@ -306,7 +307,8 @@ Exact addon-affecting commit: 1f03df4124f2e28e63c6d1ed6cab3204665a0fb5.
 ## Testing
 
 ### Latest Runtime Result
-- 0.1.26-dev runtime: Guide legacy rows clear correctly again after the Tourist rejoins and synchronization settles, but the result is not permanent; leaving/rejoining makes the historical list replay its strike/fade removal. The held-objective tracker row treatment looks correct and was explicitly preferred by the user. 0.1.27-dev / 1f03df4124f2e28e63c6d1ed6cab3204665a0fb5 persists recovered legacy completion and generalizes that clean row treatment to all binary objectives. No 0.1.27 runtime PASS is claimed yet.
+- 0.1.27-dev / 1f03df4124f2e28e63c6d1ed6cab3204665a0fb5 screenshot/runtime: completed binary objective presentation passes the intended visual migration. The native inline/tick-cross treatment is replaced by an objective heading plus per-player rows; self and the matched peer are both shown at `1/1`, and the user reports the result is clean. This does not yet validate incomplete `0/1`, no-quest filtering, or live `0/1 -> 1/1` update.
+- 0.1.26-dev runtime: Guide legacy rows clear correctly again after the Tourist rejoins and synchronization settles, but the result is not permanent; leaving/rejoining makes the historical list replay its strike/fade removal. The held-objective tracker row treatment looks correct and was explicitly preferred by the user. 0.1.27-dev / 1f03df4124f2e28e63c6d1ed6cab3204665a0fb5 persists recovered legacy completion and generalizes that clean row treatment to all binary objectives.
 - 0.1.25-dev user runtime screenshot after the persisted Tourist rejoined demonstrated two regressions: the Guide window remained populated with a large historical instruction backlog, and a locally-complete held binary objective in the top-left tracker rendered as local tick + Paladin class icon + remote cross. The Tourist had not yet been updated to the latest addon build, but protocol remained v2 and the older build was still wire-compatible, so neither behavior is being attributed to a protocol-version mismatch. 0.1.26-dev / 4b1b1bb17b0cfbfc9e1f9864e343745f351454fa targets both observed failures; no runtime PASS is claimed yet.
 - 0.1.25-dev / e168712cccb9959646491073393df1639e00a5d5 implementation checkpoint: Phase-2 persisted last-known relevant participant quest state and PFQG supplemental group-hold tracker/world-map/minimap/tooltips are committed. Static ownership guards confirm protocol remains v2, schema is 3, synchronized components remain exactly session/quests/instructions, the group-hold block does not call SearchQuestID, does not write local questState completion/progress, and uses only the PFQGROUP map namespace. This is not an in-game PASS.
 - 0.1.24-dev / 01ec7eec406ecf3a9960149aac80dbbdcb653deb implementation checkpoint: dormant Guide UI/instruction suppression and schema-2 durable Guide eligibility/ack/completion persistence are committed. Protocol remains v2. This is code/static review only; no new in-game PASS is claimed yet. The canonical vendored Lua 5.0.3 checker is not mounted in the current executable environment and the container cannot resolve GitHub, so no canonical full-file compiler pass was run in this chat.
@@ -343,7 +345,7 @@ Legend: `PASS` = user runtime pass; `PASS-Q` = runtime pass with qualification; 
 
 #### B. Local pfQuest tracker behavior
 11. **UNTESTED — Binary objective at 0/1 after 0.1.27 redesign.** Objective line should be heading-only; self row should show class/name plus coloured `0/1`. The prior PASS covered the retired incomplete-symbol layout.
-12. **UNTESTED — Binary objective reaches 1/1 after 0.1.27 redesign.** Self row should update to coloured `1/1` without tick/cross texture columns. The prior PASS covered the retired symbol layout.
+12. **PASS — Binary objective at completed `1/1` after 0.1.27 redesign.** Screenshot shows heading-only objective presentation with self and matched-peer class/name rows at `1/1`, and no tick/cross/status column. Live transition into this state remains covered separately by item 14.
 13. **UNTESTED — Binary quest nobody else has after 0.1.27 redesign.** Only the self row should appear; no remote player row should be fabricated. The prior PASS covered the retired symbol layout.
 14. **UNTESTED — Binary state changes live.** Incomplete -> complete should update without reload.
 15. **UNTESTED — Normal count objective after redesign.** Numeric progress must remain numeric, but the objective line now shows only the objective name and the local `PlayerName: current/required` row appears beneath it. The prior PASS covered the pre-0.1.22 layout and does not validate this redesign.
@@ -495,9 +497,9 @@ GH8. **UNTESTED — Local turn-in/no falsification.** If practical, turn in loca
 GH9. **UNTESTED / SKIP-eligible — Ambiguous complex objective mapping.** If a held objective has multiple database sources that cannot be matched safely by localized objective text, verify PFQG prefers tracker-only guidance over showing unrelated map nodes. The deferred Mrs Dalson's Diary / Outhouse / Locked Cabinet chain is not a test target for this case.
 
 ### Next Implementation / Runtime Sequence
-1. Put both Guide and Tourist on exact 0.1.27-dev / 1f03df4124f2e28e63c6d1ed6cab3204665a0fb5. Rejoin once so the historical legacy rows recover, then leave/rejoin again and reload/relog where practical; recovered completed rows must remain gone.
-2. Exercise an ordinary binary objective outside group-hold: objective heading only, self row with `0/1` or `1/1`, matched peer rows in party order, no tick/cross status column, and no row for a peer without the quest.
-3. Confirm the already-liked held-objective presentation remains unchanged under the unified row machinery.
+1. Keep both Guide and Tourist on exact 0.1.27-dev / 1f03df4124f2e28e63c6d1ed6cab3204665a0fb5. Verify legacy Guide completion permanence: after the historical rows recover once, leave/rejoin again and reload/relog where practical; completed rows must remain gone.
+2. Exercise an incomplete ordinary binary objective: heading-only objective line, self and matched-peer rows showing their own `0/1`/`1/1`, then verify a live `0/1 -> 1/1` update without duplicated/stale rows.
+3. Verify a compatible peer without that binary quest contributes no row.
 4. Continue dormant/no-instruction, durable offline-eligible/late-joiner checks, then GH1-GH9, C1-C5, and R8-R10 where practical.
 5. Fix only demonstrated defects with normal version discipline; keep Mrs Dalson's Diary / Outhouse / Locked Cabinet deferred.
 
@@ -522,4 +524,4 @@ GH9. **UNTESTED / SKIP-eligible — Ambiguous complex objective mapping.** If a 
 - External/runtime prerequisite: pfQuest.
 
 ## Exact Next Step
-Install exact 0.1.27-dev / 1f03df4124f2e28e63c6d1ed6cab3204665a0fb5 on both Guide and Tourist. First verify that legacy Guide rows recover once and then remain permanently gone across a second leave/rejoin plus reload/relog where practical. Then test an ordinary binary objective: heading-only objective line, self and matched-peer class/name rows with per-player `0/1` or `1/1`, no tick/cross column, and no row for peers without the quest. If those pass, resume dormant/durable, GH1-GH9, C1-C5, and R8-R10. Keep Mrs Dalson's Diary / Outhouse / Locked Cabinet deferred.
+On exact 0.1.27-dev / 1f03df4124f2e28e63c6d1ed6cab3204665a0fb5, verify the Guide legacy-completion persistence fix across a second leave/rejoin and reload/relog. Then test an incomplete binary objective and its live `0/1 -> 1/1` transition plus no-quest peer filtering; the completed `1/1` unified row presentation is already user-verified. If those pass, resume dormant/durable, GH1-GH9, C1-C5, and R8-R10. Keep Mrs Dalson's Diary / Outhouse / Locked Cabinet deferred.
