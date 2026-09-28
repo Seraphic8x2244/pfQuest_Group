@@ -2,12 +2,12 @@
 
 ## Current
 - Branch: dev.
-- Version: 0.1.21-dev from pfQuest_Group.toc.
-- Latest addon-affecting development commit: a5f78570026be729c5878ec9bb615ed357cde302 — keep the yellow `!/?` visually inline between NPC and quest text and abbreviate long NPC names.
+- Version: 0.1.23-dev from pfQuest_Group.toc.
+- Latest addon-affecting development commit: 3674229c012e6a6eab7c93d87542661d08b9b545 — harden the count-objective player-row redesign introduced in 0.1.22-dev, including self-first rows and per-player pfQuest-derived count colours.
 - Handoff checkpoint: the current dev head carrying this status file; always verify the actual remote branch head before resuming.
 - Stable baseline: None. main remains exactly bootstrap commit 4c5c63f074923266566c36c51ce2718d0060166f and is not a runtime release.
-- Goal: runtime-validate the combined 0.1.21-dev instruction fixes: Tourist manual completion for stale already-completed instructions plus the refined NPC-first/yellow-marker presentation, then continue protocol-v2 reverse-completion and the remaining broad matrix.
-- Scope boundary: the user explicitly requested one post-Phase-6 feature addition: when every Tourist eligible for a Guide instruction has completed it, the Guide should receive the same strike/fade/removal feedback. That feature is implemented in 0.1.16-dev through the existing Phase 4b instructions owner and Phase 5 window. A demonstrated stale-instruction defect is addressed in 0.1.18-dev by letting a Tourist explicitly mark an already-completed pending instruction Done through that same completion owner/path. Remote-member tracker visual fine-tuning remains deferred.
+- Goal: runtime-validate the combined 0.1.23-dev UI/state changes: Tourist manual completion, refined NPC-first instruction presentation, and the count-objective tracker redesign, then continue protocol-v2 reverse-completion and the remaining broad matrix.
+- Scope boundary: the user explicitly requested post-Phase-6 refinements through the existing owners: Guide reverse-completion feedback (0.1.16+), Tourist manual Done for stale already-completed instructions (0.1.18+), instruction NPC presentation (0.1.19-0.1.21), and the count-objective Group Progress redesign (0.1.22-0.1.23). Other remote-member/binary tracker polish remains deferred unless explicitly requested.
 
 ## Current Design / Development Contract
 
@@ -58,7 +58,7 @@
 - Numeric questID is matched first and remains authoritative; title fallback is unresolved-ID compatibility only.
 - Binary objective conversion is always active for the local player: pfQuest's terminal numeric `0/1` / `1/1`-style token is removed and replaced by a local complete/incomplete texture even if no compatible peer has that quest. Binary rows flow inline as objective label -> local status -> remote class/status pairs. Compatible peers who have the tracked quest append class icon plus complete/incomplete status; peers without the quest append nothing. The overlay is independent of Guide/Tourist mode, and the original pfQuest text/color is retained for restoration. Status marks use Vanilla-safe Blizzard textures rather than Unicode font glyphs.
 - A compatible PFQG peer who does not have the tracked quest contributes no class icon/status for that quest.
-- Count objectives add one class-icon/name/progress row per compatible peer who has the tracked quest; a missing matching objective within an otherwise matched quest displays --.
+- Count objectives render the objective label as a heading with no inline personal fraction, then add a self row first followed by one row per compatible peer who has the tracked quest in party order. Each row keeps the class icon, renders `PlayerName:` in that player's class colour (including self), and renders `current/required` using the same pfQuest objective colour rule for that player's own progress (`pfMap.tooltip:GetColor(current, required)` brightened by 0.2 and clamped). A missing matching objective within an otherwise matched remote quest displays grey `--`.
 - Reusable tracker regions are hidden/restored as peers change and tracker dimensions are recalculated.
 
 ### Guide / Tourist Session and Instructions
@@ -119,6 +119,8 @@
 - 0aa21139e353adbd4fc22bfbcf2adcbcd421a166 — render stored NPC names in the existing Guide/Tourist instruction text formatter; version 0.1.19-dev.
 - e5771dd1ab4288dc793e9ec6ba5b361e656c206b — reformat Guide/Tourist instruction text to NPC-first with the action marker in parentheses and suppress the duplicate standalone marker; version 0.1.20-dev.
 - a5f78570026be729c5878ec9bb615ed357cde302 — refine instruction presentation to `NPC` + yellow `!/?` + `Quest`, abbreviating resolved NPC names longer than 18 characters to initials-plus-final-token and collapsing the unused marker gutter for instruction rows; version 0.1.21-dev.
+- 207f801b0f3b6bb2ceee2126f6890f1a66633065 — redesign numeric/count tracker objectives as objective heading + self/party player rows with class-coloured names and per-player pfQuest-derived progress colours; version 0.1.22-dev.
+- 3674229c012e6a6eab7c93d87542661d08b9b545 — harden count-row formatting by avoiding `_` global pollution and guarding invalid zero requirements; version 0.1.23-dev.
 
 ## Validation State
 
@@ -138,6 +140,7 @@
 - Guide ACCEPT/TURNIN instruction creation passed, but NPC-name presentation remains unverified. The current instruction row renderer shows only quest title; `npcName` is still carried in instruction state when resolvable.
 
 ### Implemented / Awaiting Runtime Test
+- 0.1.23-dev count-objective redesign: numeric objectives now show only `- Objective Name` on the objective line. Under it, self appears first and compatible peers follow in party order as `PlayerName: current/required`; names are class-coloured for every player including self, and each numeric progress value uses pfQuest's own `pfMap.tooltip:GetColor(current, required)` rule (with the same +0.2 brightness) based on that player's progress. Existing class icons are retained. Remote matched quests with no equivalent objective still show grey `--`. Binary objective behavior is unchanged.
 - 0.1.18-dev stale-instruction fix: pending Tourist instruction rows now expose Done. Clicking it routes through the same completion helper used by automatic ACCEPT/TURNIN matching, persists the consumed sequence, performs the existing Tourist strike/fade/removal, and sends the existing protocol-v2 completion acknowledgement so the Guide can complete the corresponding row. No new component, protocol version, window, scheduler, or state owner was added.
 - 0.1.21-dev NPC presentation refinement: resolved instruction rows now render NPC first, then the same yellow action marker visually inline, then quest text. NPC names longer than 18 characters are abbreviated to initials for all tokens except the final token (for example `Commander Ashlam Valorfist` -> `C.A. Valorfist`). The standalone marker column is collapsed for instruction rows and reset for disparity rows. No protocol or state-shape change was required.
 - 0.1.16-dev reverse-completion delta: protocol v2 extends only the existing instructions component. Tourist completion deltas/full snapshots carry consumed instruction sequences; Guide completion waits for all currently eligible same-session Tourists, then uses the existing strike/fade/removal UI.
@@ -207,6 +210,20 @@ Exact addon-affecting commit: a5f78570026be729c5878ec9bb615ed357cde302.
 - Compatibility scan: no `string.match`, `string.gmatch`, `table.unpack`, `RegisterAddonMessagePrefix`, `C_QuestLog`, `C_ChatInfo`, `C_Timer`, or `goto` token is present.
 - Canonical Lua 5.0.3 full-file compiler pass remains not run against this exact commit; runtime visual validation remains pending.
 
+### Static / Automated Checks — 0.1.23-dev Count Tracker Delta
+Exact addon-affecting commit: 3674229c012e6a6eab7c93d87542661d08b9b545 (feature introduced by 207f801b0f3b6bb2ceee2126f6890f1a66633065).
+- Version discipline: count redesign bumped 0.1.21-dev -> 0.1.22-dev; follow-up hardening bumped -> 0.1.23-dev.
+- Upstream-colour reconciliation: pfQuest's tracker uses `pfMap.tooltip:GetColor(objNum, objNeeded)` then brightens each channel by 0.2 for numeric objectives; PFQG now applies that same rule independently to every self/remote numeric count.
+- Layout check: numeric objective text is replaced by white `- Objective Name` with no local fraction left inline.
+- Self-row check: self uses reserved count-row slot 0, appears before party rows, retains a class icon, renders the player's name with local class colour and the local count with local progress colour.
+- Remote-row check: compatible peers remain in party order; each name is class-coloured and each count colour is calculated from that peer's own current/required values.
+- Missing-objective check: an otherwise matched remote quest with no equivalent objective still displays grey `--`.
+- Region reuse check: the existing `pfqGroupRows` row pool is reused; CreateFrame/CreateFontString/CreateTexture call-site counts remain 6/4/5 and no new tracker owner/frame was introduced.
+- Ownership/protocol check: protocol remains PFQGROUP v2; exactly one instructions component registration and one `SendAddonMessage` call remain; binary tracker behavior is untouched by this delta.
+- Compatibility scan: no `string.match`, `string.gmatch`, `table.unpack`, `RegisterAddonMessagePrefix`, `C_QuestLog`, `C_ChatInfo`, `C_Timer`, or `goto` token is present.
+- Expected top-level local count: 154 after adding one top-level colour helper, leaving 46 below Lua 5.0.3's 200-local top-level chunk limit.
+- Canonical Lua 5.0.3 full-file compiler pass remains not run against this exact commit; runtime tracker layout/colour validation remains pending.
+
 ### Checks Not Actually Runnable
 - Exact full-file Lua 5.3.6 parser smoke: not run against the committed pfQuest_Group.lua blob because GitHub connector-backed repository bytes are not materialized into the executable container.
 - Canonical Lua 5.0.3 compiler check: not run / unavailable against the exact Phase 6 blob. Seraphic8x2244/VanillaTemplate main at 6980e95476a72c47a461f7c78ce9e4f649c829f contains the canonical tools/lua50 checker and vendored Lua 5.0.3 source, and the executable environment has a working C compiler, but the private connector-backed checker/source and addon blob are not mounted into that executable environment.
@@ -228,6 +245,7 @@ Exact addon-affecting commit: a5f78570026be729c5878ec9bb615ed357cde302.
 - Initial performance A/B on 0.1.16: with PFQG enabled, moving the mouse anywhere on screen dropped from about 120 FPS to below 100 with poor frametime; with PFQG disabled but pfQuest still enabled, mouse movement still dropped FPS (about 120 -> 80) but frametime felt substantially smoother.
 - 0.1.17-dev performance fix: the always-installed main quest-scan OnUpdate was replaced by a hidden worker frame that is shown only while a quest scan is actually pending and hides itself immediately when idle. Follow-up user A/B after updating and re-enabling PFQG reports that enabled frametime now feels no worse than disabled. Treat the idle quest-scan OnUpdate as a confirmed PFQG performance contributor and the 0.1.17 delta as user-verified for this symptom.
 - Separate from the mouse-specific symptom, the current Vanilla PARTY transport still has a known fan-out inefficiency: logically targeted recovery packets are PARTY broadcasts without an encoded recipient, so non-target PFQG peers can process them. This is a concrete optimization candidate, but it has not yet been changed because it does not explain a stutter that occurs only while the mouse moves.
+- Deferred linked-quest anomaly reported by user: the related quests `Mrs Dalson's Diary`, `Outhouse`, and `Locked Cabinet` do not track correctly in pfQuest itself and also do not track correctly through PFQG's quest interface. Treat this as a separate later investigation into upstream/special linked-quest identity/objective behavior; do not fold it into the count-tracker UI change.
 
 ## Testing
 
@@ -267,7 +285,7 @@ Legend: `PASS` = user runtime pass; `PASS-Q` = runtime pass with qualification; 
 12. **PASS — Binary objective reaches 1/1.** Native binary count is replaced by the local complete symbol.
 13. **PASS — Binary quest nobody else has.** Local symbol still appears; no remote class/status appears.
 14. **UNTESTED — Binary state changes live.** Incomplete -> complete should update without reload.
-15. **PASS — Normal count objective.** Numeric pfQuest display remains numeric rather than becoming binary status.
+15. **UNTESTED — Normal count objective after redesign.** Numeric progress must remain numeric, but the objective line now shows only the objective name and the local `PlayerName: current/required` row appears beneath it. The prior PASS covered the pre-0.1.22 layout and does not validate this redesign.
 16. **UNTESTED — Multiple objectives on one quest.** Binary/count objectives should coexist without row collisions.
 17. **PASS — Collapse/expand a tracked quest.** PFQG regions hide/show cleanly without duplicated icons.
 18. **UNTESTED — Tracker refresh/update.** No duplicated rows, drifting icons, or stale text during repeated progress.
@@ -279,13 +297,13 @@ Legend: `PASS` = user runtime pass; `PASS-Q` = runtime pass with qualification; 
 22. **PASS — Peer does not have the quest.** No class icon/status for that peer.
 23. **UNTESTED — Peer accepts the quest while already grouped.** Class/status should begin appearing after synchronization.
 24. **UNTESTED — Peer abandons or turns in the quest.** Class/status should disappear.
-25. **UNTESTED — Peer has same count quest.** Class/name/progress row should appear beneath the objective.
-26. **UNTESTED — Peer count progresses.** Remote count should update.
+25. **UNTESTED — Peer has same count quest.** Objective heading should contain no inline count; self row appears first, then the peer row, retaining class icons with class-coloured `PlayerName:` labels and per-player coloured numeric progress.
+26. **UNTESTED — Peer count progresses.** Remote count and its pfQuest-derived progress colour should update from that peer's own current/required values without affecting the self row.
 27. **UNTESTED / SKIP-eligible — Equivalent objective cannot be found.** Should display `--`, not bogus `0/N`.
 28. **UNTESTED / SKIP-eligible — Two remote peers with same quest.** Both should display in party order.
 29. **UNTESTED — One remote peer has quest, another does not.** Only the peer with the quest should appear.
 30. **PASS — Group Progress while PFQG mode is Off.** Tracker sharing remains independent of Guide/Tourist mode.
-31. **PASS-Q — Visual sanity.** Functional presentation was readable/correct enough for testing; exact remote-member styling/spacing remains explicitly deferred.
+31. **UNTESTED — Visual sanity after count-row redesign.** Verify objective headings and self/party rows remain readable with no overlap or unusable objective rows. The prior PASS-Q covered the pre-0.1.22 presentation.
 
 #### D. Basic Guide/Tourist session lifecycle
 32. **PASS — Both players Off.** No Guide/Tourist window.
@@ -363,6 +381,15 @@ Legend: `PASS` = user runtime pass; `PASS-Q` = runtime pass with qualification; 
 
 
 
+### Supplemental Count-Objective Tracker Redesign Tests
+These checks cover the intentional 0.1.22-0.1.23 numeric/count presentation change and are separate from binary objective behavior.
+
+C1. **UNTESTED — Count objective heading/self row.** On 0.1.23-dev track a numeric objective such as `Skeletal Fragments: 10/15`. Verify the objective line becomes only `- Skeletal Fragments` and the first child row is the local player as `PlayerName: 10/15`.
+C2. **UNTESTED — Self class/count colours.** Verify the local player name is rendered in the local class colour and the local numeric count uses the same progress colour pfQuest previously used for the local inline count.
+C3. **UNTESTED — Remote class/count colours.** With a compatible peer on the same count quest, verify their row follows self, their name uses their class colour, and their count uses a colour calculated from their own progress (for example local 10/15 and peer 7/15 may differ in colour).
+C4. **UNTESTED — Count progress live update.** Progress self and peer counts and verify values/colours update without duplicated rows, stale values, or objective overlap.
+C5. **UNTESTED — Missing equivalent remote objective.** If naturally encountered, verify an otherwise matched remote quest with no equivalent objective shows grey `--`; otherwise SKIP.
+
 ### Supplemental Protocol-v2 Reverse-Completion Tests
 These checks were added after the original 91-point matrix because reverse Tourist -> Guide completion feedback was introduced later. They are tracked separately so the original matrix numbering remains stable.
 
@@ -395,10 +422,10 @@ R10. **UNTESTED — Instruction NPC-name presentation.** On 0.1.21-dev create ne
 
 
 ### Next Runtime Test
-Update both test clients to 0.1.21-dev / a5f78570026be729c5878ec9bb615ed357cde302. Run R8-R10 first: verify Tourist Done removes a stale already-completed instruction locally and on the Guide and stays consumed after reload/regroup; then create fresh NPC-backed ACCEPT/TURNIN instructions and verify NPC + yellow `!/?` + quest text, including the long-NPC abbreviation behavior. Then continue R1-R6 and the remaining broad-matrix gaps. Keep remote-member tracker presentation polish deferred.
+Update both test clients to 0.1.23-dev / 3674229c012e6a6eab7c93d87542661d08b9b545. Run C1-C4 on a normal numeric/count quest and C5 if naturally available; also run R8-R10 for Tourist Done and NPC-first instruction presentation. Then continue R1-R6 and the remaining broad-matrix gaps. The linked `Mrs Dalson's Diary` / `Outhouse` / `Locked Cabinet` tracking anomaly is explicitly deferred for separate investigation.
 
 ## Planned / Next Work
-1. User tests the 0.1.21-dev Tourist Done path and refined NPC-first/yellow-marker instruction presentation, including Guide feedback and reload/regroup persistence.
+1. User tests the 0.1.23-dev count-objective redesign (C1-C4, C5 if available) plus the Tourist Done/NPC-first instruction refinements (R8-R10).
 2. Fix only defects demonstrated by that runtime test, with normal version discipline.
 3. Continue the remaining protocol-v2 focused cases and broad-matrix gaps on the resulting known-good build; keep remote-member tracker presentation polish deferred.
 4. After a known-good runtime state exists, review release/promotion readiness separately; do not treat development checks as a runtime test.
@@ -407,6 +434,7 @@ Update both test clients to 0.1.21-dev / a5f78570026be729c5878ec9bb615ed357cde30
 - New feature work beyond the agreed v1 Phase 1–6 scope.
 - Release/promotion to main before broad runtime validation is complete or any validation debt is explicitly accepted.
 - dev_rulebook.md changes.
+- Investigation/fix for the linked `Mrs Dalson's Diary`, `Outhouse`, and `Locked Cabinet` tracking anomaly; user reports the behavior is already incorrect in pfQuest itself as well as PFQG, so handle separately from current tracker presentation work.
 
 ## Release / Promotion Notes
 - dev_rulebook.md and DEV_PROGRESS.md must never be present on main.
@@ -415,4 +443,4 @@ Update both test clients to 0.1.21-dev / a5f78570026be729c5878ec9bb615ed357cde30
 - External/runtime prerequisite: pfQuest.
 
 ## Exact Next Step
-Update both PFQG test clients to 0.1.21-dev / a5f78570026be729c5878ec9bb615ed357cde302. Verify R8-R9 using a stale already-completed instruction, then create fresh Guide ACCEPT/TURNIN instructions at a resolvable NPC and verify R10 shows NPC + yellow `!/?` + quest text with long NPC names abbreviated (for example `C.A. Valorfist`). The mouse-movement frametime regression remains considered resolved unless it recurs.
+Update both PFQG test clients to 0.1.23-dev / 3674229c012e6a6eab7c93d87542661d08b9b545. First verify C1-C4 on a normal count quest: objective-only heading, self-first class-coloured row, peer class-coloured row, and independent pfQuest-style count colours/live updates. Then run R8-R10. Do not investigate the three linked-quest anomalies in this pass. The mouse-movement frametime regression remains considered resolved unless it recurs.
