@@ -1584,6 +1584,9 @@ local function GroupProgressColorHex(current, required)
 
   current = tonumber(current) or 0
   required = tonumber(required) or 1
+  if required <= 0 then
+    required = 1
+  end
 
   if pfMap and pfMap.tooltip and pfMap.tooltip.GetColor then
     red, green, blue = pfMap.tooltip:GetColor(current, required)
@@ -1987,6 +1990,7 @@ local function ApplyGroupProgressToButton(button, captureBase)
   local statusWidth
   local progressText
   local progressColor
+  local localClassName
   local localClassToken
   local localName
 
@@ -2021,7 +2025,7 @@ local function ApplyGroupProgressToButton(button, captureBase)
   iconSize = math.max(8, fontSize - 2)
   pairWidth = (iconSize * 2) + 2
   localName = playerName or UnitName("player") or "Player"
-  _, localClassToken = UnitClass("player")
+  localClassName, localClassToken = UnitClass("player")
 
   for objectiveIndex = 1, table.getn(localQuest.objectives or {}) do
     objective = button.objectives and button.objectives[objectiveIndex]
