@@ -2,11 +2,11 @@
 
 ## Current
 - Branch: dev.
-- Version: 0.1.19-dev from pfQuest_Group.toc.
-- Latest addon-affecting development commit: 0aa21139e353adbd4fc22bfbcf2adcbcd421a166 — show stored instruction NPC names in Guide/Tourist instruction rows when available.
+- Version: 0.1.20-dev from pfQuest_Group.toc.
+- Latest addon-affecting development commit: e5771dd1ab4288dc793e9ec6ba5b361e656c206b — format instruction rows as `NPC Name (!) Quest Name` / `NPC Name (?) Quest Name`, with marker+quest fallback when NPC is unavailable.
 - Handoff checkpoint: the current dev head carrying this status file; always verify the actual remote branch head before resuming.
 - Stable baseline: None. main remains exactly bootstrap commit 4c5c63f074923266566c36c51ce2718d0060166f and is not a runtime release.
-- Goal: runtime-validate the combined 0.1.19-dev instruction fixes: Tourist manual completion for stale already-completed instructions plus NPC-name presentation, then continue protocol-v2 reverse-completion and the remaining broad matrix.
+- Goal: runtime-validate the combined 0.1.20-dev instruction fixes: Tourist manual completion for stale already-completed instructions plus the requested NPC-first instruction presentation, then continue protocol-v2 reverse-completion and the remaining broad matrix.
 - Scope boundary: the user explicitly requested one post-Phase-6 feature addition: when every Tourist eligible for a Guide instruction has completed it, the Guide should receive the same strike/fade/removal feedback. That feature is implemented in 0.1.16-dev through the existing Phase 4b instructions owner and Phase 5 window. A demonstrated stale-instruction defect is addressed in 0.1.18-dev by letting a Tourist explicitly mark an already-completed pending instruction Done through that same completion owner/path. Remote-member tracker visual fine-tuning remains deferred.
 
 ## Current Design / Development Contract
@@ -79,7 +79,7 @@
 
 ### Guide / Tourist Window and Disparities
 - The existing compact movable Phase 5 window is the only Guide/Tourist presentation window and is shown only in Guide/Tourist mode.
-- Guide/Tourist instruction rows use Blizzard-style yellow !/? markers. When an instruction carries a resolved `npcName`, the row renders `Quest Title - NPC Name`; otherwise it keeps the existing quest-title/ID fallback. Tourist completion uses the existing completion event for ephemeral strike/fade/removal only.
+- Guide/Tourist instruction rows embed the action marker in the row text. When an instruction carries a resolved `npcName`, ACCEPT renders `NPC Name (!) Quest Name` and TURNIN renders `NPC Name (?) Quest Name`; when NPC resolution is unavailable, fallback is `(!) Quest Name` / `(?) Quest Name`. The old standalone instruction marker is suppressed to avoid duplication. Tourist completion uses the existing completion event for ephemeral strike/fade/removal only.
 - Guide disparities are derived presentation state only and compare current local Guide quests against ready remote quest state for compatible Tourists paired to the same Guide session.
 - Unknown/unready remote quest state is never treated as missing.
 - Current quest disparity is independent of Tourist joinBaseline.
@@ -117,6 +117,7 @@
 - c74a0da565d412ad118466faaff1640e21d8096c — make unrelated PARTY recipients ignore Tourist completion acknowledgements instead of requesting unnecessary full sync; version 0.1.16-dev.
 - 53e901594eacb8d7bb1be3eb15b2b3684b2d30fe — add Tourist-side Done for already-completed pending instructions using the existing consumed-state/acknowledgement pipeline; version 0.1.18-dev.
 - 0aa21139e353adbd4fc22bfbcf2adcbcd421a166 — render stored NPC names in the existing Guide/Tourist instruction text formatter; version 0.1.19-dev.
+- e5771dd1ab4288dc793e9ec6ba5b361e656c206b — reformat Guide/Tourist instruction text to NPC-first with the action marker in parentheses and suppress the duplicate standalone marker; version 0.1.20-dev.
 
 ## Validation State
 
@@ -137,7 +138,7 @@
 
 ### Implemented / Awaiting Runtime Test
 - 0.1.18-dev stale-instruction fix: pending Tourist instruction rows now expose Done. Clicking it routes through the same completion helper used by automatic ACCEPT/TURNIN matching, persists the consumed sequence, performs the existing Tourist strike/fade/removal, and sends the existing protocol-v2 completion acknowledgement so the Guide can complete the corresponding row. No new component, protocol version, window, scheduler, or state owner was added.
-- 0.1.19-dev NPC presentation fix: the existing Guide/Tourist instruction formatter now appends the already-synchronized `npcName` as `Quest Title - NPC Name` when non-empty, while preserving the current quest-title/ID fallback when NPC resolution was unavailable. No protocol or state-shape change was required.
+- 0.1.20-dev NPC presentation refinement: the existing Guide/Tourist formatter now renders resolved instructions as `NPC Name (!) Quest Name` for ACCEPT and `NPC Name (?) Quest Name` for TURNIN. If NPC resolution is unavailable it renders `(!) Quest Name` / `(?) Quest Name`. The separate instruction marker column is blanked for instruction rows so the marker is not duplicated. No protocol or state-shape change was required.
 - 0.1.16-dev reverse-completion delta: protocol v2 extends only the existing instructions component. Tourist completion deltas/full snapshots carry consumed instruction sequences; Guide completion waits for all currently eligible same-session Tourists, then uses the existing strike/fade/removal UI.
 - 0.1.16-dev recovery/transport hardening: consumed state is recoverable through full snapshots; acknowledgements are idempotent; unrelated PARTY recipients ignore them; no new component, session owner, scheduler, or Guide/Tourist window was introduced.
 - 0.1.9+ delta: all addon transport uses the Vanilla-supported PARTY addon channel; no four-argument addon-WHISPER send remains.
@@ -377,14 +378,14 @@ R6. **UNTESTED — Error/replay/premature-completion guard.** Throughout R1-R5, 
 R7. **PASS — Offline/regroup completion recovery.** On 0.1.17-dev both characters logged in with persisted Guide/Tourist modes while initially ungrouped, then formed a party. Pairing resumed and the Guide UI retroactively strike/fade/removed two steps the Tourist had completed previously, confirming persisted consumed-step state can recover through regroup/full-state synchronization.
 R8. **UNTESTED — Tourist manual Done for an already-completed stale instruction.** On 0.1.18-dev reproduce a pending instruction for a quest/action the Tourist already completed, click Done on the Tourist row, and verify the Tourist row performs the normal strike/fade/removal.
 R9. **UNTESTED — Manual Done feeds back to Guide.** Continuing R8 with one eligible Tourist, verify the corresponding Guide row strike/fade/removes after the Tourist clicks Done; reload/regroup afterward and verify the completed instruction does not return on either side.
-R10. **UNTESTED — Instruction NPC-name presentation.** On 0.1.19-dev create a new Guide ACCEPT or TURNIN instruction at an NPC that PFQG can resolve and verify the Tourist row displays `Quest Title - NPC Name`. Also confirm an unresolved-NPC instruction still renders cleanly with quest text only.
+R10. **UNTESTED — Instruction NPC-name presentation.** On 0.1.20-dev create a new Guide ACCEPT or TURNIN instruction at an NPC that PFQG can resolve and verify the Tourist row displays `NPC Name (!) Quest Name` for ACCEPT or `NPC Name (?) Quest Name` for TURNIN, with no duplicate standalone marker. Also confirm an unresolved-NPC instruction falls back cleanly to `(!) Quest Name` / `(?) Quest Name`.
 
 
 ### Next Runtime Test
-Update both test clients to 0.1.19-dev / 0aa21139e353adbd4fc22bfbcf2adcbcd421a166. Run R8-R10 first: verify Tourist Done removes a stale already-completed instruction locally and on the Guide and stays consumed after reload/regroup; then create a fresh NPC-backed ACCEPT/TURNIN instruction and verify the Tourist sees `Quest Title - NPC Name`. Then continue R1-R6 and the remaining broad-matrix gaps. Keep remote-member tracker presentation polish deferred.
+Update both test clients to 0.1.20-dev / e5771dd1ab4288dc793e9ec6ba5b361e656c206b. Run R8-R10 first: verify Tourist Done removes a stale already-completed instruction locally and on the Guide and stays consumed after reload/regroup; then create fresh NPC-backed ACCEPT/TURNIN instructions and verify `NPC Name (!) Quest Name` / `NPC Name (?) Quest Name` with no duplicate marker. Then continue R1-R6 and the remaining broad-matrix gaps. Keep remote-member tracker presentation polish deferred.
 
 ## Planned / Next Work
-1. User tests the 0.1.19-dev Tourist Done path and NPC-name instruction presentation, including Guide feedback and reload/regroup persistence.
+1. User tests the 0.1.20-dev Tourist Done path and NPC-first instruction presentation, including Guide feedback and reload/regroup persistence.
 2. Fix only defects demonstrated by that runtime test, with normal version discipline.
 3. Continue the remaining protocol-v2 focused cases and broad-matrix gaps on the resulting known-good build; keep remote-member tracker presentation polish deferred.
 4. After a known-good runtime state exists, review release/promotion readiness separately; do not treat development checks as a runtime test.
@@ -401,4 +402,4 @@ Update both test clients to 0.1.19-dev / 0aa21139e353adbd4fc22bfbcf2adcbcd421a16
 - External/runtime prerequisite: pfQuest.
 
 ## Exact Next Step
-Update both PFQG test clients to 0.1.19-dev / 0aa21139e353adbd4fc22bfbcf2adcbcd421a166. Verify R8-R9 using a stale already-completed instruction, then create a fresh Guide ACCEPT/TURNIN at a resolvable NPC and verify R10 shows `Quest Title - NPC Name` on the Tourist. The mouse-movement frametime regression remains considered resolved unless it recurs.
+Update both PFQG test clients to 0.1.20-dev / e5771dd1ab4288dc793e9ec6ba5b361e656c206b. Verify R8-R9 using a stale already-completed instruction, then create fresh Guide ACCEPT/TURNIN instructions at a resolvable NPC and verify R10 shows `NPC Name (!) Quest Name` / `NPC Name (?) Quest Name` on the Tourist with no duplicate marker. The mouse-movement frametime regression remains considered resolved unless it recurs.
