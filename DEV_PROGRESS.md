@@ -2,12 +2,12 @@
 
 ## Current
 - Branch: dev.
-- Version: 0.1.17-dev from pfQuest_Group.toc.
-- Latest addon-affecting development commit: 4df6d0b9c1c3682e5077eaaab6b191f445aa3c16 — suspend the idle quest-scan OnUpdate so PFQG has no steady-state quest-scan per-frame callback.
+- Version: 0.1.18-dev from pfQuest_Group.toc.
+- Latest addon-affecting development commit: 53e901594eacb8d7bb1be3eb15b2b3684b2d30fe — add a Tourist-side Done action that consumes an already-completed pending instruction through the existing protocol-v2 completion path.
 - Handoff checkpoint: the current dev head carrying this status file; always verify the actual remote branch head before resuming.
 - Stable baseline: None. main remains exactly bootstrap commit 4c5c63f074923266566c36c51ce2718d0060166f and is not a runtime release.
-- Goal: runtime-validate protocol-v2 reverse Tourist-completion on the performance-verified 0.1.17-dev build, then continue the remaining broad matrix and decide release/promotion readiness.
-- Scope boundary: the user explicitly requested one post-Phase-6 feature addition: when every Tourist eligible for a Guide instruction has completed it, the Guide should receive the same strike/fade/removal feedback. That feature is implemented in 0.1.16-dev through the existing Phase 4b instructions owner and Phase 5 window; remote-member tracker visual fine-tuning remains deferred.
+- Goal: runtime-validate the 0.1.18-dev Tourist manual-completion fix for stale already-completed instructions, then continue protocol-v2 reverse-completion and the remaining broad matrix.
+- Scope boundary: the user explicitly requested one post-Phase-6 feature addition: when every Tourist eligible for a Guide instruction has completed it, the Guide should receive the same strike/fade/removal feedback. That feature is implemented in 0.1.16-dev through the existing Phase 4b instructions owner and Phase 5 window. A demonstrated stale-instruction defect is addressed in 0.1.18-dev by letting a Tourist explicitly mark an already-completed pending instruction Done through that same completion owner/path. Remote-member tracker visual fine-tuning remains deferred.
 
 ## Current Design / Development Contract
 
@@ -73,6 +73,7 @@
 - Remote instruction full snapshots are accepted only when coherent with the currently known remote Guide session. Same-session stale cursors cannot roll backward.
 - Tourist pending instructions are selected-Guide/session scoped and include only seq > joinBaseline. Consumed instruction sequence numbers persist so reload/full resync does not replay completed work.
 - Matching local Tourist ACCEPT/TURNIN consumes the earliest matching pending instruction; numeric questID is authoritative when both sides have one and title is fallback.
+- A Tourist may also click Done on a pending instruction when the underlying quest action happened before that instruction could be matched. Done is a semantic completion acknowledgement, not a presentation-only hide: it writes the same persisted consumed sequence state, triggers the existing local strike/fade/removal, and sends the same protocol-v2 completion acknowledgement to the Guide. If PARTY transport is temporarily unavailable, persisted consumed state remains recoverable through the existing instructions full snapshot on later synchronization.
 - Tourist consumed sequence state remains persisted in the Phase 4b instruction store. Under protocol v2 a Tourist sends an idempotent completion delta when consuming a step and includes the consumed set in its instructions full snapshot, so missed acknowledgements can recover through the existing full-state path without a new scheduler or component.
 - Guide completion is derived only for Tourists paired to the same Guide session whose fixed joinBaseline is below that instruction sequence; Tourists who joined after the step do not block it. When all currently eligible paired Tourists have acknowledged the step, the Guide row uses the existing strike/fade/removal presentation. Acknowledgements seen by unrelated PARTY peers are ignored.
 
@@ -114,6 +115,7 @@
 - fb3f8f3bcf46b0372303db590d4f68694aba97af — move binary local/remote status from right-edge justification to inline placement after the objective label; version 0.1.14-dev.
 - 07f509361926fa05dcdab748a40c08b5e77d5933 — add protocol-v2 Tourist completion acknowledgements and Guide-side all-Tourists strike/fade/removal; version 0.1.15-dev.
 - c74a0da565d412ad118466faaff1640e21d8096c — make unrelated PARTY recipients ignore Tourist completion acknowledgements instead of requesting unnecessary full sync; version 0.1.16-dev.
+- 53e901594eacb8d7bb1be3eb15b2b3684b2d30fe — add Tourist-side Done for already-completed pending instructions using the existing consumed-state/acknowledgement pipeline; version 0.1.18-dev.
 
 ## Validation State
 
@@ -133,6 +135,7 @@
 - Guide ACCEPT/TURNIN instruction creation passed, but NPC-name presentation remains unverified. The current instruction row renderer shows only quest title; `npcName` is still carried in instruction state when resolvable.
 
 ### Implemented / Awaiting Runtime Test
+- 0.1.18-dev stale-instruction fix: pending Tourist instruction rows now expose Done. Clicking it routes through the same completion helper used by automatic ACCEPT/TURNIN matching, persists the consumed sequence, performs the existing Tourist strike/fade/removal, and sends the existing protocol-v2 completion acknowledgement so the Guide can complete the corresponding row. No new component, protocol version, window, scheduler, or state owner was added.
 - 0.1.16-dev reverse-completion delta: protocol v2 extends only the existing instructions component. Tourist completion deltas/full snapshots carry consumed instruction sequences; Guide completion waits for all currently eligible same-session Tourists, then uses the existing strike/fade/removal UI.
 - 0.1.16-dev recovery/transport hardening: consumed state is recoverable through full snapshots; acknowledgements are idempotent; unrelated PARTY recipients ignore them; no new component, session owner, scheduler, or Guide/Tourist window was introduced.
 - 0.1.9+ delta: all addon transport uses the Vanilla-supported PARTY addon channel; no four-argument addon-WHISPER send remains.
@@ -166,6 +169,18 @@ Current addon-affecting retest commit: 4df6d0b9c1c3682e5077eaaab6b191f445aa3c16.
 - Focused Phase 6 mocked integration harness passed texluac -p and runtime assertions under the available Lua 5.3.6 texluac/texlua environment. Coverage: session-first full snapshots; first-known/restarted boot invalidation and recovery; quest readiness/revision handling; numeric-ID-authoritative matching; cross-session instruction-full rejection; missed-instruction cursor resync; instruction validation before cursor mutation; instruction-delta-before-session-delta ordering.
 - Focused protocol-v2 reverse-completion extracted-logic harness passed texluac -p and 12/12 runtime assertions under the available texluac/texlua environment against the current 0.1.17-dev logic. Covered: one eligible Tourist completes; two Tourists wait for both; late joiners do not block an older step; zero eligible Tourists do not auto-remove a row; other-Guide Tourists are ignored; completion filtering drops pre-baseline, beyond-cursor, wrong-session and unrelated-PARTY state while retaining eligible known instruction records. This is a mocked/static logic check, not an in-game test and not a canonical Lua 5.0.3 full-file compiler pass.
 
+### Static / Automated Checks — 0.1.18-dev Manual Completion Delta
+Exact addon-affecting commit: 53e901594eacb8d7bb1be3eb15b2b3684b2d30fe.
+- Version discipline: passed; 0.1.17-dev -> 0.1.18-dev in the same addon-affecting commit.
+- Structural check: exactly one `CompleteTouristInstruction` helper exists; both automatic Tourist ACCEPT/TURNIN matching and the Tourist Done button route through it.
+- Completion semantics check: the shared helper writes `store.consumed[seq] = true`, removes the pending entry, sends `EncodeInstructionCompletionWire("A", ...)` through the existing instructions delta path, and emits the existing Tourist completion/change events.
+- Ownership/protocol check: protocol remains PFQGROUP v2; exactly one instructions component registration remains; no new synchronized component or Guide/Tourist window was introduced.
+- Transport check: exactly one `SendAddonMessage` call remains and continues to use the existing PARTY transport path.
+- UI structure: the existing per-row action button is reused for Tourist Done; no additional frame/button creation site was introduced.
+- Compatibility scan: no `string.match`, `string.gmatch`, `table.unpack`, `RegisterAddonMessagePrefix`, `C_QuestLog`, `C_ChatInfo`, `C_Timer`, or `goto` token was introduced.
+- Expected top-level local count: 153 after adding one top-level helper, leaving 47 below Lua 5.0.3's 200-local top-level chunk limit.
+- Canonical Lua 5.0.3 full-file compiler pass remains not run against this exact commit; do not treat these static checks as a compiler or in-game pass.
+
 ### Checks Not Actually Runnable
 - Exact full-file Lua 5.3.6 parser smoke: not run against the committed pfQuest_Group.lua blob because GitHub connector-backed repository bytes are not materialized into the executable container.
 - Canonical Lua 5.0.3 compiler check: not run / unavailable against the exact Phase 6 blob. Seraphic8x2244/VanillaTemplate main at 6980e95476a72c47a461f7c78ce9e4f649c829f contains the canonical tools/lua50 checker and vendored Lua 5.0.3 source, and the executable environment has a working C compiler, but the private connector-backed checker/source and addon blob are not mounted into that executable environment.
@@ -182,6 +197,7 @@ Current addon-affecting retest commit: 4df6d0b9c1c3682e5077eaaab6b191f445aa3c16.
 - No obvious later-Lua syntax/API blacklist hit is present in the current source.
 - Canonical Lua 5.0.3 compiler check remains not run against 0.1.17-dev: the connected GitHub source is not mounted in the executable environment, and direct network cloning from the executable environment is unavailable.
 - Protocol-v2 reverse-completion now has partial user runtime validation on 0.1.17-dev: after both players logged in on characters with persisted Guide/Tourist modes while initially ungrouped, forming the party re-established the Guide/Tourist relationship and the Guide UI retroactively strike/fade/removed two steps the Tourist had completed previously. This demonstrates persisted completion state recovering through regroup/full-state synchronization. Live one-Tourist completion, two-Tourist gating, late-join gating, and the focused recovery variants remain separately untested unless explicitly covered below.
+- Demonstrated 0.1.17 stale-instruction defect: when the Guide later ACCEPTs/TURNINs a quest action the Tourist had already performed before the instruction existed, the Tourist has no future matching local quest event to consume that instruction, leaving a permanent Tourist row and therefore a permanent Guide row. 0.1.18-dev addresses this with explicit Tourist Done acknowledgement; runtime validation is pending.
 - Initial performance A/B on 0.1.16: with PFQG enabled, moving the mouse anywhere on screen dropped from about 120 FPS to below 100 with poor frametime; with PFQG disabled but pfQuest still enabled, mouse movement still dropped FPS (about 120 -> 80) but frametime felt substantially smoother.
 - 0.1.17-dev performance fix: the always-installed main quest-scan OnUpdate was replaced by a hidden worker frame that is shown only while a quest scan is actually pending and hides itself immediately when idle. Follow-up user A/B after updating and re-enabling PFQG reports that enabled frametime now feels no worse than disabled. Treat the idle quest-scan OnUpdate as a confirmed PFQG performance contributor and the 0.1.17 delta as user-verified for this symptom.
 - Separate from the mouse-specific symptom, the current Vanilla PARTY transport still has a known fan-out inefficiency: logically targeted recovery packets are PARTY broadcasts without an encoded recipient, so non-target PFQG peers can process them. This is a concrete optimization candidate, but it has not yet been changed because it does not explain a stutter that occurs only while the mouse moves.
@@ -193,6 +209,7 @@ Current addon-affecting retest commit: 4df6d0b9c1c3682e5077eaaab6b191f445aa3c16.
 - User A/B result: the mouse-movement frametime regression is resolved for PFQG; enabled frametime now feels no worse than disabled with pfQuest left enabled.
 - Additional 0.1.17 runtime result: both players logged in while initially ungrouped with persisted Guide/Tourist modes, then formed a party; the Guide/Tourist relationship resumed and two previously completed Tourist steps were retroactively strike/fade/removed on the Guide UI after synchronization.
 - This upgrades broad-matrix item 62 (both players relog/persisted session + fresh peer boot synchronization) to PASS and provides partial runtime validation of protocol-v2 completion recovery. It does not by itself prove the live one-Tourist or multi-Tourist completion cases.
+- Same 0.1.17 session exposed a demonstrated stale-instruction case: Guide hand-ins for quests the Tourist had already completed could leave permanent instruction rows on both Tourist and Guide. This is the defect targeted by 0.1.18-dev.
 
 ### Last Broad-Matrix Runtime Test
 - Version/commit: 0.1.14-dev / fb3f8f3bcf46b0372303db590d4f68694aba97af.
@@ -345,15 +362,17 @@ R4. **UNTESTED — Late joiner.** Create a step while Tourist 1 is already paire
 R5. **UNTESTED — Recovery after Guide reload.** With two eligible Tourists, let Tourist 1 complete the step, reload the Guide and allow synchronization to settle, then let Tourist 2 complete it. The Guide row must then strike/fade/disappear, demonstrating recovered acknowledgement state where practical.
 R6. **UNTESTED — Error/replay/premature-completion guard.** Throughout R1-R5, record any PFQG Lua error, duplicate row, row reappearing after removal, repeated completion animation, or Guide completion before every eligible Tourist has finished.
 R7. **PASS — Offline/regroup completion recovery.** On 0.1.17-dev both characters logged in with persisted Guide/Tourist modes while initially ungrouped, then formed a party. Pairing resumed and the Guide UI retroactively strike/fade/removed two steps the Tourist had completed previously, confirming persisted consumed-step state can recover through regroup/full-state synchronization.
+R8. **UNTESTED — Tourist manual Done for an already-completed stale instruction.** On 0.1.18-dev reproduce a pending instruction for a quest/action the Tourist already completed, click Done on the Tourist row, and verify the Tourist row performs the normal strike/fade/removal.
+R9. **UNTESTED — Manual Done feeds back to Guide.** Continuing R8 with one eligible Tourist, verify the corresponding Guide row strike/fade/removes after the Tourist clicks Done; reload/regroup afterward and verify the completed instruction does not return on either side.
 
 
 ### Next Runtime Test
-Continue runtime validation on 0.1.17-dev / 4df6d0b9c1c3682e5077eaaab6b191f445aa3c16. First test the protocol-v2 reverse-completion feature: one Tourist completion should strike/fade/remove the Guide row; with two Tourists the Guide row must remain until both eligible Tourists complete; a Tourist joining after an older step must not block it; reload/rejoin recovery should preserve acknowledgement where practical. Then continue the remaining broad-matrix gaps. Keep remote-member tracker presentation polish deferred.
+Update both test clients to 0.1.18-dev / 53e901594eacb8d7bb1be3eb15b2b3684b2d30fe. First reproduce the demonstrated stale-instruction case and run R8-R9: the Tourist clicks Done on an instruction for a quest/action already completed, the Tourist row strike/fade/removes, the Guide receives the completion and removes its corresponding row, and the completion stays gone after reload/regroup. Then continue R1-R6 and the remaining broad-matrix gaps. Keep remote-member tracker presentation polish deferred.
 
 ## Planned / Next Work
-1. User tests the protocol-v2 reverse-completion feature on the now performance-verified 0.1.17-dev build.
+1. User tests the 0.1.18-dev Tourist Done path against the demonstrated stale-instruction case, including Guide feedback and reload/regroup persistence.
 2. Fix only defects demonstrated by that runtime test, with normal version discipline.
-3. Continue the remaining broad-matrix gaps on the resulting known-good build; keep remote-member tracker presentation polish deferred.
+3. Continue the remaining protocol-v2 focused cases and broad-matrix gaps on the resulting known-good build; keep remote-member tracker presentation polish deferred.
 4. After a known-good runtime state exists, review release/promotion readiness separately; do not treat development checks as a runtime test.
 
 ## Deferred / Out of Scope
@@ -368,4 +387,4 @@ Continue runtime validation on 0.1.17-dev / 4df6d0b9c1c3682e5077eaaab6b191f445aa
 - External/runtime prerequisite: pfQuest.
 
 ## Exact Next Step
-Keep all PFQG test clients on 0.1.17-dev / 4df6d0b9c1c3682e5077eaaab6b191f445aa3c16 and test reverse Tourist-completion feedback first, then resume the untested broad-matrix cases. The mouse-movement frametime regression is considered resolved on this build unless it recurs.
+Update both PFQG test clients to 0.1.18-dev / 53e901594eacb8d7bb1be3eb15b2b3684b2d30fe. Reproduce one stale Tourist instruction caused by the Tourist having already completed the underlying quest/action, click Done on the Tourist row, and verify normal local strike/fade/removal plus corresponding Guide strike/fade/removal. Then reload/regroup and verify it stays consumed. The mouse-movement frametime regression remains considered resolved unless it recurs.
