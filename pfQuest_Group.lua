@@ -7,7 +7,7 @@ local L = pfQuest_Group_L or {}
 
 local PROTOCOL_PREFIX = "PFQGROUP"
 local PROTOCOL_VERSION = 2
-local DB_SCHEMA_VERSION = 1
+local DB_SCHEMA_VERSION = 2
 local CHUNK_SIZE = 180
 local MAX_CHUNKS = 64
 local INCOMING_TIMEOUT = 30
@@ -340,13 +340,26 @@ end
 
 local function NormalizeInstructionStore(store, session)
   local guideRecords = {}
+  local guideParticipants = {}
+  local guideEligible = {}
+  local guideAcknowledged = {}
+  local guideCompleted = {}
+  local guideEligibilityKnown = {}
   local consumed = {}
   local guideCursor = tonumber(session and session.guideActionSeq) or 0
   local baseline = tonumber(session and session.joinBaseline)
+  local sameGuideSession
   local key
   local record
   local normalized
   local seq
+  local name
+  local normalizedName
+  local participantBaseline
+  local names
+  local normalizedNames
+  local hasEligible
+  local allAcknowledged
 
   if type(store) ~= "table" then
     store = {}
@@ -362,14 +375,99 @@ local function NormalizeInstructionStore(store, session)
   end
 
   if session and session.mode == "GUIDE" and session.guideSessionId then
-    if store.guideSessionId ~= session.guideSessionId then
+    sameGuideSession = store.guideSessionId == session.guideSessionId
+    if not sameGuideSession then
       guideRecords = {}
     end
+
+    if sameGuideSession and type(store.guideParticipants) == "table" then
+      for name, participantBaseline in pairs(store.guideParticipants) do
+        normalizedName = NormalizeName(name)
+        participantBaseline = tonumber(participantBaseline)
+        if normalizedName and participantBaseline and participantBaseline >= 0 and participantBaseline <= guideCursor then
+          guideParticipants[normalizedName] = math.floor(participantBaseline)
+        end
+      end
+    end
+
+    if sameGuideSession and type(store.guideEligible) == "table" then
+      for key, names in pairs(store.guideEligible) do
+        seq = tonumber(key)
+        if seq and guideRecords[seq] and type(names) == "table" then
+          seq = math.floor(seq)
+          normalizedNames = {}
+          for name in pairs(names) do
+            normalizedName = NormalizeName(name)
+            if normalizedName then
+              normalizedNames[normalizedName] = true
+            end
+          end
+          if next(normalizedNames) then
+            guideEligible[seq] = normalizedNames
+          end
+        end
+      end
+    end
+
+    if sameGuideSession and type(store.guideAcknowledged) == "table" then
+      for key, names in pairs(store.guideAcknowledged) do
+        seq = tonumber(key)
+        if seq and guideRecords[seq] and guideEligible[seq] and type(names) == "table" then
+          seq = math.floor(seq)
+          normalizedNames = {}
+          for name in pairs(names) do
+            normalizedName = NormalizeName(name)
+            if normalizedName and guideEligible[seq][normalizedName] then
+              normalizedNames[normalizedName] = true
+            end
+          end
+          if next(normalizedNames) then
+            guideAcknowledged[seq] = normalizedNames
+          end
+        end
+      end
+    end
+
+    if sameGuideSession and type(store.guideEligibilityKnown) == "table" then
+      for key, record in pairs(store.guideEligibilityKnown) do
+        seq = tonumber(key)
+        if record and seq and guideRecords[seq] then
+          guideEligibilityKnown[math.floor(seq)] = true
+        end
+      end
+    end
+
+    for seq in pairs(guideRecords) do
+      if guideEligibilityKnown[seq] then
+        hasEligible = false
+        allAcknowledged = true
+        for name in pairs(guideEligible[seq] or {}) do
+          hasEligible = true
+          if not guideAcknowledged[seq] or not guideAcknowledged[seq][name] then
+            allAcknowledged = false
+          end
+        end
+        if hasEligible and allAcknowledged then
+          guideCompleted[seq] = true
+        end
+      end
+    end
+
     store.guideSessionId = session.guideSessionId
     store.guideRecords = guideRecords
+    store.guideParticipants = guideParticipants
+    store.guideEligible = guideEligible
+    store.guideAcknowledged = guideAcknowledged
+    store.guideCompleted = guideCompleted
+    store.guideEligibilityKnown = guideEligibilityKnown
   else
     store.guideSessionId = nil
     store.guideRecords = {}
+    store.guideParticipants = {}
+    store.guideEligible = {}
+    store.guideAcknowledged = {}
+    store.guideCompleted = {}
+    store.guideEligibilityKnown = {}
   end
 
   if type(store.consumed) == "table" then
@@ -2450,7 +2548,18 @@ local function InstructionSnapshot()
   local store = Addon.db and Addon.db.instructions
 
   if session and session.mode == "GUIDE" and session.guideSessionId and store and store.guideSessionId == session.guideSessionId then
-    return EncodeInstructionWire("S", session.guideSessionId, tonumber(session.guideActionSeq) or 0, store.guideRecords)
+    local pending = {}
+    local seq
+    local instruction
+
+    for seq, instruction in pairs(store.guideRecords or {}) do
+      seq = tonumber(seq)
+      if seq and not (store.guideCompleted and store.guideCompleted[seq]) then
+        pending[seq] = instruction
+      end
+    end
+
+    return EncodeInstructionWire("S", session.guideSessionId, tonumber(session.guideActionSeq) or 0, pending)
   end
 
   if session and session.mode == "TOURIST" and session.guideSessionId and store and store.touristSessionId == session.guideSessionId then
@@ -2590,6 +2699,7 @@ local function ApplyRemoteInstructionCompletionFull(sender, decoded)
     peer.instructionCompletions.consumed[seq] = true
   end
 
+  Addon.RecordGuideInstructionCompletions(sender, decoded.sessionId, filtered)
   Emit("REMOTE_INSTRUCTION_COMPLETIONS_CHANGED", sender, peer.instructionCompletions)
 end
 
@@ -2624,6 +2734,7 @@ local function ApplyRemoteInstructionCompletionDelta(sender, payload)
     end
   end
 
+  Addon.RecordGuideInstructionCompletions(sender, decoded.sessionId, filtered)
   if changed then
     Emit("REMOTE_INSTRUCTION_COMPLETIONS_CHANGED", sender, peer.instructionCompletions)
   end
@@ -2883,6 +2994,7 @@ local function ApplyRemoteSession(sender, payload, checkInstructionSync)
     guideActionSeq = guideActionSeq
   }
 
+  Addon.UpdateGuideParticipant(sender, peer.session)
   Emit("REMOTE_SESSION_CHANGED", sender, peer.session)
   ReconcileTouristPairing(sender)
   ReconcileTouristInstructions(sender)
@@ -2988,12 +3100,22 @@ end
 function Addon.GetGuideInstructions()
   local session = Addon.db and Addon.db.session
   local store = Addon.db and Addon.db.instructions
+  local pending = {}
+  local seq
+  local instruction
 
   if not session or session.mode ~= "GUIDE" or not store or store.guideSessionId ~= session.guideSessionId then
     return {}
   end
 
-  return CopyInstructionList(store.guideRecords)
+  for seq, instruction in pairs(store.guideRecords or {}) do
+    seq = tonumber(seq)
+    if seq and not (store.guideCompleted and store.guideCompleted[seq]) then
+      pending[seq] = instruction
+    end
+  end
+
+  return CopyInstructionList(pending)
 end
 
 function Addon.GetTouristInstructions()
@@ -3021,6 +3143,211 @@ function Addon.GetSession()
     guideActionSeq = source.guideActionSeq,
     hiddenDisparities = source.hiddenDisparities
   }
+end
+
+function Addon.GuideHasActiveTourist(session)
+  local guideKey
+  local normalized
+  local peer
+  local remoteSession
+
+  session = session or (Addon.db and Addon.db.session)
+  if not session or session.mode ~= "GUIDE" or not session.guideSessionId then
+    return false
+  end
+
+  guideKey = NormalizeName(playerName)
+  for normalized in pairs(party) do
+    peer = peers[normalized]
+    remoteSession = peer and peer.session
+    if peer
+      and peer.compatible
+      and remoteSession
+      and remoteSession.mode == "TOURIST"
+      and NormalizeName(remoteSession.guideName) == guideKey
+      and remoteSession.guideSessionId == session.guideSessionId
+      and remoteSession.joinBaseline ~= nil then
+      return true
+    end
+  end
+
+  return false
+end
+
+function Addon.UpdateGuideParticipant(sender, remoteSession)
+  local session = Addon.db and Addon.db.session
+  local store = Addon.db and Addon.db.instructions
+  local senderKey
+  local guideKey
+  local baseline
+  local seq
+  local changed = false
+
+  if not session
+    or session.mode ~= "GUIDE"
+    or not session.guideSessionId
+    or not store
+    or store.guideSessionId ~= session.guideSessionId then
+    return false
+  end
+
+  senderKey = NormalizeName(sender)
+  if not senderKey then
+    return false
+  end
+
+  guideKey = NormalizeName(playerName)
+  if remoteSession
+    and remoteSession.mode == "TOURIST"
+    and NormalizeName(remoteSession.guideName) == guideKey
+    and remoteSession.guideSessionId == session.guideSessionId
+    and remoteSession.joinBaseline ~= nil then
+    baseline = math.floor(tonumber(remoteSession.joinBaseline) or 0)
+    if store.guideParticipants[senderKey] ~= baseline then
+      store.guideParticipants[senderKey] = baseline
+      changed = true
+    end
+
+    -- Schema-1 sessions have no authoritative historical roster. Recover
+    -- provable legacy eligibility from fixed baselines, but leave those
+    -- rows non-finalizable because an offline historical Tourist may be
+    -- unknowable until it returns.
+    for seq in pairs(store.guideRecords or {}) do
+      seq = tonumber(seq)
+      if seq
+        and seq > baseline
+        and not (store.guideEligibilityKnown and store.guideEligibilityKnown[seq]) then
+        store.guideEligible[seq] = store.guideEligible[seq] or {}
+        if not store.guideEligible[seq][senderKey] then
+          store.guideEligible[seq][senderKey] = true
+          changed = true
+        end
+      end
+    end
+  elseif store.guideParticipants[senderKey] ~= nil then
+    -- Explicit unpairing affects future instructions only. Existing
+    -- per-instruction eligibility snapshots remain immutable.
+    store.guideParticipants[senderKey] = nil
+    changed = true
+  end
+
+  return changed
+end
+
+function Addon.CaptureGuideInstructionEligibility(session, seq)
+  local store = Addon.db and Addon.db.instructions
+  local guideKey
+  local normalized
+  local peer
+  local remoteSession
+  local baseline
+  local name
+  local eligible = {}
+
+  seq = tonumber(seq)
+  if not session
+    or session.mode ~= "GUIDE"
+    or not session.guideSessionId
+    or not seq
+    or not store
+    or store.guideSessionId ~= session.guideSessionId then
+    return false
+  end
+  seq = math.floor(seq)
+
+  guideKey = NormalizeName(playerName)
+  for normalized in pairs(party) do
+    peer = peers[normalized]
+    remoteSession = peer and peer.session
+    if peer
+      and peer.compatible
+      and remoteSession
+      and remoteSession.mode == "TOURIST"
+      and NormalizeName(remoteSession.guideName) == guideKey
+      and remoteSession.guideSessionId == session.guideSessionId
+      and remoteSession.joinBaseline ~= nil then
+      store.guideParticipants[normalized] = math.floor(tonumber(remoteSession.joinBaseline) or 0)
+    end
+  end
+
+  for name, baseline in pairs(store.guideParticipants or {}) do
+    baseline = tonumber(baseline)
+    if baseline and seq > baseline then
+      eligible[name] = true
+    end
+  end
+
+  store.guideEligible[seq] = eligible
+  store.guideAcknowledged[seq] = {}
+  store.guideCompleted[seq] = nil
+  store.guideEligibilityKnown[seq] = true
+  return next(eligible) ~= nil
+end
+
+function Addon.RecordGuideInstructionCompletions(sender, sessionId, consumed)
+  local session = Addon.db and Addon.db.session
+  local store = Addon.db and Addon.db.instructions
+  local senderKey
+  local seq
+  local eligible
+  local acknowledged
+  local name
+  local hasEligible
+  local allAcknowledged
+  local instruction
+  local changed = false
+
+  if not session
+    or session.mode ~= "GUIDE"
+    or not session.guideSessionId
+    or sessionId ~= session.guideSessionId
+    or not store
+    or store.guideSessionId ~= session.guideSessionId then
+    return false
+  end
+
+  senderKey = NormalizeName(sender)
+  if not senderKey then
+    return false
+  end
+
+  for seq in pairs(consumed or {}) do
+    seq = tonumber(seq)
+    eligible = seq and store.guideEligible and store.guideEligible[seq]
+    if seq and eligible and eligible[senderKey] then
+      acknowledged = store.guideAcknowledged[seq] or {}
+      store.guideAcknowledged[seq] = acknowledged
+      if not acknowledged[senderKey] then
+        acknowledged[senderKey] = true
+        changed = true
+      end
+
+      if store.guideEligibilityKnown and store.guideEligibilityKnown[seq] and not store.guideCompleted[seq] then
+        hasEligible = false
+        allAcknowledged = true
+        for name in pairs(eligible) do
+          hasEligible = true
+          if not acknowledged[name] then
+            allAcknowledged = false
+          end
+        end
+
+        if hasEligible and allAcknowledged then
+          store.guideCompleted[seq] = true
+          instruction = store.guideRecords and store.guideRecords[seq]
+          if instruction then
+            Emit("GUIDE_INSTRUCTION_COMPLETED", CopyInstruction(instruction))
+          end
+          changed = true
+        end
+      end
+    end
+  end
+
+  if changed then
+    Emit("GUIDE_INSTRUCTIONS_CHANGED", Addon.GetGuideInstructions())
+  end
+  return changed
 end
 
 function Addon.SetMode(mode, guideName)
@@ -3216,6 +3543,10 @@ local function HandleInstructionQuestAction(actionType, quest, context)
   end
 
   if session.mode == "GUIDE" and session.guideSessionId then
+    if not Addon.GuideHasActiveTourist(session) then
+      return
+    end
+
     seq = (tonumber(session.guideActionSeq) or 0) + 1
     instruction = NormalizeInstructionRecord({
       seq = seq,
@@ -3235,6 +3566,7 @@ local function HandleInstructionQuestAction(actionType, quest, context)
     store = Addon.db.instructions
     store.guideSessionId = session.guideSessionId
     store.guideRecords[seq] = instruction
+    Addon.CaptureGuideInstructionEligibility(session, seq)
     session.revision = session.revision + 1
     Addon.SendDelta("instructions", EncodeInstructionWire("D", session.guideSessionId, seq, {
       [seq] = instruction
@@ -3319,53 +3651,18 @@ end
 
 local function GuideInstructionAllTouristsComplete(session, instruction)
   local seq = tonumber(instruction and instruction.seq)
-  local guideKey = NormalizeName(playerName)
-  local eligible = 0
-  local completed = 0
-  local partyIndex
-  local unit
-  local name
-  local normalized
-  local member
-  local peer
-  local remoteSession
-  local completionState
+  local store = Addon.db and Addon.db.instructions
 
-  if not session or session.mode ~= "GUIDE" or not session.guideSessionId or not seq then
+  if not session
+    or session.mode ~= "GUIDE"
+    or not session.guideSessionId
+    or not seq
+    or not store
+    or store.guideSessionId ~= session.guideSessionId then
     return false
   end
 
-  for partyIndex = 1, 4 do
-    unit = "party" .. partyIndex
-    if UnitExists(unit) then
-      name = UnitName(unit)
-      normalized = NormalizeName(name)
-      member = normalized and party[normalized]
-      peer = normalized and peers[normalized]
-      remoteSession = peer and peer.session
-
-      if member
-        and peer
-        and peer.compatible
-        and remoteSession
-        and remoteSession.mode == "TOURIST"
-        and NormalizeName(remoteSession.guideName) == guideKey
-        and remoteSession.guideSessionId == session.guideSessionId
-        and remoteSession.joinBaseline ~= nil
-        and seq > remoteSession.joinBaseline then
-        eligible = eligible + 1
-        completionState = peer.instructionCompletions
-        if completionState
-          and completionState.sessionId == session.guideSessionId
-          and completionState.consumed
-          and completionState.consumed[seq] then
-          completed = completed + 1
-        end
-      end
-    end
-  end
-
-  return eligible > 0 and completed == eligible
+  return store.guideCompleted and store.guideCompleted[seq] and true or false
 end
 
 local function GuideDisparityKey(peerName, quest)
@@ -3568,7 +3865,9 @@ local function RefreshGuideTouristWindow()
     return
   end
 
-  if not session or session.mode == "OFF" then
+  if not session
+    or session.mode == "OFF"
+    or (session.mode == "GUIDE" and not Addon.GuideHasActiveTourist(session)) then
     guideTouristUI.completing = {}
     guideTouristUI.completed = {}
     guideTouristUI.sessionKey = nil
@@ -3629,6 +3928,7 @@ local function RefreshGuideTouristWindow()
           completion = completion
         }
         table.insert(display, entry)
+        present[seq] = true
       end
     else
       entry = {
@@ -3641,16 +3941,14 @@ local function RefreshGuideTouristWindow()
     end
   end
 
-  if session.mode == "TOURIST" then
-    for seq, completion in pairs(guideTouristUI.completing) do
-      if not present[seq] then
-        table.insert(display, {
-          kind = "instruction",
-          instruction = completion.instruction,
-          completing = true,
-          completion = completion
-        })
-      end
+  for seq, completion in pairs(guideTouristUI.completing) do
+    if not present[seq] then
+      table.insert(display, {
+        kind = "instruction",
+        instruction = completion.instruction,
+        completing = true,
+        completion = completion
+      })
     end
   end
 
@@ -3757,6 +4055,23 @@ local function RefreshGuideTouristWindow()
 end
 
 guideTouristUI.refresh = RefreshGuideTouristWindow
+local function HandleGuideInstructionCompleted(instruction)
+  local session = Addon.GetSession()
+  local seq = tonumber(instruction and instruction.seq)
+
+  if not session or session.mode ~= "GUIDE" or not seq then
+    return
+  end
+
+  guideTouristUI.completing[seq] = {
+    instruction = CopyInstruction(instruction),
+    started = GetTime(),
+    row = nil,
+    guide = true
+  }
+  RefreshGuideTouristWindow()
+end
+
 local function HandleTouristInstructionCompleted(instruction)
   local session = Addon.GetSession()
   local seq = tonumber(instruction and instruction.seq)
@@ -3962,6 +4277,7 @@ Addon.RegisterListener("PARTY_CHANGED", RefreshGuideTouristWindow)
 Addon.RegisterListener("SESSION_CHANGED", RefreshGuideTouristWindow)
 Addon.RegisterListener("GUIDE_INSTRUCTIONS_CHANGED", RefreshGuideTouristWindow)
 Addon.RegisterListener("TOURIST_INSTRUCTIONS_CHANGED", RefreshGuideTouristWindow)
+Addon.RegisterListener("GUIDE_INSTRUCTION_COMPLETED", HandleGuideInstructionCompleted)
 Addon.RegisterListener("TOURIST_INSTRUCTION_COMPLETED", HandleTouristInstructionCompleted)
 Addon.RegisterListener("REMOTE_INSTRUCTION_COMPLETIONS_CHANGED", RefreshGuideTouristWindow)
 
