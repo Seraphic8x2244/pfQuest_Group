@@ -1577,6 +1577,29 @@ local function GroupClassColorHex(classToken)
   return string.format("%02x%02x%02x", red, green, blue)
 end
 
+local function GroupProgressColorHex(current, required)
+  local red = 0.65
+  local green = 0.65
+  local blue = 0.65
+
+  current = tonumber(current) or 0
+  required = tonumber(required) or 1
+
+  if pfMap and pfMap.tooltip and pfMap.tooltip.GetColor then
+    red, green, blue = pfMap.tooltip:GetColor(current, required)
+    red = math.min(1, (tonumber(red) or 0.65) + 0.2)
+    green = math.min(1, (tonumber(green) or 0.65) + 0.2)
+    blue = math.min(1, (tonumber(blue) or 0.65) + 0.2)
+  end
+
+  return string.format(
+    "%02x%02x%02x",
+    math.floor(red * 255 + 0.5),
+    math.floor(green * 255 + 0.5),
+    math.floor(blue * 255 + 0.5)
+  )
+end
+
 local function SetGroupClassIcon(texture, classToken)
   local coords = classToken and GROUP_CLASS_ICON_COORDS[classToken]
 
@@ -1963,6 +1986,9 @@ local function ApplyGroupProgressToButton(button, captureBase)
   local remoteStatusWidth
   local statusWidth
   local progressText
+  local progressColor
+  local localClassToken
+  local localName
 
   if not button then
     return
@@ -1994,6 +2020,8 @@ local function ApplyGroupProgressToButton(button, captureBase)
   entryHeight = math.ceil(fontSize * 1.6)
   iconSize = math.max(8, fontSize - 2)
   pairWidth = (iconSize * 2) + 2
+  localName = playerName or UnitName("player") or "Player"
+  _, localClassToken = UnitClass("player")
 
   for objectiveIndex = 1, table.getn(localQuest.objectives or {}) do
     objective = button.objectives and button.objectives[objectiveIndex]
@@ -2062,7 +2090,32 @@ local function ApplyGroupProgressToButton(button, captureBase)
           entry.mark:Show()
         end
       else
+        objective:SetText("|cffffffff- " .. SafeString(localObjective.text) .. "|r")
+        objective:SetTextColor(1, 1, 1)
         objective:SetPoint("TOPRIGHT", -10, -fontSize * lineCount - 6)
+
+        row = EnsureCountGroupRow(button, objectiveIndex, 0)
+        lineCount = lineCount + 1
+
+        row.icon:ClearAllPoints()
+        row.icon:SetPoint("TOPLEFT", button, "TOPLEFT", 32, -fontSize * lineCount - 6)
+        row.icon:SetWidth(iconSize)
+        row.icon:SetHeight(iconSize)
+        SetGroupClassIcon(row.icon, localClassToken)
+        row.icon:Show()
+
+        row.text:ClearAllPoints()
+        row.text:SetPoint("TOPLEFT", button, "TOPLEFT", 44, -fontSize * lineCount - 6)
+        row.text:SetPoint("TOPRIGHT", button, "TOPRIGHT", -10, -fontSize * lineCount - 6)
+        CopyGroupTrackerFont(objective, row.text, fontSize)
+        progressText = SafeString(tonumber(localObjective.current) or 0) .. "/" .. SafeString(required)
+        progressColor = GroupProgressColorHex(localObjective.current, required)
+        row.text:SetText(
+          "|cff" .. GroupClassColorHex(localClassToken) .. SafeString(localName) .. ":|r "
+          .. "|cff" .. progressColor .. progressText .. "|r"
+        )
+        row.text:SetTextColor(1, 1, 1)
+        row.text:Show()
 
         for peerIndex = 1, table.getn(peersInOrder) do
           peerInfo = peersInOrder[peerIndex]
@@ -2084,12 +2137,17 @@ local function ApplyGroupProgressToButton(button, captureBase)
 
           if remoteObjective then
             progressText = SafeString(tonumber(remoteObjective.current) or 0) .. "/" .. SafeString(tonumber(remoteObjective.required) or required)
+            progressColor = GroupProgressColorHex(remoteObjective.current, remoteObjective.required or required)
+            progressText = "|cff" .. progressColor .. progressText .. "|r"
           else
-            progressText = "--"
+            progressText = "|cffaaaaaa--|r"
           end
 
-          row.text:SetText("|cff" .. GroupClassColorHex(peerInfo.classToken) .. SafeString(peerInfo.name) .. "|r  " .. progressText)
-          row.text:SetTextColor(0.85, 0.85, 0.85)
+          row.text:SetText(
+            "|cff" .. GroupClassColorHex(peerInfo.classToken) .. SafeString(peerInfo.name) .. ":|r "
+            .. progressText
+          )
+          row.text:SetTextColor(1, 1, 1)
           row.text:Show()
         end
       end
