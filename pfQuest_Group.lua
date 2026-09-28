@@ -7,7 +7,7 @@ local L = pfQuest_Group_L or {}
 
 local PROTOCOL_PREFIX = "PFQGROUP"
 local PROTOCOL_VERSION = 2
-local DB_SCHEMA_VERSION = 2
+local DB_SCHEMA_VERSION = 3
 local CHUNK_SIZE = 180
 local MAX_CHUNKS = 64
 local INCOMING_TIMEOUT = 30
@@ -540,6 +540,7 @@ local function InitializeDatabase()
   pfQuest_GroupDB.session = NormalizeSession(pfQuest_GroupDB.session)
   pfQuest_GroupDB.instructions = NormalizeInstructionStore(pfQuest_GroupDB.instructions, pfQuest_GroupDB.session)
   pfQuest_GroupDB.ui = NormalizeUIState(pfQuest_GroupDB.ui)
+  pfQuest_GroupDB.groupHold = Addon.NormalizeGroupHoldState(pfQuest_GroupDB.groupHold, pfQuest_GroupDB.session)
   touristPendingInstructions = {}
   Addon.db = pfQuest_GroupDB
 end
@@ -2010,6 +2011,7 @@ local function RelayoutGroupTracker()
   local rowEntries
   local row
   local candidateWidth
+  local holdFrame
 
   if not trackerFrame or not trackerFrame.buttons then
     return
@@ -2057,6 +2059,17 @@ local function RelayoutGroupTracker()
           end
         end
       end
+    end
+  end
+
+  holdFrame = Addon.groupHoldTrackerFrame
+  if holdFrame and holdFrame:IsShown() then
+    holdFrame:ClearAllPoints()
+    holdFrame:SetPoint("TOPLEFT", trackerFrame, "TOPLEFT", 0, -height)
+    holdFrame:SetPoint("TOPRIGHT", trackerFrame, "TOPRIGHT", 0, -height)
+    height = height + holdFrame:GetHeight()
+    if holdFrame.pfqGroupWidth and holdFrame.pfqGroupWidth > width then
+      width = holdFrame.pfqGroupWidth
     end
   end
 
@@ -2275,6 +2288,9 @@ local function RefreshGroupProgress()
     end
   end
 
+  if Addon.RefreshGroupHoldTracker then
+    Addon.RefreshGroupHoldTracker()
+  end
   RelayoutGroupTracker()
 end
 
@@ -2286,6 +2302,9 @@ local function GroupTrackerButtonEvent(self)
   end
 
   ApplyGroupProgressToButton(button, true)
+  if Addon.RefreshGroupHoldTracker then
+    Addon.RefreshGroupHoldTracker()
+  end
   RelayoutGroupTracker()
 end
 
@@ -2315,6 +2334,893 @@ local function InstallGroupProgressTracker()
 
   RefreshGroupProgress()
   return true
+end
+
+
+function Addon.GroupHoldSessionKey(session)
+  session = session or (Addon.db and Addon.db.session)
+  if not session then
+    return nil
+  end
+
+  if session.mode == "GUIDE" and session.guideSessionId then
+    return SafeString(session.guideSessionId)
+  end
+
+  if session.mode == "TOURIST" and session.guideSessionId and session.joinBaseline ~= nil then
+    return SafeString(session.guideSessionId)
+  end
+
+  return nil
+end
+
+function Addon.NormalizeGroupHoldState(state, session)
+  local sessionKey = Addon.GroupHoldSessionKey(session)
+  local output = {
+    sessionKey = sessionKey,
+    participants = {},
+    localSeen = {},
+    localTracked = {}
+  }
+  local key
+  local value
+  local participant
+  local normalized
+  local ok
+  local copied
+
+  if not sessionKey or type(state) ~= "table" or state.sessionKey ~= sessionKey then
+    return output
+  end
+
+  if type(state.localSeen) == "table" then
+    for key, value in pairs(state.localSeen) do
+      if value and type(key) == "string" and key ~= "" then
+        output.localSeen[key] = true
+      end
+    end
+  end
+
+  if type(state.localTracked) == "table" then
+    for key, value in pairs(state.localTracked) do
+      if value and type(key) == "string" and key ~= "" then
+        output.localTracked[key] = true
+      end
+    end
+  end
+
+  if type(state.participants) == "table" then
+    for key, participant in pairs(state.participants) do
+      if type(participant) == "table" then
+        normalized = NormalizeName(participant.name or key)
+        if normalized then
+          copied = nil
+          if type(participant.questState) == "table" and participant.questState.ready then
+            ok, copied = pcall(CopyQuestState, participant.questState)
+            if not ok then
+              copied = nil
+            end
+          end
+
+          output.participants[normalized] = {
+            name = SafeString((participant.name and participant.name ~= "") and participant.name or key),
+            classToken = SafeString(participant.classToken),
+            order = tonumber(participant.order) or 99,
+            questState = copied
+          }
+        end
+      end
+    end
+  end
+
+  return output
+end
+
+function Addon.SyncGroupHoldSession()
+  local session
+  local sessionKey
+  local state
+
+  if not Addon.db then
+    return nil
+  end
+
+  session = Addon.db.session
+  sessionKey = Addon.GroupHoldSessionKey(session)
+  state = Addon.db.groupHold
+
+  if type(state) ~= "table" or state.sessionKey ~= sessionKey then
+    state = Addon.NormalizeGroupHoldState(nil, session)
+    Addon.db.groupHold = state
+  else
+    state.participants = type(state.participants) == "table" and state.participants or {}
+    state.localSeen = type(state.localSeen) == "table" and state.localSeen or {}
+    state.localTracked = type(state.localTracked) == "table" and state.localTracked or {}
+  end
+
+  return state
+end
+
+function Addon.MarkGroupHoldLocalState()
+  local state = Addon.SyncGroupHoldSession()
+  local trackerFrame = pfQuest and pfQuest.tracker
+  local key
+  local quest
+  local index
+  local button
+  local localQuest
+  local titleKey
+
+  if not state or not state.sessionKey or not questState.ready then
+    return
+  end
+
+  for key, quest in pairs(questState.quests or {}) do
+    state.localSeen[key] = true
+    if quest.title and quest.title ~= "" then
+      state.localSeen[QuestKey(nil, quest.title)] = true
+    end
+  end
+
+  if trackerFrame and trackerFrame.buttons then
+    for index = 1, table.getn(trackerFrame.buttons) do
+      button = trackerFrame.buttons[index]
+      localQuest = FindLocalTrackerQuest(button)
+      if localQuest then
+        state.localTracked[localQuest.key] = true
+        titleKey = localQuest.title and QuestKey(nil, localQuest.title) or nil
+        if titleKey then
+          state.localTracked[titleKey] = true
+        end
+      end
+    end
+  end
+end
+
+function Addon.GroupHoldPeerRelevant(sender, remoteSession, session)
+  local senderKey
+  local guideKey
+
+  session = session or (Addon.db and Addon.db.session)
+  if not session or not remoteSession or not session.guideSessionId then
+    return false
+  end
+
+  senderKey = NormalizeName(sender)
+  if not senderKey then
+    return false
+  end
+
+  if session.mode == "GUIDE" then
+    return remoteSession.mode == "TOURIST"
+      and remoteSession.guideSessionId == session.guideSessionId
+      and NormalizeName(remoteSession.guideName) == NormalizeName(playerName)
+  end
+
+  if session.mode == "TOURIST" and session.guideName and session.joinBaseline ~= nil then
+    guideKey = NormalizeName(session.guideName)
+    if senderKey == guideKey then
+      return remoteSession.mode == "GUIDE"
+        and remoteSession.guideSessionId == session.guideSessionId
+    end
+
+    return remoteSession.mode == "TOURIST"
+      and remoteSession.guideSessionId == session.guideSessionId
+      and NormalizeName(remoteSession.guideName) == guideKey
+  end
+
+  return false
+end
+
+function Addon.GroupHoldPartyOrder(senderKey)
+  local member = senderKey and party[senderKey]
+  local unit = member and member.unit
+  local _, _, index
+
+  if unit then
+    _, _, index = string.find(unit, "party([%d]+)")
+  end
+
+  return tonumber(index) or 99
+end
+
+function Addon.UpdateGroupHoldParticipantSession(sender, remoteSession)
+  local state = Addon.SyncGroupHoldSession()
+  local session = Addon.db and Addon.db.session
+  local senderKey = NormalizeName(sender)
+  local member
+  local peer
+  local participant
+
+  if not state or not state.sessionKey or not senderKey then
+    return false
+  end
+
+  if not Addon.GroupHoldPeerRelevant(sender, remoteSession, session) then
+    if state.participants[senderKey] then
+      state.participants[senderKey] = nil
+      return true
+    end
+    return false
+  end
+
+  member = party[senderKey]
+  peer = peers[senderKey]
+  participant = state.participants[senderKey] or {}
+  participant.name = SafeString((peer and peer.name) or (member and member.name) or sender)
+  participant.classToken = SafeString((member and member.classToken) or participant.classToken)
+  participant.order = Addon.GroupHoldPartyOrder(senderKey)
+  if peer and peer.questState and peer.questState.ready then
+    participant.questState = CopyQuestState(peer.questState)
+  end
+  state.participants[senderKey] = participant
+  return true
+end
+
+function Addon.UpdateGroupHoldParticipantQuest(sender, remoteState)
+  local state = Addon.SyncGroupHoldSession()
+  local senderKey = NormalizeName(sender)
+  local peer = senderKey and peers[senderKey]
+  local participant
+
+  if not state
+    or not state.sessionKey
+    or not senderKey
+    or not peer
+    or not Addon.GroupHoldPeerRelevant(sender, peer.session)
+    or not remoteState
+    or not remoteState.ready then
+    return false
+  end
+
+  Addon.UpdateGroupHoldParticipantSession(sender, peer.session)
+  participant = state.participants[senderKey]
+  if not participant then
+    return false
+  end
+
+  participant.questState = CopyQuestState(remoteState)
+  return true
+end
+
+function Addon.HasActiveGroupHoldPeer()
+  local session = Addon.db and Addon.db.session
+  local normalized
+  local peer
+
+  if not Addon.GroupHoldSessionKey(session) then
+    return false
+  end
+
+  for normalized in pairs(party) do
+    peer = peers[normalized]
+    if peer and peer.compatible and Addon.GroupHoldPeerRelevant(peer.name or normalized, peer.session, session) then
+      return true
+    end
+  end
+
+  return false
+end
+
+function Addon.BuildGroupHoldNeeds()
+  local output = {}
+  local byKey = {}
+  local state = Addon.SyncGroupHoldSession()
+  local participantKey
+  local participant
+  local remoteQuest
+  local localQuest
+  local localObjective
+  local objective
+  local objectiveIndex
+  local seen
+  local tracked
+  local needKey
+  local need
+
+  if not state or not state.sessionKey or not Addon.HasActiveGroupHoldPeer() then
+    return output
+  end
+
+  Addon.MarkGroupHoldLocalState()
+
+  for participantKey, participant in pairs(state.participants or {}) do
+    if participant.questState and participant.questState.ready then
+      for _, remoteQuest in pairs(participant.questState.quests or {}) do
+        localQuest = FindRemoteTrackerQuest(questState, remoteQuest)
+        seen = localQuest
+          or state.localSeen[remoteQuest.key]
+          or state.localSeen[QuestKey(nil, remoteQuest.title)]
+        tracked = state.localTracked[remoteQuest.key]
+          or state.localTracked[QuestKey(nil, remoteQuest.title)]
+
+        if seen and tracked then
+          for objectiveIndex = 1, table.getn(remoteQuest.objectives or {}) do
+            objective = remoteQuest.objectives[objectiveIndex]
+            localObjective = localQuest and localQuest.objectives and localQuest.objectives[objectiveIndex] or nil
+
+            if objective
+              and not RemoteObjectiveDone(objective)
+              and (not localObjective or RemoteObjectiveDone(localObjective)) then
+              needKey = SafeString(remoteQuest.key) .. "#" .. SafeString(objectiveIndex)
+              need = byKey[needKey]
+              if not need then
+                need = {
+                  key = needKey,
+                  quest = CopyQuest(remoteQuest),
+                  objectiveIndex = objectiveIndex,
+                  objective = CopyObjective(objective),
+                  playersNeeded = {}
+                }
+                byKey[needKey] = need
+                table.insert(output, need)
+              end
+              need.playersNeeded[participantKey] = true
+            end
+          end
+        end
+      end
+    end
+  end
+
+  table.sort(output, function(left, right)
+    local leftTitle = string.lower(SafeString(left.quest and left.quest.title))
+    local rightTitle = string.lower(SafeString(right.quest and right.quest.title))
+    if leftTitle ~= rightTitle then
+      return leftTitle < rightTitle
+    end
+    return (tonumber(left.objectiveIndex) or 0) < (tonumber(right.objectiveIndex) or 0)
+  end)
+
+  return output
+end
+
+function Addon.GetGroupHoldParticipantRows(need)
+  local output = {}
+  local state = Addon.SyncGroupHoldSession()
+  local key
+  local participant
+  local remoteQuest
+  local objective
+
+  if not state or not need then
+    return output
+  end
+
+  for key, participant in pairs(state.participants or {}) do
+    if participant.questState and participant.questState.ready then
+      remoteQuest = FindRemoteTrackerQuest(participant.questState, need.quest)
+      objective = remoteQuest
+        and remoteQuest.objectives
+        and remoteQuest.objectives[need.objectiveIndex]
+        or nil
+      if objective then
+        table.insert(output, {
+          key = key,
+          name = participant.name or key,
+          classToken = participant.classToken,
+          order = tonumber(participant.order) or 99,
+          objective = objective
+        })
+      end
+    end
+  end
+
+  table.sort(output, function(left, right)
+    if left.order ~= right.order then
+      return left.order < right.order
+    end
+    return string.lower(SafeString(left.name)) < string.lower(SafeString(right.name))
+  end)
+
+  return output
+end
+
+function Addon.GroupHoldLocalObjective(need)
+  local localQuest
+
+  if not need then
+    return nil
+  end
+
+  localQuest = FindRemoteTrackerQuest(questState, need.quest)
+  if not localQuest or not localQuest.objectives then
+    return nil
+  end
+
+  return localQuest.objectives[need.objectiveIndex]
+end
+
+function Addon.GroupHoldProgressText(objective)
+  local current
+  local required
+
+  if not objective then
+    return "|cffaaaaaa--|r"
+  end
+
+  current = tonumber(objective.current) or 0
+  required = tonumber(objective.required) or 1
+  if required <= 0 then
+    required = 1
+  end
+
+  return "|cff" .. GroupProgressColorHex(current, required)
+    .. SafeString(current) .. "/" .. SafeString(required) .. "|r"
+end
+
+function Addon.EnsureGroupHoldTrackerFrame()
+  local trackerFrame = pfQuest and pfQuest.tracker
+
+  if Addon.groupHoldTrackerFrame then
+    return Addon.groupHoldTrackerFrame
+  end
+
+  if not trackerFrame then
+    return nil
+  end
+
+  Addon.groupHoldTrackerFrame = CreateFrame("Frame", nil, trackerFrame)
+  Addon.groupHoldTrackerFrame.rows = {}
+  Addon.groupHoldTrackerFrame.pfqGroupWidth = 0
+  Addon.groupHoldTrackerFrame:Hide()
+  return Addon.groupHoldTrackerFrame
+end
+
+function Addon.EnsureGroupHoldTrackerRow(index)
+  local frame = Addon.EnsureGroupHoldTrackerFrame()
+  local row
+
+  if not frame then
+    return nil
+  end
+
+  row = frame.rows[index]
+  if not row then
+    row = {}
+    row.icon = frame:CreateTexture(nil, "ARTWORK")
+    row.text = frame:CreateFontString(nil, "HIGH", "GameFontNormal")
+    row.text:SetJustifyH("LEFT")
+    frame.rows[index] = row
+  end
+
+  return row
+end
+
+function Addon.GroupHoldNativeTrackerVisible(need)
+  local trackerFrame = pfQuest and pfQuest.tracker
+  local index
+  local button
+  local localQuest
+  local objective
+  local matches
+
+  if not trackerFrame or not trackerFrame.buttons or not need then
+    return false
+  end
+
+  for index = 1, table.getn(trackerFrame.buttons) do
+    button = trackerFrame.buttons[index]
+    localQuest = FindLocalTrackerQuest(button)
+    matches = localQuest
+      and ((localQuest.questID and need.quest.questID and localQuest.questID == need.quest.questID)
+        or localQuest.title == need.quest.title)
+
+    if matches then
+      objective = button.objectives and button.objectives[need.objectiveIndex]
+      if objective and objective:IsShown() then
+        return true
+      end
+    end
+  end
+
+  return false
+end
+
+function Addon.SetGroupHoldTrackerPlayerRow(row, name, classToken, objective, fontSize, lineIndex)
+  local frame = Addon.groupHoldTrackerFrame
+  local iconSize = math.max(8, fontSize - 2)
+  local lineHeight = math.ceil(fontSize * 1.35)
+  local text
+
+  if not row or not frame then
+    return 0
+  end
+
+  row.icon:ClearAllPoints()
+  row.icon:SetPoint("TOPLEFT", frame, "TOPLEFT", 22, -((lineIndex - 1) * lineHeight))
+  row.icon:SetWidth(iconSize)
+  row.icon:SetHeight(iconSize)
+  SetGroupClassIcon(row.icon, classToken)
+  row.icon:Show()
+
+  row.text:ClearAllPoints()
+  row.text:SetPoint("TOPLEFT", frame, "TOPLEFT", 36, -((lineIndex - 1) * lineHeight))
+  row.text:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -8, -((lineIndex - 1) * lineHeight))
+  CopyGroupTrackerFont(nil, row.text, fontSize)
+  text = "|cff" .. GroupClassColorHex(classToken) .. SafeString(name) .. ":|r "
+    .. Addon.GroupHoldProgressText(objective)
+  row.text:SetText(text)
+  row.text:SetTextColor(1, 1, 1)
+  row.text:Show()
+  return row.text:GetStringWidth() + 44
+end
+
+function Addon.RefreshGroupHoldTracker()
+  local trackerFrame = pfQuest and pfQuest.tracker
+  local frame = Addon.EnsureGroupHoldTrackerFrame()
+  local needs = Addon.groupHoldNeeds or {}
+  local fontSize = GetGroupTrackerFontSize(nil)
+  local lineHeight = math.ceil(fontSize * 1.35)
+  local lineIndex = 0
+  local rowIndex = 0
+  local maxWidth = 0
+  local lastQuestKey
+  local index
+  local need
+  local row
+  local width
+  local localName = playerName or UnitName("player") or "Player"
+  local _, localClassToken = UnitClass("player")
+  local participantRows
+  local participantIndex
+  local participant
+
+  if not frame then
+    return
+  end
+
+  for index = 1, table.getn(frame.rows) do
+    frame.rows[index].icon:Hide()
+    frame.rows[index].text:Hide()
+  end
+
+  if not trackerFrame
+    or trackerFrame.mode ~= "QUEST_TRACKING"
+    or not Addon.HasActiveGroupHoldPeer()
+    or table.getn(needs) == 0 then
+    frame:Hide()
+    frame:SetHeight(0)
+    frame.pfqGroupWidth = 0
+    return
+  end
+
+  for index = 1, table.getn(needs) do
+    need = needs[index]
+    if not Addon.GroupHoldNativeTrackerVisible(need) then
+      if lastQuestKey ~= need.quest.key then
+        lineIndex = lineIndex + 1
+        rowIndex = rowIndex + 1
+        row = Addon.EnsureGroupHoldTrackerRow(rowIndex)
+        row.icon:Hide()
+        row.text:ClearAllPoints()
+        row.text:SetPoint("TOPLEFT", frame, "TOPLEFT", 8, -((lineIndex - 1) * lineHeight))
+        row.text:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -8, -((lineIndex - 1) * lineHeight))
+        CopyGroupTrackerFont(nil, row.text, fontSize)
+        row.text:SetText("|cffffd100" .. SafeString(need.quest.title) .. "|r")
+        row.text:SetTextColor(1, 1, 1)
+        row.text:Show()
+        width = row.text:GetStringWidth() + 16
+        if width > maxWidth then maxWidth = width end
+        lastQuestKey = need.quest.key
+      end
+
+      lineIndex = lineIndex + 1
+      rowIndex = rowIndex + 1
+      row = Addon.EnsureGroupHoldTrackerRow(rowIndex)
+      row.icon:Hide()
+      row.text:ClearAllPoints()
+      row.text:SetPoint("TOPLEFT", frame, "TOPLEFT", 20, -((lineIndex - 1) * lineHeight))
+      row.text:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -8, -((lineIndex - 1) * lineHeight))
+      CopyGroupTrackerFont(nil, row.text, fontSize)
+      row.text:SetText("|cffffffff- " .. SafeString(need.objective.text) .. "|r")
+      row.text:SetTextColor(1, 1, 1)
+      row.text:Show()
+      width = row.text:GetStringWidth() + 28
+      if width > maxWidth then maxWidth = width end
+
+      lineIndex = lineIndex + 1
+      rowIndex = rowIndex + 1
+      row = Addon.EnsureGroupHoldTrackerRow(rowIndex)
+      width = Addon.SetGroupHoldTrackerPlayerRow(row, localName, localClassToken, Addon.GroupHoldLocalObjective(need), fontSize, lineIndex)
+      if width > maxWidth then maxWidth = width end
+
+      participantRows = Addon.GetGroupHoldParticipantRows(need)
+      for participantIndex = 1, table.getn(participantRows) do
+        participant = participantRows[participantIndex]
+        lineIndex = lineIndex + 1
+        rowIndex = rowIndex + 1
+        row = Addon.EnsureGroupHoldTrackerRow(rowIndex)
+        width = Addon.SetGroupHoldTrackerPlayerRow(row, participant.name, participant.classToken, participant.objective, fontSize, lineIndex)
+        if width > maxWidth then maxWidth = width end
+      end
+    end
+  end
+
+  if lineIndex == 0 then
+    frame:Hide()
+    frame:SetHeight(0)
+    frame.pfqGroupWidth = 0
+    return
+  end
+
+  frame:SetHeight((lineIndex * lineHeight) + 4)
+  frame.pfqGroupWidth = maxWidth
+  frame:Show()
+end
+
+function Addon.ClearGroupHoldNodes()
+  local spawn
+  local titles
+  local title
+  local maps
+  local map
+  local meta
+
+  if not pfMap then
+    return
+  end
+
+  if pfMap.DeleteNode then
+    pfMap:DeleteNode("PFQGROUP")
+  end
+
+  for spawn, titles in pairs(pfMap.tooltips or {}) do
+    for title, maps in pairs(titles) do
+      for map, meta in pairs(maps) do
+        if meta and meta.addon == "PFQGROUP" then
+          maps[map] = nil
+        end
+      end
+      if not next(maps) then
+        titles[title] = nil
+      end
+    end
+    if not next(titles) then
+      pfMap.tooltips[spawn] = nil
+    end
+  end
+end
+
+function Addon.NewGroupHoldNodeMeta(need)
+  return {
+    addon = "PFQGROUP",
+    quest = "PFQG:" .. SafeString(need.key),
+    questid = need.quest and need.quest.questID,
+    QTYPE = "PFQGROUP_OBJECTIVE",
+    layer = 2,
+    cluster = true,
+    pfqGroupNeedKey = need.key,
+    pfqGroupQuestKey = need.quest and need.quest.key,
+    pfqGroupQuestTitle = need.quest and need.quest.title,
+    pfqGroupObjectiveIndex = need.objectiveIndex,
+    pfqGroupObjectiveText = need.objective and need.objective.text
+  }
+end
+
+function Addon.GroupHoldTextContainsName(textValue, nameValue)
+  local text = string.lower(Trim(SafeString(textValue)))
+  local name = string.lower(Trim(SafeString(nameValue)))
+  return text ~= "" and name ~= "" and string.find(text, name, 1, true) ~= nil
+end
+
+function Addon.AddGroupHoldSource(kind, id, need)
+  local meta
+
+  if not pfDatabase or not id or not need then
+    return false
+  end
+
+  meta = Addon.NewGroupHoldNodeMeta(need)
+  if kind == "U" and pfDatabase.SearchMobID then
+    pfDatabase:SearchMobID(id, meta)
+    return true
+  elseif kind == "O" and pfDatabase.SearchObjectID then
+    pfDatabase:SearchObjectID(id, meta)
+    return true
+  elseif kind == "I" and pfDatabase.SearchItemID then
+    pfDatabase:SearchItemID(id, meta)
+    return true
+  elseif kind == "A" and pfDatabase.SearchAreaTriggerID then
+    pfDatabase:SearchAreaTriggerID(id, meta)
+    return true
+  elseif kind == "Z" and pfDatabase.SearchZoneID then
+    pfDatabase:SearchZoneID(id, meta)
+    return true
+  end
+
+  return false
+end
+
+function Addon.AddGroupHoldNamedSources(kind, ids, names, need)
+  local matched = 0
+  local _
+  local id
+  local name
+
+  for _, id in pairs(ids or {}) do
+    name = names and names[id]
+    if name and Addon.GroupHoldTextContainsName(need.objective.text, name) then
+      if Addon.AddGroupHoldSource(kind, id, need) then
+        matched = matched + 1
+      end
+    end
+  end
+
+  return matched
+end
+
+function Addon.AddSingleGroupHoldSource(kinds, objectives, need)
+  local count = 0
+  local soleKind
+  local soleId
+  local index
+  local kind
+  local _
+  local id
+
+  for index = 1, table.getn(kinds or {}) do
+    kind = kinds[index]
+    for _, id in pairs(objectives[kind] or {}) do
+      count = count + 1
+      soleKind = kind
+      soleId = id
+    end
+  end
+
+  if count == 1 and soleKind and soleId then
+    return Addon.AddGroupHoldSource(soleKind, soleId, need) and 1 or 0
+  end
+
+  return 0
+end
+
+function Addon.AddGroupHoldObjectiveNodes(need)
+  local questID = tonumber(need and need.quest and need.quest.questID)
+  local questData
+  local objectives
+  local objectiveType
+  local matched = 0
+
+  if not questID
+    or not pfDB
+    or not pfDB.quests
+    or not pfDB.quests.data
+    or not pfDB.quests.data[questID] then
+    return false
+  end
+
+  questData = pfDB.quests.data[questID]
+  objectives = questData and questData.obj
+  if not objectives then
+    return false
+  end
+
+  objectiveType = string.lower(SafeString(need.objective and need.objective.objectiveType))
+
+  if objectiveType == "item" then
+    matched = Addon.AddGroupHoldNamedSources("I", objectives.I, pfDB.items and pfDB.items.loc, need)
+    if matched == 0 then matched = Addon.AddSingleGroupHoldSource({ "I" }, objectives, need) end
+  elseif objectiveType == "monster" then
+    matched = Addon.AddGroupHoldNamedSources("U", objectives.U, pfDB.units and pfDB.units.loc, need)
+    matched = matched + Addon.AddGroupHoldNamedSources("O", objectives.O, pfDB.objects and pfDB.objects.loc, need)
+    if matched == 0 then matched = Addon.AddSingleGroupHoldSource({ "U", "O" }, objectives, need) end
+  else
+    matched = Addon.AddGroupHoldNamedSources("O", objectives.O, pfDB.objects and pfDB.objects.loc, need)
+    matched = matched + Addon.AddGroupHoldNamedSources("U", objectives.U, pfDB.units and pfDB.units.loc, need)
+    matched = matched + Addon.AddGroupHoldNamedSources("I", objectives.I, pfDB.items and pfDB.items.loc, need)
+    if matched == 0 then matched = Addon.AddSingleGroupHoldSource({ "O", "U", "I" }, objectives, need) end
+    if matched == 0 then matched = Addon.AddSingleGroupHoldSource({ "A", "Z" }, objectives, need) end
+  end
+
+  return matched > 0
+end
+
+function Addon.RefreshGroupHoldNodes()
+  local needs = Addon.groupHoldNeeds or {}
+  local index
+
+  Addon.ClearGroupHoldNodes()
+
+  if not Addon.HasActiveGroupHoldPeer()
+    or not pfMap
+    or not pfDatabase
+    or (pfQuest_config and pfQuest_config["trackingmethod"] == "4") then
+    return
+  end
+
+  for index = 1, table.getn(needs) do
+    Addon.AddGroupHoldObjectiveNodes(needs[index])
+  end
+end
+
+function Addon.ShowGroupHoldTooltip(meta, tooltip)
+  local need = meta and Addon.groupHoldNeedByKey and Addon.groupHoldNeedByKey[meta.pfqGroupNeedKey]
+  local localName = playerName or UnitName("player") or "Player"
+  local _, localClassToken = UnitClass("player")
+  local localObjective
+  local rows
+  local index
+  local row
+
+  tooltip = tooltip or GameTooltip
+  if not need then
+    return
+  end
+
+  tooltip:AddLine("|cffffd100" .. SafeString(need.quest.title) .. "|r", 1, 1, 1)
+  tooltip:AddLine("|cffffffff- " .. SafeString(need.objective.text) .. "|r", 1, 1, 1)
+
+  localObjective = Addon.GroupHoldLocalObjective(need)
+  tooltip:AddLine("  |cff" .. GroupClassColorHex(localClassToken) .. SafeString(localName) .. ":|r " .. Addon.GroupHoldProgressText(localObjective), 1, 1, 1)
+
+  rows = Addon.GetGroupHoldParticipantRows(need)
+  for index = 1, table.getn(rows) do
+    row = rows[index]
+    tooltip:AddLine("  |cff" .. GroupClassColorHex(row.classToken) .. SafeString(row.name) .. ":|r " .. Addon.GroupHoldProgressText(row.objective), 1, 1, 1)
+  end
+
+  tooltip:Show()
+end
+
+function Addon.InstallGroupHoldMapTooltip()
+  if Addon.groupHoldMapTooltipInstalled then
+    return true
+  end
+
+  if not pfMap or type(pfMap.ShowTooltip) ~= "function" then
+    return false
+  end
+
+  Addon.originalGroupHoldShowTooltip = pfMap.ShowTooltip
+  pfMap.ShowTooltip = function(self, meta, tooltip)
+    if meta and meta.addon == "PFQGROUP" then
+      return Addon.ShowGroupHoldTooltip(meta, tooltip)
+    end
+
+    return Addon.originalGroupHoldShowTooltip(self, meta, tooltip)
+  end
+
+  Addon.groupHoldMapTooltipInstalled = true
+  return true
+end
+
+function Addon.RefreshGroupHoldPresentation()
+  local needs
+  local index
+
+  if not Addon.db then
+    return
+  end
+
+  Addon.SyncGroupHoldSession()
+  Addon.MarkGroupHoldLocalState()
+  needs = Addon.BuildGroupHoldNeeds()
+  Addon.groupHoldNeeds = needs
+  Addon.groupHoldNeedByKey = {}
+
+  for index = 1, table.getn(needs) do
+    Addon.groupHoldNeedByKey[needs[index].key] = needs[index]
+  end
+
+  Addon.RefreshGroupHoldTracker()
+  Addon.RefreshGroupHoldNodes()
+  RelayoutGroupTracker()
+end
+
+function Addon.HandleGroupHoldRemoteSession(sender, remoteSession)
+  Addon.UpdateGroupHoldParticipantSession(sender, remoteSession)
+  Addon.RefreshGroupHoldPresentation()
+end
+
+function Addon.HandleGroupHoldRemoteQuest(sender, remoteState)
+  Addon.UpdateGroupHoldParticipantQuest(sender, remoteState)
+  Addon.RefreshGroupHoldPresentation()
+end
+
+function Addon.HandleGroupHoldLocalState()
+  Addon.SyncGroupHoldSession()
+  Addon.RefreshGroupHoldPresentation()
 end
 
 
@@ -4262,6 +5168,13 @@ Addon.RegisterStateComponent("session", SessionSnapshot, ApplyRemoteSessionFull,
 Addon.RegisterStateComponent("quests", QuestSnapshot, ApplyRemoteQuestFull, ApplyRemoteQuestDelta)
 Addon.RegisterStateComponent("instructions", InstructionSnapshot, ApplyRemoteInstructionFull, ApplyRemoteInstructionDelta)
 
+Addon.RegisterListener("REMOTE_SESSION_CHANGED", Addon.HandleGroupHoldRemoteSession)
+Addon.RegisterListener("REMOTE_QUEST_STATE_CHANGED", Addon.HandleGroupHoldRemoteQuest)
+Addon.RegisterListener("SESSION_CHANGED", Addon.HandleGroupHoldLocalState)
+Addon.RegisterListener("LOCAL_QUEST_STATE_CHANGED", Addon.HandleGroupHoldLocalState)
+Addon.RegisterListener("PEER_STATUS", Addon.RefreshGroupHoldPresentation)
+Addon.RegisterListener("PEER_LEFT", Addon.RefreshGroupHoldPresentation)
+Addon.RegisterListener("PARTY_CHANGED", Addon.RefreshGroupHoldPresentation)
 Addon.RegisterListener("LOCAL_QUEST_ACTION", HandleInstructionQuestAction)
 Addon.RegisterListener("LOCAL_QUEST_STATE_CHANGED", RefreshGroupProgress)
 Addon.RegisterListener("REMOTE_QUEST_STATE_CHANGED", RefreshGroupProgress)
@@ -4305,6 +5218,7 @@ frame:SetScript("OnEvent", function()
     InitializeDatabase()
     InstallQuestActionHooks()
     InstallGroupProgressTracker()
+    Addon.InstallGroupHoldMapTooltip()
     InitializeGuideTouristWindow()
     initialized = true
     RefreshParty()
@@ -4318,6 +5232,7 @@ frame:SetScript("OnEvent", function()
   if event == "PLAYER_ENTERING_WORLD" or event == "PARTY_MEMBERS_CHANGED" then
     playerName = UnitName("player") or playerName
     InstallGroupProgressTracker()
+    Addon.InstallGroupHoldMapTooltip()
     RefreshParty()
 
     if event == "PLAYER_ENTERING_WORLD" then
