@@ -437,6 +437,15 @@ local function NormalizeInstructionStore(store, session)
       end
     end
 
+    if sameGuideSession and type(store.guideCompleted) == "table" then
+      for key, record in pairs(store.guideCompleted) do
+        seq = tonumber(key)
+        if record and seq and guideRecords[seq] then
+          guideCompleted[math.floor(seq)] = true
+        end
+      end
+    end
+
     for seq in pairs(guideRecords) do
       if guideEligibilityKnown[seq] then
         hasEligible = false
@@ -1857,42 +1866,7 @@ local function RemoteObjectiveDone(objective)
   return required > 0 and current >= required
 end
 
-local function EnsureLocalBinaryStatus(button, objectiveIndex)
-  local mark
-
-  button.pfqGroupLocalBinary = button.pfqGroupLocalBinary or {}
-  mark = button.pfqGroupLocalBinary[objectiveIndex]
-  if not mark then
-    mark = button:CreateTexture(nil, "OVERLAY")
-    button.pfqGroupLocalBinary[objectiveIndex] = mark
-  end
-
-  return mark
-end
-
-local function EnsureBinaryGroupStatus(button, objectiveIndex, peerIndex)
-  local objectiveStatuses
-  local entry
-
-  button.pfqGroupBinary = button.pfqGroupBinary or {}
-  objectiveStatuses = button.pfqGroupBinary[objectiveIndex]
-  if not objectiveStatuses then
-    objectiveStatuses = {}
-    button.pfqGroupBinary[objectiveIndex] = objectiveStatuses
-  end
-
-  entry = objectiveStatuses[peerIndex]
-  if not entry then
-    entry = {}
-    entry.icon = button:CreateTexture(nil, "ARTWORK")
-    entry.mark = button:CreateTexture(nil, "OVERLAY")
-    objectiveStatuses[peerIndex] = entry
-  end
-
-  return entry
-end
-
-local function EnsureCountGroupRow(button, objectiveIndex, peerIndex)
+local function EnsureGroupProgressRow(button, objectiveIndex, peerIndex)
   local objectiveRows
   local row
 
@@ -1917,33 +1891,16 @@ end
 
 local function HideGroupTrackerRegions(button)
   local objectiveEntries
-  local entry
-
-  if button.pfqGroupLocalBinary then
-    for _, entry in pairs(button.pfqGroupLocalBinary) do
-      entry:Hide()
-    end
-  end
-
-  if button.pfqGroupBinary then
-    for _, objectiveEntries in pairs(button.pfqGroupBinary) do
-      for _, entry in pairs(objectiveEntries) do
-        entry.icon:Hide()
-        entry.mark:Hide()
-      end
-    end
-  end
+  local row
 
   if button.pfqGroupRows then
     for _, objectiveEntries in pairs(button.pfqGroupRows) do
-      for _, entry in pairs(objectiveEntries) do
-        entry.icon:Hide()
-        entry.text:Hide()
+      for _, row in pairs(objectiveEntries) do
+        row.icon:Hide()
+        row.text:Hide()
       end
     end
   end
-
-  button.pfqGroupStatusWidth = {}
 end
 
 local function CaptureGroupObjectiveBase(objective)
@@ -2038,7 +1995,7 @@ local function RelayoutGroupTracker()
         if button.objectives then
           for objectiveIndex, objective in pairs(button.objectives) do
             if objective:IsShown() then
-              candidateWidth = objective:GetStringWidth() + (button.pfqGroupStatusWidth and button.pfqGroupStatusWidth[objectiveIndex] or 0)
+              candidateWidth = objective:GetStringWidth()
               if candidateWidth > width then
                 width = candidateWidth
               end
@@ -2092,13 +2049,8 @@ local function ApplyGroupProgressToButton(button, captureBase)
   local peerIndex
   local peerInfo
   local remoteObjective
-  local entry
-  local localMark
   local row
   local iconSize
-  local pairWidth
-  local remoteStatusWidth
-  local statusWidth
   local progressText
   local progressColor
   local localClassName
@@ -2138,7 +2090,6 @@ local function ApplyGroupProgressToButton(button, captureBase)
   fontSize = GetGroupTrackerFontSize(button)
   entryHeight = math.ceil(fontSize * 1.6)
   iconSize = math.max(8, fontSize - 2)
-  pairWidth = (iconSize * 2) + 2
   localName = playerName or UnitName("player") or "Player"
   localClassName, localClassToken = UnitClass("player")
 
@@ -2165,7 +2116,7 @@ local function ApplyGroupProgressToButton(button, captureBase)
         objective:SetTextColor(1, 1, 1)
         objective:SetPoint("TOPRIGHT", -10, -fontSize * lineCount - 6)
 
-        row = EnsureCountGroupRow(button, objectiveIndex, 0)
+        row = EnsureGroupProgressRow(button, objectiveIndex, 0)
         lineCount = lineCount + 1
 
         row.icon:ClearAllPoints()
@@ -2189,7 +2140,7 @@ local function ApplyGroupProgressToButton(button, captureBase)
         heldRows = Addon.GetGroupHoldParticipantRows(heldNeed)
         for heldIndex = 1, table.getn(heldRows) do
           heldParticipant = heldRows[heldIndex]
-          row = EnsureCountGroupRow(button, objectiveIndex, heldIndex)
+          row = EnsureGroupProgressRow(button, objectiveIndex, heldIndex)
           lineCount = lineCount + 1
 
           row.icon:ClearAllPoints()
@@ -2210,62 +2161,12 @@ local function ApplyGroupProgressToButton(button, captureBase)
           row.text:SetTextColor(1, 1, 1)
           row.text:Show()
         end
-      elseif required <= 1 then
-        objective:SetText(string.gsub(objective.pfqGroupBaseText or objective:GetText() or "", "%s*[%d]+%s*/%s*[%d]+%s*$", ""))
-
-        remoteStatusWidth = table.getn(peersInOrder) * pairWidth
-        statusWidth = iconSize + 2
-        if remoteStatusWidth > 0 then
-          statusWidth = statusWidth + remoteStatusWidth + 3
-        end
-        button.pfqGroupStatusWidth[objectiveIndex] = statusWidth
-        objective:SetPoint("TOPRIGHT", -10, -fontSize * lineCount - 6)
-
-        localMark = EnsureLocalBinaryStatus(button, objectiveIndex)
-        localMark:ClearAllPoints()
-        localMark:SetPoint("LEFT", objective, "LEFT", objective:GetStringWidth() + 2, 0)
-        localMark:SetWidth(iconSize)
-        localMark:SetHeight(iconSize)
-        if RemoteObjectiveDone(localObjective) then
-          localMark:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
-          localMark:SetVertexColor(0.25, 1, 0.25, 1)
-        else
-          localMark:SetTexture("Interface\\Buttons\\UI-GroupLoot-Pass-Up")
-          localMark:SetVertexColor(1, 0.25, 0.25, 1)
-        end
-        localMark:Show()
-
-        for peerIndex = 1, table.getn(peersInOrder) do
-          peerInfo = peersInOrder[peerIndex]
-          remoteObjective = GetRemoteObjective(peerInfo, localQuest, objectiveIndex)
-          entry = EnsureBinaryGroupStatus(button, objectiveIndex, peerIndex)
-
-          entry.icon:ClearAllPoints()
-          entry.icon:SetPoint("LEFT", localMark, "RIGHT", 3 + ((peerIndex - 1) * pairWidth), 0)
-          entry.icon:SetWidth(iconSize)
-          entry.icon:SetHeight(iconSize)
-          SetGroupClassIcon(entry.icon, peerInfo.classToken)
-          entry.icon:Show()
-
-          entry.mark:ClearAllPoints()
-          entry.mark:SetPoint("LEFT", entry.icon, "RIGHT", 1, 0)
-          entry.mark:SetWidth(iconSize)
-          entry.mark:SetHeight(iconSize)
-          if RemoteObjectiveDone(remoteObjective) then
-            entry.mark:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
-            entry.mark:SetVertexColor(0.25, 1, 0.25, 1)
-          else
-            entry.mark:SetTexture("Interface\\Buttons\\UI-GroupLoot-Pass-Up")
-            entry.mark:SetVertexColor(1, 0.25, 0.25, 1)
-          end
-          entry.mark:Show()
-        end
       else
         objective:SetText("|cffffffff- " .. SafeString(localObjective.text) .. "|r")
         objective:SetTextColor(1, 1, 1)
         objective:SetPoint("TOPRIGHT", -10, -fontSize * lineCount - 6)
 
-        row = EnsureCountGroupRow(button, objectiveIndex, 0)
+        row = EnsureGroupProgressRow(button, objectiveIndex, 0)
         lineCount = lineCount + 1
 
         row.icon:ClearAllPoints()
@@ -2291,7 +2192,7 @@ local function ApplyGroupProgressToButton(button, captureBase)
         for peerIndex = 1, table.getn(peersInOrder) do
           peerInfo = peersInOrder[peerIndex]
           remoteObjective = GetRemoteObjective(peerInfo, localQuest, objectiveIndex)
-          row = EnsureCountGroupRow(button, objectiveIndex, peerIndex)
+          row = EnsureGroupProgressRow(button, objectiveIndex, peerIndex)
           lineCount = lineCount + 1
 
           row.icon:ClearAllPoints()
@@ -4710,7 +4611,13 @@ local function GuideInstructionAllTouristsComplete(session, instruction)
     end
   end
 
-  return eligible > 0 and completed == eligible
+  if eligible > 0 and completed == eligible then
+    store.guideCompleted = store.guideCompleted or {}
+    store.guideCompleted[seq] = true
+    return true
+  end
+
+  return false
 end
 
 local function GuideDisparityKey(peerName, quest)
