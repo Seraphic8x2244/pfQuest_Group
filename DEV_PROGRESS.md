@@ -505,6 +505,7 @@ GH9. **UNTESTED / SKIP-eligible — Ambiguous complex objective mapping.** If a 
 5. Fix only demonstrated defects with normal version discipline; keep Mrs Dalson's Diary / Outhouse / Locked Cabinet deferred.
 
 ## Planned / Next Work
+- Future feature backlog: Flightpath guidance — define how Guide/Tourist routing should surface recommended flightpath usage without changing current quest/objective ownership or transport semantics. Do not begin implementation until the current GH/C/R validation sequence is complete or the user explicitly reprioritizes it.
 1. Runtime-test exact 0.1.27-dev with the existing Guide/Tourist pair, prioritizing legacy-completion permanence and unified binary rows.
 2. Record exact PASS/FAIL observations in DEV_PROGRESS.md; do not upgrade untested matrix items from static evidence.
 3. Continue dormant/durable, GH1-GH9, C1-C5, R8-R10, and remaining broad protocol-v2 gaps.
@@ -513,6 +514,7 @@ GH9. **UNTESTED / SKIP-eligible — Ambiguous complex objective mapping.** If a 
 6. After a known-good runtime state exists, review release/promotion readiness separately; do not treat development checks as a runtime test.
 
 ## Deferred / Out of Scope
+- Flightpath guidance feature work is deferred until after the current tracker/Guide validation sequence unless explicitly reprioritized.
 - New feature work beyond the currently agreed post-Phase-6 tracker/Guide refinements.
 - Release/promotion to main before broad runtime validation is complete or any validation debt is explicitly accepted.
 - dev_rulebook.md changes.
