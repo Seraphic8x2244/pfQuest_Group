@@ -3065,6 +3065,33 @@ function Addon.AddSingleGroupHoldSource(kinds, objectives, need)
   return 0
 end
 
+function Addon.FinalizeGroupHoldNodes(need)
+  local maps
+  local coords
+  local titles
+  local meta
+  local _
+
+  if not pfMap or not pfMap.nodes or not need then
+    return
+  end
+
+  maps = pfMap.nodes["PFQGROUP"]
+  if not maps then
+    return
+  end
+
+  for _, coords in pairs(maps) do
+    for _, titles in pairs(coords) do
+      for _, meta in pairs(titles) do
+        if meta and meta.pfqGroupNeedKey == need.key then
+          meta.cluster = nil
+        end
+      end
+    end
+  end
+end
+
 function Addon.AddGroupHoldObjectiveNodes(need)
   local questID = tonumber(need and need.quest and need.quest.questID)
   local questData
@@ -3103,7 +3130,12 @@ function Addon.AddGroupHoldObjectiveNodes(need)
     if matched == 0 then matched = Addon.AddSingleGroupHoldSource({ "A", "Z" }, objectives, need) end
   end
 
-  return matched > 0
+  if matched > 0 then
+    Addon.FinalizeGroupHoldNodes(need)
+    return true
+  end
+
+  return false
 end
 
 function Addon.RefreshGroupHoldNodes()
