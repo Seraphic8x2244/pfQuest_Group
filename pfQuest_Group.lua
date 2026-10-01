@@ -2591,7 +2591,7 @@ function Addon.BuildGroupHoldNeeds()
         tracked = state.localTracked[remoteQuest.key]
           or state.localTracked[QuestKey(nil, remoteQuest.title)]
 
-        if seen and tracked then
+        if localQuest or (seen and tracked) then
           for objectiveIndex = 1, table.getn(remoteQuest.objectives or {}) do
             objective = remoteQuest.objectives[objectiveIndex]
             localObjective = localQuest and localQuest.objectives and localQuest.objectives[objectiveIndex] or nil
