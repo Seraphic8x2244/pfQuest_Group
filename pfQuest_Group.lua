@@ -2837,106 +2837,21 @@ function Addon.SetGroupHoldTrackerPlayerRow(row, name, classToken, objective, fo
 end
 
 function Addon.RefreshGroupHoldTracker()
-  local trackerFrame = pfQuest and pfQuest.tracker
-  local frame = Addon.EnsureGroupHoldTrackerFrame()
-  local needs = Addon.groupHoldNeeds or {}
-  local fontSize = GetGroupTrackerFontSize(nil)
-  local lineHeight = math.ceil(fontSize * 1.35)
-  local lineIndex = 0
-  local rowIndex = 0
-  local maxWidth = 0
-  local lastQuestKey
+  local frame = Addon.groupHoldTrackerFrame
   local index
-  local need
-  local row
-  local width
-  local localName = playerName or UnitName("player") or "Player"
-  local _, localClassToken = UnitClass("player")
-  local participantRows
-  local participantIndex
-  local participant
 
   if not frame then
     return
   end
 
-  for index = 1, table.getn(frame.rows) do
+  for index = 1, table.getn(frame.rows or {}) do
     frame.rows[index].icon:Hide()
     frame.rows[index].text:Hide()
   end
 
-  if not trackerFrame
-    or trackerFrame.mode ~= "QUEST_TRACKING"
-    or not Addon.HasActiveGroupHoldPeer()
-    or table.getn(needs) == 0 then
-    frame:Hide()
-    frame:SetHeight(0)
-    frame.pfqGroupWidth = 0
-    return
-  end
-
-  for index = 1, table.getn(needs) do
-    need = needs[index]
-    if not Addon.GroupHoldNativeTrackerVisible(need) then
-      if lastQuestKey ~= need.quest.key then
-        lineIndex = lineIndex + 1
-        rowIndex = rowIndex + 1
-        row = Addon.EnsureGroupHoldTrackerRow(rowIndex)
-        row.icon:Hide()
-        row.text:ClearAllPoints()
-        row.text:SetPoint("TOPLEFT", frame, "TOPLEFT", 8, -((lineIndex - 1) * lineHeight))
-        row.text:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -8, -((lineIndex - 1) * lineHeight))
-        CopyGroupTrackerFont(nil, row.text, fontSize)
-        row.text:SetText("|cffffd100" .. SafeString(need.quest.title) .. "|r")
-        row.text:SetTextColor(1, 1, 1)
-        row.text:Show()
-        width = row.text:GetStringWidth() + 16
-        if width > maxWidth then maxWidth = width end
-        lastQuestKey = need.quest.key
-      end
-
-      lineIndex = lineIndex + 1
-      rowIndex = rowIndex + 1
-      row = Addon.EnsureGroupHoldTrackerRow(rowIndex)
-      row.icon:Hide()
-      row.text:ClearAllPoints()
-      row.text:SetPoint("TOPLEFT", frame, "TOPLEFT", 20, -((lineIndex - 1) * lineHeight))
-      row.text:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -8, -((lineIndex - 1) * lineHeight))
-      CopyGroupTrackerFont(nil, row.text, fontSize)
-      row.text:SetText("|cffffffff- " .. SafeString(need.objective.text) .. "|r")
-      row.text:SetTextColor(1, 1, 1)
-      row.text:Show()
-      width = row.text:GetStringWidth() + 28
-      if width > maxWidth then maxWidth = width end
-
-      lineIndex = lineIndex + 1
-      rowIndex = rowIndex + 1
-      row = Addon.EnsureGroupHoldTrackerRow(rowIndex)
-      width = Addon.SetGroupHoldTrackerPlayerRow(row, localName, localClassToken, Addon.GroupHoldLocalObjective(need), fontSize, lineIndex)
-      if width > maxWidth then maxWidth = width end
-
-      participantRows = Addon.GetGroupHoldParticipantRows(need)
-      for participantIndex = 1, table.getn(participantRows) do
-        participant = participantRows[participantIndex]
-        lineIndex = lineIndex + 1
-        rowIndex = rowIndex + 1
-        row = Addon.EnsureGroupHoldTrackerRow(rowIndex)
-        width = Addon.SetGroupHoldTrackerPlayerRow(row, participant.name, participant.classToken, participant.objective, fontSize, lineIndex)
-        if width > maxWidth then maxWidth = width end
-      end
-    end
-  end
-
-  if lineIndex == 0 then
-    frame:Hide()
-    frame:SetHeight(0)
-    frame.pfqGroupWidth = 0
-    return
-  end
-
-  frame:SetHeight((lineIndex * lineHeight) + 4)
-  frame.pfqGroupWidth = maxWidth
-  frame:Show()
+  frame:Hide()
+  frame:SetHeight(0)
+  frame.pfqGroupWidth = 0
 end
 
 function Addon.ClearGroupHoldNodes()
