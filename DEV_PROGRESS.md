@@ -339,6 +339,7 @@ Exact addon-affecting commit: 1f03df4124f2e28e63c6d1ed6cab3204665a0fb5.
 ## Testing
 
 ### Latest Runtime Result
+- GH5 remains PENDING by availability, not failure: the user has not yet spent enough time questing in the world on a suitable multi-objective quest to exercise objective-specific held-node filtering. Test only when such a quest arises naturally; do not block unrelated work on it.
 - 0.1.32-dev GH6 PASS: user reports held guidance releases correctly when the final relevant participant finishes the held objective; no lingering PFQGROUP guidance/native-row hold remains after completion.
 - 0.1.32-dev focused matrix update: user reports C1-C5 all PASS, R8-R10 all PASS, GH1 PASS, GH3 PASS, GH7 PASS, and GH8 PASS. GH2 is removed from the active matrix by design/user direction. Earlier 0.1.28 runtime evidence already demonstrated GH4 held-node tooltip behavior on `Moontouched Wildkin`, so GH4 is reconciled to PASS. Remaining explicit Group Hold checks are GH5, GH6, and GH9 (GH9 remains skip-eligible).
 - 0.1.32-dev attribution correction: the SoloCraft `spam detected` warnings were ultimately traced by the user to a combination of Quest Tracker Sharing and WanderingGaia, both now fixed. PFQG was not the demonstrated root cause of the server warning. Keep the 0.1.31/0.1.32 transport reductions as valid efficiency improvements, but do not cite the warning as proof of a PFQG transport defect.
