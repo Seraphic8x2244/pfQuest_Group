@@ -649,7 +649,8 @@ local function SendHello(target)
 end
 
 local function RequestFullState(target)
-  return SendWire("R", "", target)
+  local requested = target and NormalizeName(target) or ""
+  return SendWire("R", requested or "", target)
 end
 
 local function ApplyFullState(sender, payload)
@@ -773,8 +774,7 @@ local function DispatchMessage(sender, protocolVersion, messageType, payload)
       if establishBoot then
         SendHello(sender)
       end
-      SendFullState(sender)
-      if establishBoot then
+      if establishBoot or not hadRemoteState then
         RequestFullState(sender)
       end
     end
@@ -797,7 +797,10 @@ local function DispatchMessage(sender, protocolVersion, messageType, payload)
   end
 
   if messageType == "R" then
-    SendFullState(sender)
+    local requested = NormalizeName(payload)
+    if not requested or requested == NormalizeName(playerName) then
+      SendFullState(sender)
+    end
   elseif messageType == "F" then
     ApplyFullState(sender, payload)
   elseif messageType == "D" then
@@ -890,8 +893,33 @@ local function ReceiveWire(prefix, wire, channel, sender)
   end
 end
 
+local function PartyRosterChanged(previousParty, nextParty)
+  local key
+  local previous
+  local current
+
+  for key, previous in pairs(previousParty or {}) do
+    current = nextParty and nextParty[key]
+    if not current
+      or current.unit ~= previous.unit
+      or current.classToken ~= previous.classToken then
+      return true
+    end
+  end
+
+  for key in pairs(nextParty or {}) do
+    if not previousParty or not previousParty[key] then
+      return true
+    end
+  end
+
+  return false
+end
+
 local function RefreshParty()
+  local previousParty = party
   local nextParty = {}
+  local changed
   local index
   local unit
   local name
@@ -918,6 +946,7 @@ local function RefreshParty()
     end
   end
 
+  changed = PartyRosterChanged(previousParty, nextParty)
   party = nextParty
   Addon.party = party
 
@@ -929,11 +958,12 @@ local function RefreshParty()
     end
   end
 
-  Emit("PARTY_CHANGED")
+  if changed then
+    Emit("PARTY_CHANGED")
+  end
 
-  if initialized and GetNumPartyMembers() > 0 then
+  if initialized and changed and GetNumPartyMembers() > 0 then
     SendHello()
-    SendFullState()
   end
 end
 
