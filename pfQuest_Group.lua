@@ -4,6 +4,7 @@ local ADDON_VERSION = GetAddOnMetadata(ADDON_NAME, "Version")
 pfQuest_Group = pfQuest_Group or {}
 local Addon = pfQuest_Group
 local L = pfQuest_Group_L or {}
+Addon.groupContextKey = nil
 
 local PROTOCOL_PREFIX = "PFQGROUP"
 local PROTOCOL_VERSION = 2
@@ -641,11 +642,16 @@ local function SendFullState(target)
 end
 
 local function SendHello(target)
-  local hello = EncodeMap({
+  local hello = {
     version = ADDON_VERSION or "unknown",
     boot = bootId or ""
-  })
-  return SendWire("H", hello, target)
+  }
+
+  if target then
+    hello.target = NormalizeName(target)
+  end
+
+  return SendWire("H", EncodeMap(hello), target)
 end
 
 local function RequestFullState(target)
@@ -723,11 +729,17 @@ local function DispatchMessage(sender, protocolVersion, messageType, payload)
 
   if messageType == "H" then
     local hello = DecodeMap(payload)
+    local helloTarget = NormalizeName(hello.target)
     local previousBoot
     local incomingBoot
     local establishBoot = false
     local restarted = false
     local hadRemoteState
+
+    if helloTarget and helloTarget ~= NormalizeName(playerName) then
+      return
+    end
+
     peer = peers[senderKey] or { name = sender }
 
     previousBoot = peer.bootId
@@ -771,7 +783,7 @@ local function DispatchMessage(sender, protocolVersion, messageType, payload)
     Emit("PEER_STATUS", sender, peer.compatible)
 
     if peer.compatible then
-      if establishBoot then
+      if establishBoot and not helloTarget then
         SendHello(sender)
       end
       if establishBoot or not hadRemoteState then
@@ -916,6 +928,43 @@ local function PartyRosterChanged(previousParty, nextParty)
   return false
 end
 
+function Addon.LocalGroupContextKey()
+  local raidCount = GetNumRaidMembers and GetNumRaidMembers() or 0
+  local selfKey = NormalizeName(playerName or UnitName("player"))
+  local index
+  local name
+  local subgroup
+
+  if raidCount and raidCount > 0 and GetRaidRosterInfo then
+    for index = 1, raidCount do
+      name, _, subgroup = GetRaidRosterInfo(index)
+      if selfKey and NormalizeName(name) == selfKey then
+        return "GROUP:" .. SafeString(subgroup or 1)
+      end
+    end
+    return "GROUP"
+  end
+
+  if GetNumPartyMembers() > 0 then
+    return "GROUP:1"
+  end
+
+  return "SOLO"
+end
+
+function Addon.AnnounceOwnGroupContext()
+  local current = Addon.LocalGroupContextKey()
+  local previous = Addon.groupContextKey
+
+  Addon.groupContextKey = current
+
+  if initialized and current ~= "SOLO" and current ~= previous then
+    return SendHello()
+  end
+
+  return false
+end
+
 local function RefreshParty()
   local previousParty = party
   local nextParty = {}
@@ -962,9 +1011,7 @@ local function RefreshParty()
     Emit("PARTY_CHANGED")
   end
 
-  if initialized and changed and GetNumPartyMembers() > 0 then
-    SendHello()
-  end
+  Addon.AnnounceOwnGroupContext()
 end
 
 local function ReadQuestLogTitle(index)
@@ -3927,8 +3974,32 @@ function Addon.RegisterStateComponent(name, snapshotHandler, fullHandler, deltaH
   return true
 end
 
+function Addon.HasCompatiblePeer(target)
+  local normalized
+  local peer
+
+  if target then
+    normalized = NormalizeName(target)
+    peer = normalized and peers[normalized]
+    return normalized
+      and party[normalized] ~= nil
+      and peer
+      and peer.compatible
+      and true
+      or false
+  end
+
+  for normalized, peer in pairs(peers) do
+    if party[normalized] and peer and peer.compatible then
+      return true
+    end
+  end
+
+  return false
+end
+
 function Addon.SendDelta(componentName, payload, target)
-  if not components[componentName] then
+  if not components[componentName] or not Addon.HasCompatiblePeer(target) then
     return false
   end
 
