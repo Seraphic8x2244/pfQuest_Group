@@ -2,11 +2,11 @@
 
 ## Current
 - Branch: dev.
-- Version: 0.1.32-dev from pfQuest_Group.toc.
-- Latest addon-affecting development commit: 7fb8de8036fc56674fe382b2af6357ef4a59205d — 0.1.32-dev makes PFQG discovery joiner/self-context announced. A client sends discovery HELLO only when its own communication cohort changes (solo -> party/subgroup, reload/login while grouped, or raid subgroup move), not because unrelated members/bots changed the roster. HELLO replies carry a logical target so other current PFQG peers ignore them, and ordinary quest/session/instruction deltas are suppressed when there are zero known compatible PFQG peers.
+- Version: 0.1.33-dev from pfQuest_Group.toc.
+- Latest addon-affecting development commit: ee29e2ff1f3e18f6dee52cf279fe9902b18121d3 — 0.1.33-dev adds automatic Guide/Tourist flightpath instructions through the existing durable instruction owner. Guide `TakeTaxiNode` creates a `FLIGHT` instruction for the selected destination when an active Tourist exists; a Tourist taking the same destination automatically completes it through the existing consumed/acknowledgement pipeline. Flight rows display `Fly to <destination>`, and manual Done remains available as fallback.
 - Handoff checkpoint: the current dev head carrying this status file; always verify the actual remote branch head before resuming.
 - Stable baseline: None. main remains exactly bootstrap commit 4c5c63f074923266566c36c51ce2718d0060166f and is not a runtime release.
-- Goal: first runtime-verify the 0.1.32 joiner-announced discovery model eliminates bot/raid roster spam while preserving peer discovery/synchronization, then verify native-only tracker ownership remains correct and continue `Strange Sources`, legacy-completion permanence, unified binary/count tracker validation, dormant/durable + remaining GH/C/R checks.
+- Goal: runtime-verify 0.1.33 flightpath guidance end-to-end without regressing the now broadly validated tracker/Guide behavior; leave GH5 opportunistic and GH9 skip-eligible.
 - Scope boundary: the user explicitly requested post-Phase-6 refinements through the existing owners: Guide reverse-completion feedback, Tourist manual Done, instruction NPC presentation, unified per-player Group Progress rows for both binary and count objectives, dormant/durable Guide sessions, and PFQG-owned group-held objective/map tracking. The old binary tick/cross + remote icon-column presentation is intentionally retired as of 0.1.27-dev.
 
 ## Current Design / Development Contract
@@ -31,11 +31,11 @@
 - Group Progress is independent of Guide/Tourist mode.
 
 ### Protocol / Peer State
-- Protocol prefix: PFQGROUP; protocol version: 2; SavedVariables schema: 3. Protocol v2 remains sufficient: schema 2 introduced Guide-local durable instruction eligibility/acknowledgement/completion metadata without changing wire formats, and schema 3 adds only the local persisted Phase-2 group-hold cache. v1 peers remain rejected.
+- Protocol prefix: PFQGROUP; protocol version: 3; SavedVariables schema: 3. Protocol v3 is required as of 0.1.33-dev because the durable instructions wire now supports a third action code, `F` / `FLIGHT`, plus a flight-destination field. Protocol v2 peers are intentionally rejected rather than being treated as compatible with an instruction type they cannot decode. SavedVariables schema remains 3 because normalized local instruction records are additive and require no destructive migration.
 - Only actual current party/subgroup members participate; peer/state presentation still scans `party1` through `party4`. Discovery is joiner/self-context announced as of 0.1.32-dev: unrelated member/bot roster changes do not make established PFQG clients announce. A PFQG client announces when its own communication cohort changes (joining from solo, loading/reloading while grouped, or moving raid subgroup).
 - Transport remains native Vanilla SendAddonMessage over PARTY. WoW 1.12 SendAddonMessage does not support WHISPER; logical targeting is carried inside PFQG payloads while the physical transport remains PARTY. Ordinary component deltas are silent when no compatible PFQG peer is known.
-- Wire types remain HELLO (H), full-state request (R), full snapshot (F), and component delta (D).
-- State synchronization remains component-based through RegisterStateComponent, SendDelta, and RequestFullSync.
+- Transport wire message types remain HELLO (H), full-state request (R), full snapshot (F), and component delta (D). Instruction records inside the instructions component now support action codes A (ACCEPT), T (TURNIN), and F (FLIGHT).
+- State synchronization remains component-based through RegisterStateComponent, SendDelta, and RequestFullSync; flight guidance adds no new state component or transport message type.
 - Registered synchronized components remain exactly session, quests, and instructions.
 - Live remote peer state remains ephemeral and is removed when the player leaves the party. The Phase-2 group-hold cache separately persists last-known quest snapshots only for relevant members of the current Guide session so an offline unfinished Tourist cannot be mistaken for completion.
 - A newly established or changed peer boot id invalidates previously cached remote session/quest/instruction state. Joiner-announced HELLO discovery establishes the boot boundary; compatible existing peers may answer with a logically targeted HELLO and targeted full-state request so both sides learn each other without unrelated PFQG peers responding.
@@ -81,7 +81,7 @@
 - Tourist follows one specific player and preserves that target through temporary absence.
 - Tourist binds only when that compatible peer advertises Guide mode with a Guide session id. joinBaseline is the Guide's current guideActionSeq and remains fixed for that Guide session.
 - A different Guide session id causes a fresh binding/baseline. Explicit non-Guide advertisement clears active binding/baseline but preserves Tourist mode and target. Turning Tourist Off clears target/binding/baseline.
-- Guide ACCEPT/TURNIN actions create ordered instruction records using guideActionSeq. Records persist in pfQuest_GroupDB.instructions and synchronize through the existing instructions component.
+- Guide ACCEPT/TURNIN actions and Guide flightpath selections create ordered instruction records using guideActionSeq. Records persist in pfQuest_GroupDB.instructions and synchronize through the existing instructions component.
 - A Guide instruction record is validated before guideActionSeq advances.
 - Guide sends the instruction delta before the corresponding session cursor delta. A bound Tourist uses the existing Guide session cursor to detect a missing instruction delta and requests the existing full-state resync path; no new scheduler, owner, component, or wire type exists.
 - Remote instruction full snapshots are accepted only when coherent with the currently known remote Guide session. Same-session stale cursors cannot roll backward.
@@ -97,6 +97,16 @@
 - Tourist completion acknowledgements remain durable per Tourist. Guide-side schema-2 instruction metadata now persists each new instruction's fixed eligible Tourist cohort, per-Tourist acknowledgements, and derived completed state. Completed Guide instructions are filtered from Guide UI/full instruction snapshots so they do not reappear within the same Guide session.
 - Eligibility for permanent Guide completion is frozen when each new instruction is created from the durable Guide participant roster plus current matching Tourists. Temporarily offline eligible Tourists remain in that frozen cohort; explicit unpairing affects future instructions only; late joiners are not retroactively added.
 - Ownership remains unchanged: Phase 4a owns session identity/pairing and Phase 4b owns instruction/completion state. Protocol stays v2. Fresh schema-2+ instructions remain authoritative and use only their frozen durable eligibility cohort. Schema-1 historical instructions have no recoverable authoritative historical roster; 0.1.26 restored live-party recovery for them, and 0.1.27 now persists a legacy row as completed once that recovery successfully observes every currently eligible same-session Tourist complete. Persisted completed markers are restored during normalization, so recovered rows should not replay after leave/rejoin, reload, or relog.
+
+### Flightpath Guidance — Implemented in 0.1.33-dev; runtime pending
+- Flightpath guidance is owned by the existing Guide/Tourist instruction system; there is no separate flight state machine, window, scheduler, or protocol component.
+- PFQG wraps Vanilla `TakeTaxiNode(slot)`. While the taxi map is open it captures `TaxiNodeName(slot)` and, for a reachable destination, treats the actual Guide taxi selection as a `FLIGHT` instruction.
+- A Guide creates a flight instruction only while at least one active same-session Tourist exists, matching the dormant Guide rule used for quest instructions.
+- Flight instructions persist in the existing Guide instruction store, participate in the same fixed eligible-Tourist cohort, and use the same completion acknowledgement/durability machinery as ACCEPT/TURNIN.
+- Tourist presentation is `Fly to <destination>` in the existing Guide/Tourist window. No separate map marker is created.
+- When a bound Tourist calls `TakeTaxiNode` for the same destination name, PFQG consumes the earliest matching pending FLIGHT instruction automatically and sends the ordinary completion acknowledgement. Manual Done remains a fallback for a missed/raced action or an instruction the Tourist cannot reproduce automatically.
+- Matching is by the taxi destination name exposed by the client. This is appropriate for the current same-locale addon scope; no cross-locale stable taxi-node identity has been introduced.
+- Protocol version is 3 because older v2 clients cannot decode the new durable FLIGHT record. Both PFQG clients must run 0.1.33-dev or later for this feature.
 
 ### Guide / Tourist Window and Disparities
 - The existing compact movable Phase 5 window is the only Guide/Tourist presentation window and is shown only in Guide/Tourist mode.
@@ -314,6 +324,15 @@ Exact addon-affecting commit: 1f03df4124f2e28e63c6d1ed6cab3204665a0fb5.
 - Physical transport remains PARTY because Vanilla 1.12 has no addon-message whisper path. The optimization eliminates unnecessary sends; it does not make PARTY packets physically private.
 - Canonical Lua 5.0.3 compiler check was not run in this connector-only environment; do not claim a compiler pass.
 
+### Static / Automated Checks — 0.1.33-dev Flightpath Guidance
+- Focused source review PASS: `NormalizeInstructionRecord` accepts ACCEPT/TURNIN/FLIGHT and requires a non-empty destination for FLIGHT while keeping quest fields authoritative only for quest actions.
+- Instruction serialization PASS by inspection: action code `F` and the destination field round-trip through the same instruction record format; existing A/T records remain represented by their existing codes.
+- Ownership PASS: both quest and flight Guide actions now route through `Addon.CreateGuideInstruction`, preserving one durable instruction owner, one sequence, one eligibility snapshot path, one instructions component, and one completion pipeline.
+- Taxi hook PASS by inspection: the wrapper captures `TaxiNodeName(slot)` / optional `TaxiNodeGetType(slot)` before calling the original `TakeTaxiNode(slot)`, then records only non-empty/non-INVALID reachable selections.
+- Tourist auto-completion PASS by inspection: the earliest pending FLIGHT instruction with the same destination is consumed via `CompleteTouristInstruction`; manual Done remains unchanged.
+- Transport/component structure unchanged apart from protocol version: exactly one source call to `SendAddonMessage` remains, and no new synchronized component was added.
+- Canonical Lua 5.0.3 compiler check was not run in this connector-only environment; do not claim a compiler pass.
+
 ### Checks Not Actually Runnable
 - Exact full-file Lua 5.3.6 parser smoke: not run against the committed pfQuest_Group.lua blob because GitHub connector-backed repository bytes are not materialized into the executable container.
 - Canonical Lua 5.0.3 compiler check: not run / unavailable against the exact Phase 6 blob. Seraphic8x2244/VanillaTemplate main at 6980e95476a72c47a461f7c78ce9e4f649c829f contains the canonical tools/lua50 checker and vendored Lua 5.0.3 source, and the executable environment has a working C compiler, but the private connector-backed checker/source and addon blob are not mounted into that executable environment.
@@ -339,6 +358,7 @@ Exact addon-affecting commit: 1f03df4124f2e28e63c6d1ed6cab3204665a0fb5.
 ## Testing
 
 ### Latest Runtime Result
+- 0.1.33-dev flightpath guidance IMPLEMENTED / RUNTIME PENDING: Guide taxi selection now creates a durable `FLIGHT` instruction with the selected destination; Tourist selection of the same destination auto-completes it through the existing completion pipeline. Protocol is v3, so both clients must update. No in-game result has yet been reported for this delta.
 - GH5 remains PENDING by availability, not failure: the user has not yet spent enough time questing in the world on a suitable multi-objective quest to exercise objective-specific held-node filtering. Test only when such a quest arises naturally; do not block unrelated work on it.
 - 0.1.32-dev GH6 PASS: user reports held guidance releases correctly when the final relevant participant finishes the held objective; no lingering PFQGROUP guidance/native-row hold remains after completion.
 - 0.1.32-dev focused matrix update: user reports C1-C5 all PASS, R8-R10 all PASS, GH1 PASS, GH3 PASS, GH7 PASS, and GH8 PASS. GH2 is removed from the active matrix by design/user direction. Earlier 0.1.28 runtime evidence already demonstrated GH4 held-node tooltip behavior on `Moontouched Wildkin`, so GH4 is reconciled to PASS. Remaining explicit Group Hold checks are GH5, GH6, and GH9 (GH9 remains skip-eligible).
@@ -551,24 +571,23 @@ GH8. **PASS — Local completion/removal historical hold without synthetic track
 GH9. **UNTESTED / SKIP-eligible — Ambiguous complex objective mapping.** If a held objective has multiple database sources that cannot be matched safely by localized objective text, verify PFQG prefers tracker-only guidance over showing unrelated map nodes. The deferred Mrs Dalson's Diary / Outhouse / Locked Cabinet chain is not a test target for this case.
 
 ### Next Implementation / Runtime Sequence
-1. Continue normal play on 0.1.32-dev; C1-C5 and R8-R10 are complete, and GH1/GH3/GH4/GH6/GH7/GH8 are complete.
-2. When naturally encountered, test GH5 multi-objective filtering: only the specific held objective(s) still needed by a relevant participant should retain PFQGROUP guidance.
-3. GH9 ambiguous-source mapping remains skip-eligible; only test it if a naturally ambiguous objective appears.
-5. `Strange Sources` remains deferred until reproducible and is not a blocker. Legacy Guide completion replay remains observationally fixed unless it recurs.
-6. Keep Mrs Dalson's Diary / Outhouse / Locked Cabinet deferred. Keep raid-FPS investigation pinned unless it recurs with stronger PFQG correlation.
+1. Update both Guide and Tourist to exact 0.1.33-dev / ee29e2ff1f3e18f6dee52cf279fe9902b18121d3; protocol v2 clients are intentionally incompatible.
+2. With Guide/Tourist actively paired, have the Guide take a normal reachable flightpath. Verify both windows show a new `Fly to <destination>` instruction and no Lua error occurs.
+3. Have the Tourist take that same destination. Verify the Tourist row completes/vanishes normally and the corresponding Guide row receives the usual completion feedback and stays completed.
+4. Take a different destination than the pending flight instruction and verify it does not falsely complete the pending step. Also verify Guide flight selection while no active Tourist is present creates no instruction.
+5. Reload/regroup with a pending flight step if convenient and verify it survives/reconciles through the existing durable instruction path; manual Done should remain usable as fallback.
+6. Continue normal play. GH5 remains pending only until a suitable multi-objective world quest arises; GH9 remains skip-eligible. `Strange Sources` and the Mrs Dalson's Diary / Outhouse / Locked Cabinet anomaly remain deferred.
 
 ## Planned / Next Work
-- Future feature backlog: Flightpath guidance — define how Guide/Tourist routing should surface recommended flightpath usage without changing current quest/objective ownership or transport semantics. Do not begin implementation until the current GH/C/R validation sequence is complete or the user explicitly reprioritizes it.
-1. Runtime-test exact 0.1.27-dev with the existing Guide/Tourist pair, prioritizing legacy-completion permanence and unified binary rows.
+1. Runtime-test the current 0.1.33-dev flightpath delta first, then continue opportunistic remaining validation.
 2. Record exact PASS/FAIL observations in DEV_PROGRESS.md; do not upgrade untested matrix items from static evidence.
-3. Continue dormant/durable, GH1-GH9, C1-C5, R8-R10, and remaining broad protocol-v2 gaps.
+3. Continue only remaining relevant gaps: GH5 when available, GH9 if naturally encountered, and any current protocol-v3 regression that appears during normal play.
 4. Fix only demonstrated defects, bumping the dev version for every addon-affecting revision.
 5. Keep the linked Mrs Dalson's Diary / Outhouse / Locked Cabinet anomaly deferred.
 6. After a known-good runtime state exists, review release/promotion readiness separately; do not treat development checks as a runtime test.
 
 ## Deferred / Out of Scope
 - Raid-FPS investigation is pinned unless the issue recurs with a stronger PFQG correlation; current observation is confounded by several recently updated addons.
-- Flightpath guidance feature work is deferred until after the current tracker/Guide validation sequence unless explicitly reprioritized.
 - New feature work beyond the currently agreed post-Phase-6 tracker/Guide refinements.
 - Release/promotion to main before broad runtime validation is complete or any validation debt is explicitly accepted.
 - dev_rulebook.md changes.
@@ -581,4 +600,4 @@ GH9. **UNTESTED / SKIP-eligible — Ambiguous complex objective mapping.** If a 
 - External/runtime prerequisite: pfQuest.
 
 ## Exact Next Step
-Continue normal play on 0.1.32-dev and close GH5 multi-objective filtering when it naturally arises. GH9 is skip-eligible and should only be tested if a naturally ambiguous objective appears. C1-C5, R8-R10, GH1, GH3, GH4, GH6, GH7, and GH8 are recorded PASS; GH2 has been removed from the active matrix. `Strange Sources` remains deferred until reproducible. Keep Mrs Dalson's Diary / Outhouse / Locked Cabinet deferred.
+Update both PFQG clients to exact 0.1.33-dev / ee29e2ff1f3e18f6dee52cf279fe9902b18121d3. With an active Guide/Tourist pairing, have the Guide take a reachable flightpath and verify `Fly to <destination>` appears. Then have the Tourist take the same destination and verify the instruction completes on both sides through the normal strike/fade/removal and durable acknowledgement path. A different destination must not complete it, and a Guide with no active Tourist must not create a flight instruction. GH5 remains opportunistic; GH9 remains skip-eligible.
