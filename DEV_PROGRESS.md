@@ -2,11 +2,11 @@
 
 ## Current
 - Branch: dev.
-- Version: 0.1.30-dev from pfQuest_Group.toc.
-- Latest addon-affecting development commit: f9c3615afccf5b367c64c9d9bdb3b4086c704b31 — 0.1.30-dev removes PFQG-created fallback quest blocks from the pfQuest tracker. PFQG still augments native pfQuest objective rows when they exist and retains the separate PFQGROUP map/minimap hold path, but it no longer synthesizes a replacement quest/objective block when pfQuest has no native tracker row.
+- Version: 0.1.31-dev from pfQuest_Group.toc.
+- Latest addon-affecting development commit: 8cbab146b4dfd6cd071acde20da6a280f73c4447 — 0.1.31-dev reduces raid roster synchronization bursts: repeated `PARTY_MEMBERS_CHANGED` events that do not change the local `party1`-`party4` subgroup no longer trigger discovery/UI churn; roster discovery sends HELLO only, repeated same-boot HELLOs no longer force full snapshots, and full-state requests now carry a logical target so only the intended new PFQG peer responds on modern clients.
 - Handoff checkpoint: the current dev head carrying this status file; always verify the actual remote branch head before resuming.
 - Stable baseline: None. main remains exactly bootstrap commit 4c5c63f074923266566c36c51ce2718d0060166f and is not a runtime release.
-- Goal: runtime-verify 0.1.30 no longer synthesizes historical/held quests in the tracker while preserving native-row shared progress and map/minimap hold behavior, then continue `Strange Sources`, legacy-completion permanence, unified binary/count tracker validation, dormant/durable + remaining GH/C/R checks.
+- Goal: first runtime-verify the 0.1.31 raid/bot summon message-burst fix, then verify 0.1.30 native-only tracker ownership remains correct and continue `Strange Sources`, legacy-completion permanence, unified binary/count tracker validation, dormant/durable + remaining GH/C/R checks.
 - Scope boundary: the user explicitly requested post-Phase-6 refinements through the existing owners: Guide reverse-completion feedback, Tourist manual Done, instruction NPC presentation, unified per-player Group Progress rows for both binary and count objectives, dormant/durable Guide sessions, and PFQG-owned group-held objective/map tracking. The old binary tick/cross + remote icon-column presentation is intentionally retired as of 0.1.27-dev.
 
 ## Current Design / Development Contract
@@ -299,6 +299,13 @@ Exact addon-affecting commit: 1f03df4124f2e28e63c6d1ed6cab3204665a0fb5.
 - Group-hold need calculation, participant durability, PFQGROUP map/minimap source selection, protocol v2, and SavedVariables schema 3 are unchanged.
 - Canonical Lua 5.0.3 compiler check was not run in this connector-only environment; do not claim a compiler pass.
 
+### Static / Automated Checks — 0.1.31-dev Raid Sync Burst Reduction
+- Focused transport diff PASS: `RefreshParty()` no longer sends `SendFullState()` on every roster event and emits discovery only when the effective local `party1`-`party4` roster changes.
+- HELLO handling now requests a full state only for a newly established boot or missing remote state; repeated HELLO from an already synchronized same-boot peer does not produce a full snapshot.
+- Full-state requests now include the normalized requested peer name in the existing `R` payload; 0.1.31 peers ignore requests not addressed to themselves, while an empty payload remains backward-compatible with earlier broadcast semantics.
+- Protocol remains v2 because wire framing/types are unchanged and the `R` payload extension is additive; older v2 peers may still respond broadly to a targeted request, so the strongest spam reduction requires both PFQG users on 0.1.31-dev.
+- Canonical Lua 5.0.3 compiler check was not run in this connector-only environment; do not claim a compiler pass.
+
 ### Checks Not Actually Runnable
 - Exact full-file Lua 5.3.6 parser smoke: not run against the committed pfQuest_Group.lua blob because GitHub connector-backed repository bytes are not materialized into the executable container.
 - Canonical Lua 5.0.3 compiler check: not run / unavailable against the exact Phase 6 blob. Seraphic8x2244/VanillaTemplate main at 6980e95476a72c47a461f7c78ce9e4f649c829f contains the canonical tools/lua50 checker and vendored Lua 5.0.3 source, and the executable environment has a working C compiler, but the private connector-backed checker/source and addon blob are not mounted into that executable environment.
@@ -324,6 +331,7 @@ Exact addon-affecting commit: 1f03df4124f2e28e63c6d1ed6cab3204665a0fb5.
 ## Testing
 
 ### Latest Runtime Result
+- 0.1.30-dev runtime/network FAIL reproduced by user on SoloCraft: creating a 10-player raid with 2 PFQG users plus 8 summoned bots produced roughly 50-100 addon messages and server `spam detected` warnings. Static trace identified multiplicative roster-sync traffic: every `PARTY_MEMBERS_CHANGED` unconditionally sent HELLO + a chunked full snapshot, and every received HELLO unconditionally sent another chunked full snapshot. Raid roster events also fired even when the local `party1`-`party4` subgroup did not materially change. 0.1.31-dev / 8cbab146b4dfd6cd071acde20da6a280f73c4447 removes those redundant full-state broadcasts and filters no-op subgroup roster events; runtime retest pending.
 - 0.1.30-dev design correction awaiting runtime: user rejected PFQG-created fallback quest blocks after observing the historical `Are We There, Yeti?` hold. Product rule is now that PFQG may augment native pfQuest tracker rows but must not create its own replacement quest in the tracker once pfQuest has no native row. The Guide is responsible for deciding whether to delay turn-in. Map/minimap group-hold guidance remains unchanged for now. 0.1.29's synthetic historical tracker block is therefore superseded behavior, not a target to preserve.
 - 0.1.29-dev runtime: `Are We There, Yeti?` supplemental historical hold behaves as intended. The Guide confirmed they previously had/tracked and completed the quest earlier in the same Guide session while Gaiallmighty remained incomplete. With the local quest now absent, PFQG retains Gaia's unfinished `0/2` objective and renders the local self row as grey `--`, matching the intended GH8 historical-hold semantics rather than remote-only quest injection. This is partial GH8 evidence; no claim is made yet for final release, map/minimap retention, or no-falsification beyond the observed tracker state.
 - 0.1.29-dev performance observation — PINNED / UNATTRIBUTED: user reports raid play felt shaky while grouped with one same-subgroup PFQG peer (Gaia) and both were progressing `Echoes of War` (quest 9033), but several other addons were updated recently and raid FPS had previously been good. Do not treat PFQG as the likely cause or block current PFQG validation on this observation. If it recurs with stronger PFQG correlation, isolate with PFQGROUP node-count/node-removal A-B testing first, then inspect tracker relayout / PARTY roster-sync frequency.
@@ -521,12 +529,11 @@ GH8. **SUPERSEDED PARTIAL OBSERVATION — Local completion/removal historical ho
 GH9. **UNTESTED / SKIP-eligible — Ambiguous complex objective mapping.** If a held objective has multiple database sources that cannot be matched safely by localized objective text, verify PFQG prefers tracker-only guidance over showing unrelated map nodes. The deferred Mrs Dalson's Diary / Outhouse / Locked Cabinet chain is not a test target for this case.
 
 ### Next Implementation / Runtime Sequence
-1. Put both Guide and Tourist on exact 0.1.30-dev / f9c3615afccf5b367c64c9d9bdb3b4086c704b31. Reproduce a historical/held case like `Are We There, Yeti?` where the local quest is already absent but Gaia remains incomplete. Verify PFQG does not create a replacement quest block in the local tracker.
-2. Verify ordinary shared progress and held progress still augment native pfQuest tracker rows correctly whenever the local quest/objective row actually exists.
-3. Retest `Strange Sources` exploration-marker retention and held-node tooltip behavior; map/minimap Group Hold remains intentionally separate from the no-synthetic-tracker rule.
-4. Recheck legacy Guide-completion permanence across leave/rejoin and reload/relog.
-5. Test incomplete ordinary binary live `0/1 -> 1/1` plus no-quest peer filtering, then continue remaining dormant/durable, GH1-GH9 (with GH2 retired), C1-C5, and R8-R10.
-6. Keep raid-FPS investigation pinned unless it recurs with stronger PFQG correlation. Keep Mrs Dalson's Diary / Outhouse / Locked Cabinet deferred.
+1. Put both PFQG users on exact 0.1.31-dev / 8cbab146b4dfd6cd071acde20da6a280f73c4447. Recreate the SoloCraft 10-player setup with 2 PFQG users and 8 summoned bots. Verify bot/raid roster changes no longer cause `spam detected` warnings or a 50-100-message burst.
+2. While still grouped, verify the two PFQG users discover each other and shared quest progress/Guide-Tourist synchronization still settles after the roster stabilizes.
+3. Verify the 0.1.30 native-only tracker rule remains correct: a historical quest absent from local pfQuest must not be synthesized into the tracker, while a genuinely local tracked quest still receives shared player rows.
+4. Retest `Strange Sources` exploration-marker retention, legacy Guide-completion permanence, incomplete ordinary binary live `0/1 -> 1/1`, and no-quest peer filtering.
+5. Continue remaining dormant/durable, GH1-GH9 (GH2 retired), C1-C5, and R8-R10 runtime tests. Keep Mrs Dalson's Diary / Outhouse / Locked Cabinet deferred.
 
 ## Planned / Next Work
 - Future feature backlog: Flightpath guidance — define how Guide/Tourist routing should surface recommended flightpath usage without changing current quest/objective ownership or transport semantics. Do not begin implementation until the current GH/C/R validation sequence is complete or the user explicitly reprioritizes it.
@@ -552,4 +559,4 @@ GH9. **UNTESTED / SKIP-eligible — Ambiguous complex objective mapping.** If a 
 - External/runtime prerequisite: pfQuest.
 
 ## Exact Next Step
-On exact 0.1.30-dev / f9c3615afccf5b367c64c9d9bdb3b4086c704b31, first verify the `Are We There, Yeti?` style historical hold no longer creates a PFQG quest block in the local tracker once the local quest is absent. Then verify a quest that is genuinely present in the local pfQuest tracker still shows shared/held player rows correctly. Retest `Strange Sources` for map/minimap retention separately, then continue legacy-completion permanence, incomplete binary live `0/1 -> 1/1`, no-quest peer filtering, dormant/durable, remaining GH tests (GH2 retired), C1-C5, and R8-R10. Raid-FPS investigation remains pinned unless it recurs with stronger PFQG correlation. Keep Mrs Dalson's Diary / Outhouse / Locked Cabinet deferred.
+Update both PFQG users to exact 0.1.31-dev / 8cbab146b4dfd6cd071acde20da6a280f73c4447 and recreate the 10-player SoloCraft raid by summoning the 8 bots. The immediate PASS condition is no server `spam detected` warning / no 50-100-message roster burst while the two PFQG users still discover each other and synchronize after the roster stabilizes. Then resume the 0.1.30 native-only tracker check, `Strange Sources`, legacy-completion permanence, binary live-update/no-quest filtering, dormant/durable, GH/C/R validation. Keep Mrs Dalson's Diary / Outhouse / Locked Cabinet deferred.
