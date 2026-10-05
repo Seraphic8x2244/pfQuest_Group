@@ -2,11 +2,11 @@
 
 ## Current
 - Branch: dev.
-- Version: 0.1.31-dev from pfQuest_Group.toc.
-- Latest addon-affecting development commit: 8cbab146b4dfd6cd071acde20da6a280f73c4447 — 0.1.31-dev reduces raid roster synchronization bursts: repeated `PARTY_MEMBERS_CHANGED` events that do not change the local `party1`-`party4` subgroup no longer trigger discovery/UI churn; roster discovery sends HELLO only, repeated same-boot HELLOs no longer force full snapshots, and full-state requests now carry a logical target so only the intended new PFQG peer responds on modern clients.
+- Version: 0.1.32-dev from pfQuest_Group.toc.
+- Latest addon-affecting development commit: 7fb8de8036fc56674fe382b2af6357ef4a59205d — 0.1.32-dev makes PFQG discovery joiner/self-context announced. A client sends discovery HELLO only when its own communication cohort changes (solo -> party/subgroup, reload/login while grouped, or raid subgroup move), not because unrelated members/bots changed the roster. HELLO replies carry a logical target so other current PFQG peers ignore them, and ordinary quest/session/instruction deltas are suppressed when there are zero known compatible PFQG peers.
 - Handoff checkpoint: the current dev head carrying this status file; always verify the actual remote branch head before resuming.
 - Stable baseline: None. main remains exactly bootstrap commit 4c5c63f074923266566c36c51ce2718d0060166f and is not a runtime release.
-- Goal: first runtime-verify the 0.1.31 raid/bot summon message-burst fix, then verify 0.1.30 native-only tracker ownership remains correct and continue `Strange Sources`, legacy-completion permanence, unified binary/count tracker validation, dormant/durable + remaining GH/C/R checks.
+- Goal: first runtime-verify the 0.1.32 joiner-announced discovery model eliminates bot/raid roster spam while preserving peer discovery/synchronization, then verify native-only tracker ownership remains correct and continue `Strange Sources`, legacy-completion permanence, unified binary/count tracker validation, dormant/durable + remaining GH/C/R checks.
 - Scope boundary: the user explicitly requested post-Phase-6 refinements through the existing owners: Guide reverse-completion feedback, Tourist manual Done, instruction NPC presentation, unified per-player Group Progress rows for both binary and count objectives, dormant/durable Guide sessions, and PFQG-owned group-held objective/map tracking. The old binary tick/cross + remote icon-column presentation is intentionally retired as of 0.1.27-dev.
 
 ## Current Design / Development Contract
@@ -32,13 +32,13 @@
 
 ### Protocol / Peer State
 - Protocol prefix: PFQGROUP; protocol version: 2; SavedVariables schema: 3. Protocol v2 remains sufficient: schema 2 introduced Guide-local durable instruction eligibility/acknowledgement/completion metadata without changing wire formats, and schema 3 adds only the local persisted Phase-2 group-hold cache. v1 peers remain rejected.
-- Only actual current party members participate; discovery scans party1 through party4.
-- Transport remains native Vanilla SendAddonMessage over PARTY. WoW 1.12 SendAddonMessage does not support WHISPER; logical directed recovery validates the requested party peer but uses the PARTY addon channel.
+- Only actual current party/subgroup members participate; peer/state presentation still scans `party1` through `party4`. Discovery is joiner/self-context announced as of 0.1.32-dev: unrelated member/bot roster changes do not make established PFQG clients announce. A PFQG client announces when its own communication cohort changes (joining from solo, loading/reloading while grouped, or moving raid subgroup).
+- Transport remains native Vanilla SendAddonMessage over PARTY. WoW 1.12 SendAddonMessage does not support WHISPER; logical targeting is carried inside PFQG payloads while the physical transport remains PARTY. Ordinary component deltas are silent when no compatible PFQG peer is known.
 - Wire types remain HELLO (H), full-state request (R), full snapshot (F), and component delta (D).
 - State synchronization remains component-based through RegisterStateComponent, SendDelta, and RequestFullSync.
 - Registered synchronized components remain exactly session, quests, and instructions.
 - Live remote peer state remains ephemeral and is removed when the player leaves the party. The Phase-2 group-hold cache separately persists last-known quest snapshots only for relevant members of the current Guide session so an offline unfinished Tourist cannot be mistaken for completion.
-- A newly established or changed peer boot id invalidates previously cached remote session/quest/instruction state. Compatible peers answer a newly established boot with HELLO plus full state and request the peer's full state, so both sides establish the boot boundary and current state.
+- A newly established or changed peer boot id invalidates previously cached remote session/quest/instruction state. Joiner-announced HELLO discovery establishes the boot boundary; compatible existing peers may answer with a logically targeted HELLO and targeted full-state request so both sides learn each other without unrelated PFQG peers responding.
 - Full snapshots apply the session component before dependent components. Unknown components continue to be ignored.
 
 ### Quest-State Engine
@@ -306,6 +306,14 @@ Exact addon-affecting commit: 1f03df4124f2e28e63c6d1ed6cab3204665a0fb5.
 - Protocol remains v2 because wire framing/types are unchanged and the `R` payload extension is additive; older v2 peers may still respond broadly to a targeted request, so the strongest spam reduction requires both PFQG users on 0.1.31-dev.
 - Canonical Lua 5.0.3 compiler check was not run in this connector-only environment; do not claim a compiler pass.
 
+### Static / Automated Checks — 0.1.32-dev Joiner-Announced Discovery
+- Focused call-path review PASS: ordinary `PARTY_MEMBERS_CHANGED` still rebuilds the local `party1`-`party4` roster and can emit local `PARTY_CHANGED`, but no longer calls `SendHello()` based on roster membership changes.
+- `Addon.AnnounceOwnGroupContext()` is the only roster-side discovery trigger. It sends HELLO only when this client's own context changes from the previously recorded context and the client is not solo. Party uses `GROUP:1`; raid uses the player's `GetRaidRosterInfo()` subgroup, so adding/moving other members without moving the local player does not announce.
+- Targeted HELLO replies include `target=<normalized player>` in the existing HELLO payload; 0.1.32 peers ignore HELLOs addressed to someone else. Wire type/framing and protocol version remain v2; this is an additive field.
+- `Addon.SendDelta()` now returns without network transmission unless the target is a known compatible peer or at least one compatible current peer exists for broadcast deltas. Local quest/session state still advances, so a later discovered peer receives current state through full synchronization.
+- Physical transport remains PARTY because Vanilla 1.12 has no addon-message whisper path. The optimization eliminates unnecessary sends; it does not make PARTY packets physically private.
+- Canonical Lua 5.0.3 compiler check was not run in this connector-only environment; do not claim a compiler pass.
+
 ### Checks Not Actually Runnable
 - Exact full-file Lua 5.3.6 parser smoke: not run against the committed pfQuest_Group.lua blob because GitHub connector-backed repository bytes are not materialized into the executable container.
 - Canonical Lua 5.0.3 compiler check: not run / unavailable against the exact Phase 6 blob. Seraphic8x2244/VanillaTemplate main at 6980e95476a72c47a461f7c78ce9e4f649c829f contains the canonical tools/lua50 checker and vendored Lua 5.0.3 source, and the executable environment has a working C compiler, but the private connector-backed checker/source and addon blob are not mounted into that executable environment.
@@ -331,6 +339,7 @@ Exact addon-affecting commit: 1f03df4124f2e28e63c6d1ed6cab3204665a0fb5.
 ## Testing
 
 ### Latest Runtime Result
+- 0.1.32-dev transport redesign awaiting runtime: user requested joiner-announced discovery after identifying that established PFQG clients should remain silent while non-PFQG raid members/bots join. `7fb8de8036fc56674fe382b2af6357ef4a59205d` now keys discovery to the local client's own group/subgroup context (`GROUP:1` for party / raid subgroup number for raid), sends HELLO only when that context changes, adds logical targeting to HELLO replies, and suppresses ordinary state deltas when no compatible PFQG peer is known. This supersedes 0.1.31's broader "effective subgroup roster changed -> HELLO" trigger. Runtime spam/discovery validation pending.
 - 0.1.30-dev runtime/network FAIL reproduced by user on SoloCraft: creating a 10-player raid with 2 PFQG users plus 8 summoned bots produced roughly 50-100 addon messages and server `spam detected` warnings. Static trace identified multiplicative roster-sync traffic: every `PARTY_MEMBERS_CHANGED` unconditionally sent HELLO + a chunked full snapshot, and every received HELLO unconditionally sent another chunked full snapshot. Raid roster events also fired even when the local `party1`-`party4` subgroup did not materially change. 0.1.31-dev / 8cbab146b4dfd6cd071acde20da6a280f73c4447 removes those redundant full-state broadcasts and filters no-op subgroup roster events; runtime retest pending.
 - 0.1.30-dev design correction awaiting runtime: user rejected PFQG-created fallback quest blocks after observing the historical `Are We There, Yeti?` hold. Product rule is now that PFQG may augment native pfQuest tracker rows but must not create its own replacement quest in the tracker once pfQuest has no native row. The Guide is responsible for deciding whether to delay turn-in. Map/minimap group-hold guidance remains unchanged for now. 0.1.29's synthetic historical tracker block is therefore superseded behavior, not a target to preserve.
 - 0.1.29-dev runtime: `Are We There, Yeti?` supplemental historical hold behaves as intended. The Guide confirmed they previously had/tracked and completed the quest earlier in the same Guide session while Gaiallmighty remained incomplete. With the local quest now absent, PFQG retains Gaia's unfinished `0/2` objective and renders the local self row as grey `--`, matching the intended GH8 historical-hold semantics rather than remote-only quest injection. This is partial GH8 evidence; no claim is made yet for final release, map/minimap retention, or no-falsification beyond the observed tracker state.
@@ -529,11 +538,12 @@ GH8. **SUPERSEDED PARTIAL OBSERVATION — Local completion/removal historical ho
 GH9. **UNTESTED / SKIP-eligible — Ambiguous complex objective mapping.** If a held objective has multiple database sources that cannot be matched safely by localized objective text, verify PFQG prefers tracker-only guidance over showing unrelated map nodes. The deferred Mrs Dalson's Diary / Outhouse / Locked Cabinet chain is not a test target for this case.
 
 ### Next Implementation / Runtime Sequence
-1. Put both PFQG users on exact 0.1.31-dev / 8cbab146b4dfd6cd071acde20da6a280f73c4447. Recreate the SoloCraft 10-player setup with 2 PFQG users and 8 summoned bots. Verify bot/raid roster changes no longer cause `spam detected` warnings or a 50-100-message burst.
-2. While still grouped, verify the two PFQG users discover each other and shared quest progress/Guide-Tourist synchronization still settles after the roster stabilizes.
-3. Verify the 0.1.30 native-only tracker rule remains correct: a historical quest absent from local pfQuest must not be synthesized into the tracker, while a genuinely local tracked quest still receives shared player rows.
-4. Retest `Strange Sources` exploration-marker retention, legacy Guide-completion permanence, incomplete ordinary binary live `0/1 -> 1/1`, and no-quest peer filtering.
-5. Continue remaining dormant/durable, GH1-GH9 (GH2 retired), C1-C5, and R8-R10 runtime tests. Keep Mrs Dalson's Diary / Outhouse / Locked Cabinet deferred.
+1. Put both real PFQG users on exact 0.1.32-dev / 7fb8de8036fc56674fe382b2af6357ef4a59205d. Start grouped together and confirm they discover/synchronize normally.
+2. With one or both PFQG users already established, summon/add non-PFQG bots one at a time up to the 10-player SoloCraft raid state. Existing PFQG clients should remain network-silent for those bot-only joins unless the local player's own raid subgroup actually changes; there must be no prior 50-100-message burst / `spam detected` warning.
+3. Move a PFQG user to a different raid subgroup, or have a PFQG user join from solo. That moved/joining client should announce itself and same-subgroup PFQG peers should discover/resynchronize without requiring established clients to announce because unrelated members joined.
+4. With zero compatible PFQG peers but bots/party members present, progress a quest. PFQG should produce no ordinary state delta traffic; after a real PFQG peer joins and announces, full sync should bring them current.
+5. Recheck the native-only tracker rule, `Strange Sources`, legacy Guide-completion permanence, incomplete ordinary binary live `0/1 -> 1/1`, and no-quest peer filtering.
+6. Continue remaining dormant/durable, GH1-GH9 (GH2 retired), C1-C5, and R8-R10 runtime tests. Keep Mrs Dalson's Diary / Outhouse / Locked Cabinet deferred.
 
 ## Planned / Next Work
 - Future feature backlog: Flightpath guidance — define how Guide/Tourist routing should surface recommended flightpath usage without changing current quest/objective ownership or transport semantics. Do not begin implementation until the current GH/C/R validation sequence is complete or the user explicitly reprioritizes it.
@@ -559,4 +569,4 @@ GH9. **UNTESTED / SKIP-eligible — Ambiguous complex objective mapping.** If a 
 - External/runtime prerequisite: pfQuest.
 
 ## Exact Next Step
-Update both PFQG users to exact 0.1.31-dev / 8cbab146b4dfd6cd071acde20da6a280f73c4447 and recreate the 10-player SoloCraft raid by summoning the 8 bots. The immediate PASS condition is no server `spam detected` warning / no 50-100-message roster burst while the two PFQG users still discover each other and synchronize after the roster stabilizes. Then resume the 0.1.30 native-only tracker check, `Strange Sources`, legacy-completion permanence, binary live-update/no-quest filtering, dormant/durable, GH/C/R validation. Keep Mrs Dalson's Diary / Outhouse / Locked Cabinet deferred.
+Update both PFQG users to exact 0.1.32-dev / 7fb8de8036fc56674fe382b2af6357ef4a59205d. First confirm the two real users discover/synchronize. Then summon the 8 non-PFQG bots into the 10-player SoloCraft raid without moving the local PFQG user's subgroup: established PFQG clients should send no discovery traffic for those bot-only joins and there must be no `spam detected` burst. Separately verify that a PFQG user joining from solo or moving subgroup does announce and resynchronize. Then resume native-only tracker, `Strange Sources`, legacy completion, binary/no-quest, dormant/durable, GH/C/R validation. Keep Mrs Dalson's Diary / Outhouse / Locked Cabinet deferred.
