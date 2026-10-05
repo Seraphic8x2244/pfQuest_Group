@@ -339,6 +339,7 @@ Exact addon-affecting commit: 1f03df4124f2e28e63c6d1ed6cab3204665a0fb5.
 ## Testing
 
 ### Latest Runtime Result
+- 0.1.32-dev GH6 PASS: user reports held guidance releases correctly when the final relevant participant finishes the held objective; no lingering PFQGROUP guidance/native-row hold remains after completion.
 - 0.1.32-dev focused matrix update: user reports C1-C5 all PASS, R8-R10 all PASS, GH1 PASS, GH3 PASS, GH7 PASS, and GH8 PASS. GH2 is removed from the active matrix by design/user direction. Earlier 0.1.28 runtime evidence already demonstrated GH4 held-node tooltip behavior on `Moontouched Wildkin`, so GH4 is reconciled to PASS. Remaining explicit Group Hold checks are GH5, GH6, and GH9 (GH9 remains skip-eligible).
 - 0.1.32-dev attribution correction: the SoloCraft `spam detected` warnings were ultimately traced by the user to a combination of Quest Tracker Sharing and WanderingGaia, both now fixed. PFQG was not the demonstrated root cause of the server warning. Keep the 0.1.31/0.1.32 transport reductions as valid efficiency improvements, but do not cite the warning as proof of a PFQG transport defect.
 - 0.1.32-dev native-only tracker ownership remains PENDING: the user has not yet naturally encountered the post-turn-in/local-quest-absent scenario needed to verify that PFQG never synthesizes a replacement tracker quest.
@@ -543,16 +544,15 @@ GH1. **PASS — Count objective local completion hold.** User reports the local-
 GH3. **PASS — World-map/minimap held nodes.** User reports relevant PFQGROUP held-objective nodes persist correctly on map/minimap after local completion without resurrecting quest start/end state.
 GH4. **PASS — Group-aware held tooltip.** Reconciled from earlier 0.1.28 user runtime evidence on `Moontouched Wildkin`: hovering the retained PFQGROUP node showed both Tourist and Guide progress correctly.
 GH5. **UNTESTED — Multi-objective filtering.** On a quest with multiple objectives, complete one locally while another participant still needs only that objective. Verify PFQG retains only objective sources still needed by somebody relevant and does not blindly restore all quest nodes.
-GH6. **UNTESTED — Completion release.** Let the final relevant participant finish the held objective. Verify any PFQGROUP map/minimap hold guidance disappears, and any PFQG augmentation of a still-existing native tracker row settles cleanly, without altering the local quest log/pfQuest completion state. No synthetic tracker block should exist.
+GH6. **PASS — Completion release.** User reports that when the final relevant participant finishes the held objective, retained PFQGROUP map/minimap guidance and native-row hold presentation release cleanly without altering local quest/pfQuest state.
 GH7. **PASS — Offline unfinished durability + dormancy.** User reports the held-objective state survives the relevant leave/disconnect/rejoin behavior correctly without premature release.
 GH8. **PASS — Local completion/removal historical hold without synthetic tracker state.** User reports the post-completion/turn-in behavior is correct under the current native-only tracker rule: no fake local tracker quest/personal quest state is recreated while non-tracker hold guidance remains safe.
 GH9. **UNTESTED / SKIP-eligible — Ambiguous complex objective mapping.** If a held objective has multiple database sources that cannot be matched safely by localized objective text, verify PFQG prefers tracker-only guidance over showing unrelated map nodes. The deferred Mrs Dalson's Diary / Outhouse / Locked Cabinet chain is not a test target for this case.
 
 ### Next Implementation / Runtime Sequence
-1. Continue normal play on 0.1.32-dev; C1-C5 and R8-R10 are complete, and GH1/GH3/GH4/GH7/GH8 are complete.
+1. Continue normal play on 0.1.32-dev; C1-C5 and R8-R10 are complete, and GH1/GH3/GH4/GH6/GH7/GH8 are complete.
 2. When naturally encountered, test GH5 multi-objective filtering: only the specific held objective(s) still needed by a relevant participant should retain PFQGROUP guidance.
-3. Test GH6 completion release: when the final relevant participant finishes a held objective, any retained PFQGROUP map/minimap guidance and native-row augmentation should disappear cleanly.
-4. GH9 ambiguous-source mapping remains skip-eligible; only test it if a naturally ambiguous objective appears.
+3. GH9 ambiguous-source mapping remains skip-eligible; only test it if a naturally ambiguous objective appears.
 5. `Strange Sources` remains deferred until reproducible and is not a blocker. Legacy Guide completion replay remains observationally fixed unless it recurs.
 6. Keep Mrs Dalson's Diary / Outhouse / Locked Cabinet deferred. Keep raid-FPS investigation pinned unless it recurs with stronger PFQG correlation.
 
@@ -580,4 +580,4 @@ GH9. **UNTESTED / SKIP-eligible — Ambiguous complex objective mapping.** If a 
 - External/runtime prerequisite: pfQuest.
 
 ## Exact Next Step
-Continue normal play on 0.1.32-dev and close the remaining practical Group Hold checks when they arise: GH5 multi-objective filtering and GH6 final-participant completion release. GH9 is skip-eligible and should only be tested if a naturally ambiguous objective appears. C1-C5, R8-R10, GH1, GH3, GH4, GH7, and GH8 are now recorded PASS; GH2 has been removed from the active matrix. `Strange Sources` remains deferred until reproducible. Keep Mrs Dalson's Diary / Outhouse / Locked Cabinet deferred.
+Continue normal play on 0.1.32-dev and close GH5 multi-objective filtering when it naturally arises. GH9 is skip-eligible and should only be tested if a naturally ambiguous objective appears. C1-C5, R8-R10, GH1, GH3, GH4, GH6, GH7, and GH8 are recorded PASS; GH2 has been removed from the active matrix. `Strange Sources` remains deferred until reproducible. Keep Mrs Dalson's Diary / Outhouse / Locked Cabinet deferred.
