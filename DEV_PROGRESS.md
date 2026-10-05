@@ -339,6 +339,7 @@ Exact addon-affecting commit: 1f03df4124f2e28e63c6d1ed6cab3204665a0fb5.
 ## Testing
 
 ### Latest Runtime Result
+- 0.1.32-dev focused matrix update: user reports C1-C5 all PASS, R8-R10 all PASS, GH1 PASS, GH3 PASS, GH7 PASS, and GH8 PASS. GH2 is removed from the active matrix by design/user direction. Earlier 0.1.28 runtime evidence already demonstrated GH4 held-node tooltip behavior on `Moontouched Wildkin`, so GH4 is reconciled to PASS. Remaining explicit Group Hold checks are GH5, GH6, and GH9 (GH9 remains skip-eligible).
 - 0.1.32-dev attribution correction: the SoloCraft `spam detected` warnings were ultimately traced by the user to a combination of Quest Tracker Sharing and WanderingGaia, both now fixed. PFQG was not the demonstrated root cause of the server warning. Keep the 0.1.31/0.1.32 transport reductions as valid efficiency improvements, but do not cite the warning as proof of a PFQG transport defect.
 - 0.1.32-dev native-only tracker ownership remains PENDING: the user has not yet naturally encountered the post-turn-in/local-quest-absent scenario needed to verify that PFQG never synthesizes a replacement tracker quest.
 - 0.1.32-dev `Strange Sources` retest remains BLOCKED BY AVAILABILITY: that exploration objective cannot be recompleted on the current characters, so the 0.1.29 area-trigger/map visibility correction may remain unverified for some time rather than blocking unrelated validation.
@@ -494,11 +495,13 @@ Legend: `PASS` = user runtime pass; `PASS-Q` = runtime pass with qualification; 
 ### Supplemental Count-Objective Tracker Redesign Tests
 These checks cover the intentional 0.1.22-0.1.23 numeric/count presentation change and are separate from binary objective behavior.
 
-C1. **UNTESTED — Count objective heading/self row.** On 0.1.23-dev track a numeric objective such as `Skeletal Fragments: 10/15`. Verify the objective line becomes only `- Skeletal Fragments` and the first child row is the local player as `PlayerName: 10/15`.
-C2. **UNTESTED — Self class/count colours.** Verify the local player name is rendered in the local class colour and the local numeric count uses the same progress colour pfQuest previously used for the local inline count.
-C3. **UNTESTED — Remote class/count colours.** With a compatible peer on the same count quest, verify their row follows self, their name uses their class colour, and their count uses a colour calculated from their own progress (for example local 10/15 and peer 7/15 may differ in colour).
-C4. **UNTESTED — Count progress live update.** Progress self and peer counts and verify values/colours update without duplicated rows, stale values, or objective overlap.
-C5. **UNTESTED — Missing equivalent remote objective.** If naturally encountered, verify an otherwise matched remote quest with no equivalent objective shows grey `--`; otherwise SKIP.
+C1. **PASS — Count objective heading/self row.** User reports the count-objective presentation behaves correctly: the objective heading is separated from the local player's count row.
+C2. **PASS — Self class/count colours.** User reports the local class/name and numeric progress colouring behave correctly.
+C3. **PASS — Remote class/count colours.** User reports compatible peer count rows use the expected class/progress colouring.
+C4. **PASS — Count progress live update.** User reports self/peer numeric counts update cleanly without duplicate/stale rows or overlap.
+C5. **PASS — Missing equivalent remote objective.** User reports the count-objective edge behavior is clean, including the missing-equivalent-objective presentation.
+
+### Supplemental Protocol-v2 Reverse-Completion Tests
 
 ### Supplemental Protocol-v2 Reverse-Completion Tests
 These checks were added after the original 91-point matrix because reverse Tourist -> Guide completion feedback was introduced later. They are tracked separately so the original matrix numbering remains stable.
@@ -526,29 +529,31 @@ R4. **UNTESTED — Late joiner.** Create a step while Tourist 1 is already paire
 R5. **UNTESTED — Recovery after Guide reload.** With two eligible Tourists, let Tourist 1 complete the step, reload the Guide and allow synchronization to settle, then let Tourist 2 complete it. The Guide row must then strike/fade/disappear, demonstrating recovered acknowledgement state where practical.
 R6. **UNTESTED — Error/replay/premature-completion guard.** Throughout R1-R5, record any PFQG Lua error, duplicate row, row reappearing after removal, repeated completion animation, or Guide completion before every eligible Tourist has finished.
 R7. **PASS — Offline/regroup completion recovery.** On 0.1.17-dev both characters logged in with persisted Guide/Tourist modes while initially ungrouped, then formed a party. Pairing resumed and the Guide UI retroactively strike/fade/removed two steps the Tourist had completed previously, confirming persisted consumed-step state can recover through regroup/full-state synchronization.
-R8. **UNTESTED — Tourist manual Done for an already-completed stale instruction.** On 0.1.18-dev reproduce a pending instruction for a quest/action the Tourist already completed, click Done on the Tourist row, and verify the Tourist row performs the normal strike/fade/removal.
-R9. **UNTESTED — Manual Done feeds back to Guide.** Continuing R8 with one eligible Tourist, verify the corresponding Guide row strike/fade/removes after the Tourist clicks Done; reload/regroup afterward and verify the completed instruction does not return on either side.
-R10. **UNTESTED — Instruction NPC-name presentation.** On 0.1.21-dev create new Guide ACCEPT/TURNIN instructions at a resolvable NPC and verify the Tourist row displays `NPC Name` + yellow `!/?` + `Quest Name`, without parentheses or a duplicate marker/gutter. Confirm a long NPC such as `Commander Ashlam Valorfist` displays as `C.A. Valorfist`, short NPC names remain intact, and unresolved-NPC instructions fall back cleanly to yellow `!/?` + quest text.
+R8. **PASS — Tourist manual Done for an already-completed stale instruction.** User reports manual Done behaves correctly with the normal completion/removal presentation.
+R9. **PASS — Manual Done feeds back to Guide.** User reports Tourist Done correctly feeds completion back to the Guide and does not replay improperly.
+R10. **PASS — Instruction NPC-name presentation.** User reports the Guide/Tourist instruction NPC presentation behaves correctly, including the current accept/turn-in row formatting.
+
+
+### Focused in-game group-hold matrix
 
 
 ### Focused in-game group-hold matrix — awaiting user runtime results
-Pre-matrix held-native presentation regression: **PASS on 0.1.26-dev** by user observation; the objective now uses the preferred per-player row treatment rather than the old tick/class-icon/cross strip. GH1-GH9 remain separately untested unless explicitly marked below. 0.1.27 generalizes the same row presentation to ordinary binary objectives.
-GH1. **UNTESTED — Count objective local completion hold.** With Guide/Tourist paired on a tracked count objective such as Skeletal Fragments, let the local player reach the required count first while a relevant participant remains incomplete. Verify WoW/pfQuest still records the local objective as complete normally, while PFQG retains only the shared objective guidance.
-GH2. **RETIRED BY DESIGN in 0.1.30-dev — No synthetic tracker fallback.** When the native pfQuest objective/quest row disappears, PFQG must not create a replacement quest block in the tracker. Existing native-row augmentation remains valid only while pfQuest exposes the row.
-GH3. **UNTESTED — World-map/minimap held nodes.** Verify relevant PFQGROUP objective nodes remain on both world map and minimap after local completion, with no quest-start/giver/ender/turn-in markers resurrected.
-GH4. **UNTESTED — Group-aware held tooltip.** Hover a held node/source and verify the tooltip shows the real quest/objective heading plus self and relevant participant progress rows, not pfQuest's misleading local complete/? presentation.
+Pre-matrix held-native presentation regression: **PASS on 0.1.26-dev** by user observation; the objective uses the preferred per-player row treatment rather than the old tick/class-icon/cross strip. Current focused Group Hold status is recorded below; GH2 has been removed from the active matrix by design.
+GH1. **PASS — Count objective local completion hold.** User reports the local-completes-first count-objective hold behaves correctly while the relevant participant remains incomplete.
+GH3. **PASS — World-map/minimap held nodes.** User reports relevant PFQGROUP held-objective nodes persist correctly on map/minimap after local completion without resurrecting quest start/end state.
+GH4. **PASS — Group-aware held tooltip.** Reconciled from earlier 0.1.28 user runtime evidence on `Moontouched Wildkin`: hovering the retained PFQGROUP node showed both Tourist and Guide progress correctly.
 GH5. **UNTESTED — Multi-objective filtering.** On a quest with multiple objectives, complete one locally while another participant still needs only that objective. Verify PFQG retains only objective sources still needed by somebody relevant and does not blindly restore all quest nodes.
 GH6. **UNTESTED — Completion release.** Let the final relevant participant finish the held objective. Verify any PFQGROUP map/minimap hold guidance disappears, and any PFQG augmentation of a still-existing native tracker row settles cleanly, without altering the local quest log/pfQuest completion state. No synthetic tracker block should exist.
-GH7. **UNTESTED — Offline unfinished durability + dormancy.** With a held objective active, disconnect/leave the relevant unfinished Tourist. Verify no premature completion/release is persisted, but the Guide/group-hold presentation goes dormant while no relevant participant is present. Rejoin the same Guide session and verify the hold resumes from last-known state until fresh synchronization settles.
-GH8. **SUPERSEDED PARTIAL OBSERVATION — Local completion/removal historical hold.** On 0.1.29-dev PFQG synthesized an `Are We There, Yeti?` tracker block after the Guide's local quest was gone; the user explicitly rejected that tracker behavior. As of 0.1.30-dev historical hold may remain only in non-tracker guidance such as safely mapped PFQGROUP nodes/tooltips. Verify no synthetic tracker quest appears, no Blizzard/personal quest state or PFQUEST namespace is recreated, and any retained map/minimap guidance behaves safely.
+GH7. **PASS — Offline unfinished durability + dormancy.** User reports the held-objective state survives the relevant leave/disconnect/rejoin behavior correctly without premature release.
+GH8. **PASS — Local completion/removal historical hold without synthetic tracker state.** User reports the post-completion/turn-in behavior is correct under the current native-only tracker rule: no fake local tracker quest/personal quest state is recreated while non-tracker hold guidance remains safe.
 GH9. **UNTESTED / SKIP-eligible — Ambiguous complex objective mapping.** If a held objective has multiple database sources that cannot be matched safely by localized objective text, verify PFQG prefers tracker-only guidance over showing unrelated map nodes. The deferred Mrs Dalson's Diary / Outhouse / Locked Cabinet chain is not a test target for this case.
 
 ### Next Implementation / Runtime Sequence
-1. Keep 0.1.32-dev transport behavior under normal observation, but do not spend more runtime effort chasing the cleared SoloCraft spam-warning attribution unless a PFQG-specific symptom appears.
-2. When naturally encountered, verify the native-only tracker rule: once a local quest disappears from pfQuest, PFQG must not synthesize a replacement tracker quest; native rows that still exist may continue showing shared player progress.
-3. Defer the `Strange Sources` retest until a character can naturally reproduce that exploration objective; do not block other work on it.
-4. Treat the legacy Guide completion replay issue as observationally fixed unless replay/cross-out spam reappears. The exact leave/rejoin + reload/relog permanence sequence is optional follow-up rather than the next blocker.
-5. Continue the focused remaining matrices: count-objective presentation C1-C5, reverse-completion/manual-Done/NPC checks R8-R10, and practical Group Hold checks GH1/GH3-GH9 (GH2 retired), prioritizing cases that arise naturally rather than forcing unavailable quests.
+1. Continue normal play on 0.1.32-dev; C1-C5 and R8-R10 are complete, and GH1/GH3/GH4/GH7/GH8 are complete.
+2. When naturally encountered, test GH5 multi-objective filtering: only the specific held objective(s) still needed by a relevant participant should retain PFQGROUP guidance.
+3. Test GH6 completion release: when the final relevant participant finishes a held objective, any retained PFQGROUP map/minimap guidance and native-row augmentation should disappear cleanly.
+4. GH9 ambiguous-source mapping remains skip-eligible; only test it if a naturally ambiguous objective appears.
+5. `Strange Sources` remains deferred until reproducible and is not a blocker. Legacy Guide completion replay remains observationally fixed unless it recurs.
 6. Keep Mrs Dalson's Diary / Outhouse / Locked Cabinet deferred. Keep raid-FPS investigation pinned unless it recurs with stronger PFQG correlation.
 
 ## Planned / Next Work
@@ -575,4 +580,4 @@ GH9. **UNTESTED / SKIP-eligible — Ambiguous complex objective mapping.** If a 
 - External/runtime prerequisite: pfQuest.
 
 ## Exact Next Step
-Continue normal play on 0.1.32-dev and use naturally occurring quests to exercise the focused remaining matrices: C1-C5 count-objective presentation, R8-R10 manual Done/Guide feedback/NPC presentation, and practical GH1/GH3-GH9 Group Hold cases (GH2 retired). Native-only tracker ownership should be checked the next time one player completes/turns in before the other. `Strange Sources` is deferred until reproducible and is not a blocker. Legacy Guide completion replay is observationally fixed unless it recurs. The prior SoloCraft `spam detected` warning is attributed to Quest Tracker Sharing + WanderingGaia, not PFQG.
+Continue normal play on 0.1.32-dev and close the remaining practical Group Hold checks when they arise: GH5 multi-objective filtering and GH6 final-participant completion release. GH9 is skip-eligible and should only be tested if a naturally ambiguous objective appears. C1-C5, R8-R10, GH1, GH3, GH4, GH7, and GH8 are now recorded PASS; GH2 has been removed from the active matrix. `Strange Sources` remains deferred until reproducible. Keep Mrs Dalson's Diary / Outhouse / Locked Cabinet deferred.
