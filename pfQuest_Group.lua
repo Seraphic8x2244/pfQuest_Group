@@ -7,7 +7,7 @@ local L = pfQuest_Group_L or {}
 Addon.groupContextKey = nil
 
 local PROTOCOL_PREFIX = "PFQGROUP"
-local PROTOCOL_VERSION = 2
+local PROTOCOL_VERSION = 3
 local DB_SCHEMA_VERSION = 3
 local CHUNK_SIZE = 180
 local MAX_CHUNKS = 64
@@ -304,6 +304,7 @@ local function NormalizeInstructionRecord(record, fallbackSeq)
   local mobID
   local questTitle
   local npcName
+  local flightName
 
   if type(record) ~= "table" then
     return nil
@@ -316,7 +317,7 @@ local function NormalizeInstructionRecord(record, fallbackSeq)
   seq = math.floor(seq)
 
   actionType = string.upper(SafeString(record.actionType))
-  if actionType ~= "ACCEPT" and actionType ~= "TURNIN" then
+  if actionType ~= "ACCEPT" and actionType ~= "TURNIN" and actionType ~= "FLIGHT" then
     return nil
   end
 
@@ -324,8 +325,17 @@ local function NormalizeInstructionRecord(record, fallbackSeq)
   mobID = tonumber(record.mobID)
   questTitle = SafeString(record.questTitle)
   npcName = SafeString(record.npcName)
+  flightName = Trim(SafeString(record.flightName))
 
-  if not questID and questTitle == "" then
+  if actionType == "FLIGHT" then
+    if flightName == "" then
+      return nil
+    end
+    questID = nil
+    mobID = nil
+    questTitle = ""
+    npcName = ""
+  elseif not questID and questTitle == "" then
     return nil
   end
 
@@ -335,7 +345,8 @@ local function NormalizeInstructionRecord(record, fallbackSeq)
     questID = questID,
     questTitle = questTitle,
     mobID = mobID,
-    npcName = npcName
+    npcName = npcName,
+    flightName = flightName
   }
 end
 
@@ -1475,6 +1486,31 @@ local function InstallQuestActionHooks()
       }
       previousAbandonQuest()
       ScheduleQuestScan(0.05)
+    end
+  end
+
+  if type(TakeTaxiNode) == "function" then
+    local previousTakeTaxiNode = TakeTaxiNode
+    TakeTaxiNode = function(slot)
+      local destination
+      local nodeType
+
+      if type(TaxiNodeName) == "function" then
+        destination = TaxiNodeName(slot)
+      end
+      if type(TaxiNodeGetType) == "function" then
+        nodeType = TaxiNodeGetType(slot)
+      end
+
+      previousTakeTaxiNode(slot)
+
+      if destination
+        and destination ~= ""
+        and destination ~= "INVALID"
+        and (not nodeType or nodeType == "REACHABLE")
+        and Addon.HandleFlightAction then
+        Addon.HandleFlightAction(destination)
+      end
     end
   end
 end
@@ -3249,7 +3285,8 @@ local function CopyInstruction(source)
     questID = source.questID,
     questTitle = source.questTitle,
     mobID = source.mobID,
-    npcName = source.npcName
+    npcName = source.npcName,
+    flightName = source.flightName
   }
 end
 
@@ -3274,7 +3311,9 @@ local function CopyInstructionList(records)
 end
 
 local function EncodeInstructionRecord(instruction)
-  local actionCode = instruction.actionType == "ACCEPT" and "A" or "T"
+  local actionCode = instruction.actionType == "ACCEPT"
+    and "A"
+    or (instruction.actionType == "TURNIN" and "T" or "F")
 
   return table.concat({
     "I",
@@ -3283,7 +3322,8 @@ local function EncodeInstructionRecord(instruction)
     SafeString(instruction.questID or 0),
     SafeString(instruction.mobID or 0),
     HexEncode(instruction.questTitle),
-    HexEncode(instruction.npcName)
+    HexEncode(instruction.npcName),
+    HexEncode(instruction.flightName)
   }, ".")
 end
 
@@ -3295,6 +3335,7 @@ local function DecodeInstructionRecord(record)
   local mobID
   local questTitle
   local npcName
+  local flightName
 
   if fields[1] ~= "I" or table.getn(fields) < 7 then
     return nil
@@ -3310,6 +3351,8 @@ local function DecodeInstructionRecord(record)
     actionType = "ACCEPT"
   elseif fields[3] == "T" then
     actionType = "TURNIN"
+  elseif fields[3] == "F" then
+    actionType = "FLIGHT"
   else
     return nil
   end
@@ -3326,7 +3369,17 @@ local function DecodeInstructionRecord(record)
 
   questTitle = HexDecode(fields[6])
   npcName = HexDecode(fields[7])
-  if not questID and questTitle == "" then
+  flightName = HexDecode(fields[8] or "")
+
+  if actionType == "FLIGHT" then
+    if flightName == "" then
+      return nil
+    end
+    questID = nil
+    mobID = nil
+    questTitle = ""
+    npcName = ""
+  elseif not questID and questTitle == "" then
     return nil
   end
 
@@ -3336,7 +3389,8 @@ local function DecodeInstructionRecord(record)
     questID = questID,
     questTitle = questTitle,
     mobID = mobID,
-    npcName = npcName
+    npcName = npcName,
+    flightName = flightName
   }
 end
 
@@ -3492,9 +3546,17 @@ end
 local function InstructionMatchesAction(instruction, actionType, quest, context)
   local actionQuestID
   local actionTitle
+  local flightName
 
   if not instruction or instruction.actionType ~= actionType then
     return false
+  end
+
+  if actionType == "FLIGHT" then
+    flightName = Trim(SafeString(context and context.flightName))
+    return instruction.flightName ~= ""
+      and flightName ~= ""
+      and instruction.flightName == flightName
   end
 
   actionQuestID = tonumber(context and context.questID) or tonumber(quest and quest.questID)
@@ -4473,10 +4535,46 @@ local function CompleteTouristInstruction(seq)
   return true
 end
 
-local function HandleInstructionQuestAction(actionType, quest, context)
+function Addon.CreateGuideInstruction(record)
   local session = Addon.db and Addon.db.session
   local store
   local seq
+  local instruction
+
+  if not session
+    or session.mode ~= "GUIDE"
+    or not session.guideSessionId
+    or not Addon.GuideHasActiveTourist(session) then
+    return false
+  end
+
+  seq = (tonumber(session.guideActionSeq) or 0) + 1
+  record = record or {}
+  record.seq = seq
+  instruction = NormalizeInstructionRecord(record, seq)
+  if not instruction then
+    return false
+  end
+
+  session.guideActionSeq = seq
+  Addon.db.instructions = NormalizeInstructionStore(Addon.db.instructions, session)
+  store = Addon.db.instructions
+  store.guideSessionId = session.guideSessionId
+  store.guideRecords[seq] = instruction
+  Addon.CaptureGuideInstructionEligibility(session, seq)
+  session.revision = session.revision + 1
+  Addon.SendDelta("instructions", EncodeInstructionWire("D", session.guideSessionId, seq, {
+    [seq] = instruction
+  }))
+  BroadcastSessionDelta()
+  Emit("SESSION_CHANGED", Addon.GetSession())
+  Emit("GUIDE_INSTRUCTION_CREATED", CopyInstruction(instruction))
+  Emit("GUIDE_INSTRUCTIONS_CHANGED", Addon.GetGuideInstructions())
+  return true
+end
+
+local function HandleInstructionQuestAction(actionType, quest, context)
+  local session = Addon.db and Addon.db.session
   local instruction
   local pendingSeq
   local candidateSeq
@@ -4487,38 +4585,13 @@ local function HandleInstructionQuestAction(actionType, quest, context)
   end
 
   if session.mode == "GUIDE" and session.guideSessionId then
-    if not Addon.GuideHasActiveTourist(session) then
-      return
-    end
-
-    seq = (tonumber(session.guideActionSeq) or 0) + 1
-    instruction = NormalizeInstructionRecord({
-      seq = seq,
+    Addon.CreateGuideInstruction({
       actionType = actionType,
       questID = tonumber(context and context.questID) or tonumber(quest and quest.questID),
       questTitle = SafeString((context and context.questTitle) or (quest and quest.title)),
       mobID = tonumber(context and context.mobID),
       npcName = SafeString(context and context.npcName)
-    }, seq)
-
-    if not instruction then
-      return
-    end
-
-    session.guideActionSeq = seq
-    Addon.db.instructions = NormalizeInstructionStore(Addon.db.instructions, session)
-    store = Addon.db.instructions
-    store.guideSessionId = session.guideSessionId
-    store.guideRecords[seq] = instruction
-    Addon.CaptureGuideInstructionEligibility(session, seq)
-    session.revision = session.revision + 1
-    Addon.SendDelta("instructions", EncodeInstructionWire("D", session.guideSessionId, seq, {
-      [seq] = instruction
-    }))
-    BroadcastSessionDelta()
-    Emit("SESSION_CHANGED", Addon.GetSession())
-    Emit("GUIDE_INSTRUCTION_CREATED", CopyInstruction(instruction))
-    Emit("GUIDE_INSTRUCTIONS_CHANGED", Addon.GetGuideInstructions())
+    })
     return
   end
 
@@ -4543,11 +4616,59 @@ local function HandleInstructionQuestAction(actionType, quest, context)
   CompleteTouristInstruction(pendingSeq)
 end
 
+function Addon.HandleFlightAction(flightName)
+  local session = Addon.db and Addon.db.session
+  local pendingSeq
+  local candidateSeq
+  local candidate
+
+  flightName = Trim(SafeString(flightName))
+  if not session or flightName == "" then
+    return false
+  end
+
+  if session.mode == "GUIDE" and session.guideSessionId then
+    return Addon.CreateGuideInstruction({
+      actionType = "FLIGHT",
+      flightName = flightName
+    })
+  end
+
+  if session.mode ~= "TOURIST" or not session.guideSessionId or session.joinBaseline == nil then
+    return false
+  end
+
+  for candidateSeq, candidate in pairs(touristPendingInstructions) do
+    candidateSeq = tonumber(candidateSeq)
+    if candidateSeq
+      and InstructionMatchesAction(candidate, "FLIGHT", nil, {
+        flightName = flightName
+      }) then
+      if not pendingSeq or candidateSeq < pendingSeq then
+        pendingSeq = candidateSeq
+      end
+    end
+  end
+
+  if not pendingSeq then
+    return false
+  end
+
+  return CompleteTouristInstruction(pendingSeq)
+end
+
 
 local function GuideTouristInstructionText(instruction)
   local text
   local marker = instruction and instruction.actionType == "ACCEPT" and "!" or "?"
   local npcName = Trim(SafeString(instruction and instruction.npcName))
+
+  if instruction and instruction.actionType == "FLIGHT" then
+    return string.format(
+      L.INSTRUCTION_FLIGHT or "|cffffd100Fly|r to %s",
+      SafeString(instruction.flightName)
+    )
+  end
   local shortNPC = npcName
   local initials = ""
   local startAt
