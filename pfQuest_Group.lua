@@ -1494,6 +1494,8 @@ local function InstallQuestActionHooks()
     TakeTaxiNode = function(slot)
       local destination
       local nodeType
+      local nodeCost
+      local canTake = true
 
       if type(TaxiNodeName) == "function" then
         destination = TaxiNodeName(slot)
@@ -1501,16 +1503,30 @@ local function InstallQuestActionHooks()
       if type(TaxiNodeGetType) == "function" then
         nodeType = TaxiNodeGetType(slot)
       end
+      if type(TaxiNodeCost) == "function" then
+        nodeCost = tonumber(TaxiNodeCost(slot))
+      end
 
-      previousTakeTaxiNode(slot)
+      if nodeType and nodeType ~= "REACHABLE" then
+        canTake = false
+      end
+      if nodeCost and type(GetMoney) == "function" and nodeCost > GetMoney() then
+        canTake = false
+      end
 
-      if destination
+      -- Synchronize while the taxi map/group context is still stable.
+      -- Sending after TakeTaxiNode can race the taxi transition: the Guide
+      -- may update locally while the Tourist misses both instruction/session
+      -- deltas.
+      if canTake
+        and destination
         and destination ~= ""
         and destination ~= "INVALID"
-        and (not nodeType or nodeType == "REACHABLE")
         and Addon.HandleFlightAction then
         Addon.HandleFlightAction(destination)
       end
+
+      previousTakeTaxiNode(slot)
     end
   end
 end
