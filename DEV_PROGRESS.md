@@ -2,8 +2,8 @@
 
 ## Current
 - Branch: dev.
-- Version: 0.1.33-dev from pfQuest_Group.toc.
-- Latest addon-affecting development commit: ee29e2ff1f3e18f6dee52cf279fe9902b18121d3 — 0.1.33-dev adds automatic Guide/Tourist flightpath instructions through the existing durable instruction owner. Guide `TakeTaxiNode` creates a `FLIGHT` instruction for the selected destination when an active Tourist exists; a Tourist taking the same destination automatically completes it through the existing consumed/acknowledgement pipeline. Flight rows display `Fly to <destination>`, and manual Done remains available as fallback.
+- Version: 0.1.34-dev from pfQuest_Group.toc.
+- Latest addon-affecting development commit: 578556e7560536421a1bffea43ca48bf9ac25eab — 0.1.34-dev moves flight-instruction synchronization before the Vanilla taxi transition. This delta is not yet runtime-tested and does not address the broader one-way sync symptom by itself.
 - Handoff checkpoint: the current dev head carrying this status file; always verify the actual remote branch head before resuming.
 - Stable baseline: None. main remains exactly bootstrap commit 4c5c63f074923266566c36c51ce2718d0060166f and is not a runtime release.
 - Goal: runtime-verify 0.1.33 flightpath guidance end-to-end without regressing the now broadly validated tracker/Guide behavior; leave GH5 opportunistic and GH9 skip-eligible.
@@ -358,6 +358,7 @@ Exact addon-affecting commit: 1f03df4124f2e28e63c6d1ed6cab3204665a0fb5.
 ## Testing
 
 ### Latest Runtime Result
+- 0.1.33-dev runtime FAIL / asymmetrical synchronization: both real clients were confirmed on exact 0.1.33-dev. Guide-side flight capture worked and `Fly to <destination>` appeared locally in the Guide window, but the Tourist did not receive that flight instruction and also was not seeing the Guide's quest state. Because the Guide still recognized the Tourist strongly enough to create the instruction, this is not a simple protocol-version mismatch and not flight-specific; investigate Guide -> Tourist peer/state receive/recovery asymmetry. 0.1.34-dev has not yet been runtime-tested.
 - 0.1.33-dev flightpath guidance IMPLEMENTED / RUNTIME PENDING: Guide taxi selection now creates a durable `FLIGHT` instruction with the selected destination; Tourist selection of the same destination auto-completes it through the existing completion pipeline. Protocol is v3, so both clients must update. No in-game result has yet been reported for this delta.
 - GH5 remains PENDING by availability, not failure: the user has not yet spent enough time questing in the world on a suitable multi-objective quest to exercise objective-specific held-node filtering. Test only when such a quest arises naturally; do not block unrelated work on it.
 - 0.1.32-dev GH6 PASS: user reports held guidance releases correctly when the final relevant participant finishes the held objective; no lingering PFQGROUP guidance/native-row hold remains after completion.
@@ -600,4 +601,4 @@ GH9. **UNTESTED / SKIP-eligible — Ambiguous complex objective mapping.** If a 
 - External/runtime prerequisite: pfQuest.
 
 ## Exact Next Step
-Update both PFQG clients to exact 0.1.33-dev / ee29e2ff1f3e18f6dee52cf279fe9902b18121d3. With an active Guide/Tourist pairing, have the Guide take a reachable flightpath and verify `Fly to <destination>` appears. Then have the Tourist take the same destination and verify the instruction completes on both sides through the normal strike/fade/removal and durable acknowledgement path. A different destination must not complete it, and a Guide with no active Tourist must not create a flight instruction. GH5 remains opportunistic; GH9 remains skip-eligible.
+Diagnose the 0.1.33 one-way Guide -> Tourist sync failure before judging flightpath behavior. Both clients were on 0.1.33-dev; the Guide saw the Tourist and created the local flight instruction, while the Tourist received neither that instruction nor the Guide's quest state. First inspect the Tourist-side peer/session/quest state for the Guide and confirm whether `/pfqg status` reports paired. 0.1.34-dev exists only as an untested taxi-timing change and must not be treated as a fix for the broader asymmetry.
