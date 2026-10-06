@@ -2,8 +2,8 @@
 
 ## Current
 - Branch: dev.
-- Version: 0.1.35-dev from pfQuest_Group.toc.
-- Latest addon-affecting development commit: ae36e9dcdadcac6888b0c4f33c27835e958e97e2 — 0.1.35-dev anchors normal Guide/Tourist instruction text directly to the row frame instead of through the zero-width marker FontString; disparity rows still use the marker anchor. Runtime validation pending.
+- Version: 0.1.36-dev from pfQuest_Group.toc.
+- Latest addon-affecting development commit: 10dcceedff3904c0838676fc10c931e238379572 — 0.1.36-dev stabilizes Guide/Tourist row rendering by giving normal instruction text and Guide disparity text separate fixed FontStrings and explicit Show/Hide state; dynamic instruction-text re-anchoring is removed. Runtime validation pending.
 - Handoff checkpoint: the current dev head carrying this status file; always verify the actual remote branch head before resuming.
 - Stable baseline: None. main remains exactly bootstrap commit 4c5c63f074923266566c36c51ce2718d0060166f and is not a runtime release.
 - Goal: runtime-verify 0.1.33 flightpath guidance end-to-end without regressing the now broadly validated tracker/Guide behavior; leave GH5 opportunistic and GH9 skip-eligible.
@@ -358,6 +358,7 @@ Exact addon-affecting commit: 1f03df4124f2e28e63c6d1ed6cab3204665a0fb5.
 ## Testing
 
 ### Latest Runtime Result
+- 0.1.35-dev runtime FAIL after initial rendering recovery: Gaia's Tourist rows became visible, but when she selected the matching flight, text disappeared from all entries while the row slots and `Done` buttons remained. This indicates the underlying pending rows survived but the shared instruction FontString render state was invalidated during completion/refresh. 0.1.36-dev replaces the dynamically re-anchored shared text region with fixed normal/disparity FontStrings and explicit Show/Hide state. Runtime retest pending.
 - 0.1.34-dev final pre-fix UI diagnostic: Gaia's Tourist row 1 was shown, alpha=1, `DIALOG` strata/frame level above parent, and contained `Fly to Ironforge, Dun Morogh`; parent showed 12 pending rows with expected height, but the box rendered visually empty. Coordinate probing returned nil on this 1.12 client and was not diagnostically useful. This isolated the defect to effective text rendering geometry. 0.1.35-dev removes the zero-width marker FontString from normal instruction-text anchoring; runtime retest pending.
 - 0.1.34-dev Tourist row layering diagnostic: Gaia's Tourist parent frame is frame level 1, the populated row is frame level 2, and both are `DIALOG` strata. This rules out the obvious child-behind-parent frame-level failure. Next check effective row/fontstring screen geometry before changing rendering code.
 - 0.1.34-dev Tourist row diagnostic: Gaia row 1 reports shown=true, alpha=1, and its text region contains `Fly to Ironforge, Dun Morogh`, while the Tourist window still appears visually empty. Combined with pending=12 and frame height ~=274, this proves row creation, row visibility state, text population, and parent layout all succeeded. Remaining defect is actual rendering geometry/layering on Gaia's client (for example child frame level/strata or region placement), not synchronization or reconciliation.
@@ -609,4 +610,4 @@ GH9. **UNTESTED / SKIP-eligible — Ambiguous complex objective mapping.** If a 
 - External/runtime prerequisite: pfQuest.
 
 ## Exact Next Step
-Update both clients to exact 0.1.35-dev / ae36e9dcdadcac6888b0c4f33c27835e958e97e2. On Gaia, verify the existing Tourist rows are visibly rendered (including `Fly to Ironforge, Dun Morogh`) rather than only existing internally. If visible, take the matching flight and verify normal auto-completion/acknowledgement. Also verify ordinary shared quest progress remains visible in the normal pfQuest tracker augmentation. Do not change networking unless these 0.1.35 UI checks fail in a way that demonstrates missing data.
+Update both clients to exact 0.1.36-dev / 10dcceedff3904c0838676fc10c931e238379572. Confirm Gaia's existing Tourist instruction rows render normally. Then take one matching flight and verify only that FLIGHT row completes/strikes/fades/removes while all other instruction text and `Done` buttons remain intact. Confirm the Guide receives the durable completion acknowledgement. If that passes, verify ordinary ACCEPT/TURNIN `Done` still affects only its own row. Static review passed by inspection; no canonical Lua 5.0.3 compiler pass was run.
