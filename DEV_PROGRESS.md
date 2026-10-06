@@ -2,11 +2,11 @@
 
 ## Current
 - Branch: dev.
-- Version: 0.1.42-dev from pfQuest_Group.toc.
-- Latest addon-affecting development commit: e23037b6b08d6328e5855290caf36049b10a8756 — 0.1.42-dev adds exact-name NPC targeting from Guide/Tourist instruction text areas. The existing raw instruction `npcName` is carried into the Tourist prepared display model; Guide and Tourist rows each expose a transparent text-area button only when an NPC name is available, and clicking it calls Vanilla `TargetByName(name, 1)`. `Done` remains a separate Tourist action button, disparity rows are unaffected, and FLIGHT rows have no NPC target.
+- Version: 0.1.43-dev from pfQuest_Group.toc.
+- Latest addon-affecting development commit: c1c569b152258fe0765679aa33eb8f310cabb7dc — 0.1.43-dev adds a Guide-side `Remove` action for ordinary instruction rows while retaining the 0.1.42 NPC click-targeting change. Removal is authoritative cancellation, not completion: a durable `guideRemoved[seq]` flag excludes the record from Guide pending rows and Guide instruction snapshots; a full protocol-v3 state snapshot then removes the same pending row from paired Tourists. Late Tourist completion acknowledgements for removed rows are ignored. Disparity Hide/Unhide and Tourist `Done` remain separate actions.
 - Handoff checkpoint: the current dev head carrying this status file; always verify the actual remote branch head before resuming.
 - Stable baseline: None. main remains exactly bootstrap commit 4c5c63f074923266566c36c51ce2718d0060166f and is not a runtime release.
-- Goal: 0.1.41-dev structural Tourist presentation, Guide reverse-completion feedback, NPC-name colours, and shared objective visibility are runtime-PASS. Runtime-test 0.1.42 NPC click-targeting without regressing those paths, then complete FLIGHT rendering/matching validation.
+- Goal: runtime-test 0.1.43 NPC click-targeting plus authoritative Guide `Remove` cancellation without regressing the 0.1.41 working Tourist renderer/completion paths, then complete FLIGHT rendering/matching validation.
 - Scope boundary: the user explicitly requested post-Phase-6 refinements through the existing owners: Guide reverse-completion feedback, Tourist manual Done, instruction NPC presentation, unified per-player Group Progress rows for both binary and count objectives, dormant/durable Guide sessions, and PFQG-owned group-held objective/map tracking. The old binary tick/cross + remote icon-column presentation is intentionally retired as of 0.1.27-dev. As of 0.1.41 the Tourist panel follows a prepared display-model -> renderer boundary instead of interpreting instruction/session records inside row rendering; NPC-name green/yellow/orange/red colouring is part of that presentation layer.
 
 ## Current Design / Development Contract
@@ -339,6 +339,7 @@ Exact addon-affecting commit: 1f03df4124f2e28e63c6d1ed6cab3204665a0fb5.
 - Broad in-game testing is in progress on the exact current addon build; automated/compiler limitations above remain separate from the user runtime results.
 
 ### Current Issues / Validation Debt
+- 0.1.43-dev Guide removal is runtime-pending. The Guide `Remove` button sets a distinct durable removal flag rather than faking completion; Guide/Tourist pending snapshots omit removed records, and late Tourist completion acknowledgements for those records are ignored. The existing full-state snapshot is intentionally used to propagate the changed authoritative pending set because protocol-v3 instruction deltas are append-only and do not encode removals.
 - 0.1.40-dev runtime FAIL: restoring the exact 0.1.32 renderer did not restore Tourist text. Guide ACCEPT still rendered correctly; the Tourist panel still showed a blank instruction row with its action button present. This rules out the later 0.1.35-0.1.39 row-layout experiments as the sole cause and justifies the 0.1.41 structural split rather than another shared-renderer patch.
 - History reconciliation for the panel regression: 0.1.31 communication-spam changes and 0.1.32 joiner-announced discovery made no Guide/Tourist row-layout changes. 0.1.33 flight/protocol-v3 changed instruction records and added FLIGHT but likewise left the panel row renderer unchanged. 0.1.39 then proved that merely isolating Tourist text from the old zero-width marker anchor was insufficient: Guide ACCEPT displayed normally, the Tourist received a blank row and blank button, and the Tourist turning in the quest still caused the Guide row to strike through. That demonstrates creation, transport, Tourist matching, consumption, and reverse completion while the Tourist text layer remains visually broken. 0.1.40 now restores the exact 0.1.32 renderer wholesale as the decisive renderer-vs-event/state test.
 - 0.1.26 live legacy Guide recovery is user-verified, but completion was demonstrated not to persist across leave/rejoin; 0.1.27 persists successful recovered completion and requires runtime verification across leave/rejoin, reload, and relog.
@@ -360,6 +361,7 @@ Exact addon-affecting commit: 1f03df4124f2e28e63c6d1ed6cab3204665a0fb5.
 ## Testing
 
 ### Latest Runtime Result
+- 0.1.42-dev NPC click-targeting was implemented but not separately runtime-tested before being superseded by 0.1.43-dev, which carries the same targeting behavior plus Guide instruction removal. Validate both on 0.1.43 rather than returning to 0.1.42.
 - 0.1.41-dev runtime PASS: user confirms Tourist hand-ins strike through the corresponding Guide instruction row, validating reverse-completion feedback on the working structural renderer. User also confirms NPC-name difficulty colours render correctly. FLIGHT remains explicitly untested.
 - 0.1.41-dev runtime PASS for the structural Tourist presentation boundary: user reports the Tourist panel now works, and the Tourist can also see the Guide's shared quest objectives. This validates visible Tourist row presentation and confirms shared quest/objective state is reaching the Tourist under the dedicated prepared-model renderer. This report does not yet separately validate completion fade/removal, NPC-name difficulty colours, or FLIGHT automatic completion.
 - 0.1.40-dev runtime FAIL: using the byte-for-byte 0.1.32 renderer still produced no Tourist instruction text; only the blank row/action control appeared. This demonstrates that restoring the old shared renderer alone is insufficient. 0.1.41-dev now moves Tourist presentation onto a prepared display model and dedicated row pool while leaving Guide rendering separate.
@@ -590,22 +592,24 @@ GH8. **PASS — Local completion/removal historical hold without synthetic track
 GH9. **UNTESTED / SKIP-eligible — Ambiguous complex objective mapping.** If a held objective has multiple database sources that cannot be matched safely by localized objective text, verify PFQG prefers tracker-only guidance over showing unrelated map nodes. The deferred Mrs Dalson's Diary / Outhouse / Locked Cabinet chain is not a test target for this case.
 
 ### Next Implementation / Runtime Sequence
-1. Update both Guide and Tourist to exact 0.1.42-dev / e23037b6b08d6328e5855290caf36049b10a8756.
-2. On an ordinary ACCEPT/TURNIN instruction with an NPC name, click the instruction text area on both Guide and Tourist. PASS requires exact-name NPC targeting when the NPC is targetable/in range, with no effect on the Tourist `Done` button behavior.
-3. Reconfirm one ordinary Tourist completion still strikes/fades the Guide row normally after the click-targeting addition.
-4. Create one FLIGHT instruction from the Guide and verify it renders visibly on the Tourist through the dedicated renderer.
-5. Have the Tourist take the same destination. Verify only that FLIGHT row completes/removes and the Guide receives the durable completion acknowledgement. A different destination must not falsely complete it.
-6. Continue normal play. GH5 remains pending only until a suitable multi-objective world quest arises; GH9 remains skip-eligible. `Strange Sources` and the Mrs Dalson's Diary / Outhouse / Locked Cabinet anomaly remain deferred.
+1. Update both Guide and Tourist to exact 0.1.43-dev / c1c569b152258fe0765679aa33eb8f310cabb7dc.
+2. On an ordinary ACCEPT/TURNIN instruction with an NPC name, click the instruction text area on both Guide and Tourist. PASS requires exact-name NPC targeting when the NPC is targetable/in range, with no effect on Tourist `Done` or Guide `Remove`.
+3. Create a second ordinary Guide instruction and click its `Remove` button before the Tourist completes it. PASS requires the row to disappear from the Guide and the paired Tourist, remain removed after refresh/reload/resync, and not produce Guide completion feedback.
+4. Reconfirm one non-removed ordinary Tourist completion still strikes/fades the Guide row normally.
+5. Create one FLIGHT instruction from the Guide and verify it renders visibly on the Tourist through the dedicated renderer.
+6. Have the Tourist take the same destination. Verify only that FLIGHT row completes/removes and the Guide receives the durable completion acknowledgement. A different destination must not falsely complete it.
+7. Continue normal play. GH5 remains pending only until a suitable multi-objective world quest arises; GH9 remains skip-eligible. `Strange Sources` and the Mrs Dalson's Diary / Outhouse / Locked Cabinet anomaly remain deferred.
 
 ## Planned / Next Work
 1. Preserve the prepared Tourist display-model -> renderer boundary; basic Tourist rendering, shared objective visibility, Guide reverse-completion feedback, and NPC-name colours are runtime-PASS on 0.1.41.
-2. Runtime-test 0.1.42 NPC click-targeting on both Guide and Tourist instruction rows without changing transport or instruction ownership.
-3. Validate FLIGHT rendering and matching automatic completion on the dedicated Tourist renderer, including wrong-destination non-completion.
-4. Record exact PASS/FAIL observations in DEV_PROGRESS.md; do not upgrade untested matrix items from static evidence.
-5. Continue only remaining relevant gaps: GH5 when available, GH9 if naturally encountered, and any current protocol-v3 regression that appears during normal play.
-6. Fix only demonstrated defects, bumping the dev version for every addon-affecting revision.
-7. Keep the linked Mrs Dalson's Diary / Outhouse / Locked Cabinet anomaly deferred.
-8. After a known-good runtime state exists, review release/promotion readiness separately; do not treat development checks as a runtime test.
+2. Runtime-test 0.1.43 NPC click-targeting on both Guide and Tourist instruction rows.
+3. Runtime-test Guide `Remove` as authoritative instruction cancellation: it must remove the same pending row for Guide and Tourist, persist across resync/reload, and remain distinct from completion acknowledgement.
+4. Validate FLIGHT rendering and matching automatic completion on the dedicated Tourist renderer, including wrong-destination non-completion.
+5. Record exact PASS/FAIL observations in DEV_PROGRESS.md; do not upgrade untested matrix items from static evidence.
+6. Continue only remaining relevant gaps: GH5 when available, GH9 if naturally encountered, and any current protocol-v3 regression that appears during normal play.
+7. Fix only demonstrated defects, bumping the dev version for every addon-affecting revision.
+8. Keep the linked Mrs Dalson's Diary / Outhouse / Locked Cabinet anomaly deferred.
+9. After a known-good runtime state exists, review release/promotion readiness separately; do not treat development checks as a runtime test.
 
 ## Deferred / Out of Scope
 - Raid-FPS investigation is pinned unless the issue recurs with a stronger PFQG correlation; current observation is confounded by several recently updated addons.
@@ -621,4 +625,4 @@ GH9. **UNTESTED / SKIP-eligible — Ambiguous complex objective mapping.** If a 
 - External/runtime prerequisite: pfQuest.
 
 ## Exact Next Step
-Update both clients to exact 0.1.42-dev / e23037b6b08d6328e5855290caf36049b10a8756. First click an ordinary instruction text area with a resolved NPC name on Guide and Tourist; it should exact-target that NPC when targetable, while Tourist `Done` remains independent. Then retry one matching FLIGHT instruction and verify Tourist rendering plus automatic completion/Guide acknowledgement. FLIGHT is still untested. No canonical Lua 5.0.3 compiler pass was run.
+Update both clients to exact 0.1.43-dev / c1c569b152258fe0765679aa33eb8f310cabb7dc. First verify NPC text click-targeting on Guide and Tourist. Then create an ordinary instruction and press Guide `Remove` before the Tourist completes it: the row must disappear on both clients, stay removed through resync/reload, and not count as Tourist completion. Reconfirm one normal non-removed Tourist completion, then test one matching FLIGHT instruction. FLIGHT remains untested. No canonical Lua 5.0.3 compiler pass was run.
