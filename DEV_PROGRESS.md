@@ -2,11 +2,11 @@
 
 ## Current
 - Branch: dev.
-- Version: 0.1.38-dev from pfQuest_Group.toc.
-- Latest addon-affecting development commit: 421d0bc915fd36d406c4bf821bfceeb778d7a0c3 — 0.1.38-dev reverts the 0.1.37 shared Guide/Tourist row rewrite and restores the exact 0.1.36 row implementation after 0.1.37 regressed previously working Guide quest/instruction behavior. The Tourist rendering defect remains unresolved and must be fixed without changing the working Guide row path.
+- Version: 0.1.39-dev from pfQuest_Group.toc.
+- Latest addon-affecting development commit: 708fcaefb6575eb28777032109d1c285097d6405 — 0.1.39-dev isolates Tourist instruction text rendering from the shared Guide row text. Guide/disparity text is restored to the known-good 0.1.32 marker-anchored path; Tourist instruction text/strike now use separate regions parented directly to the main Guide/Tourist window, while the existing row frame still owns the Tourist Done button. Runtime validation pending.
 - Handoff checkpoint: the current dev head carrying this status file; always verify the actual remote branch head before resuming.
 - Stable baseline: None. main remains exactly bootstrap commit 4c5c63f074923266566c36c51ce2718d0060166f and is not a runtime release.
-- Goal: first confirm 0.1.38-dev restores the previously working Guide quest/instruction behavior, then isolate and fix the Tourist-only rendering defect without altering the Guide row path; flightpath end-to-end validation remains after the UI regression is contained.
+- Goal: runtime-verify 0.1.39-dev restores Guide behavior and fixes Tourist instruction text without changing transport/data semantics; then resume flightpath end-to-end validation.
 - Scope boundary: the user explicitly requested post-Phase-6 refinements through the existing owners: Guide reverse-completion feedback, Tourist manual Done, instruction NPC presentation, unified per-player Group Progress rows for both binary and count objectives, dormant/durable Guide sessions, and PFQG-owned group-held objective/map tracking. The old binary tick/cross + remote icon-column presentation is intentionally retired as of 0.1.27-dev.
 
 ## Current Design / Development Contract
@@ -339,6 +339,7 @@ Exact addon-affecting commit: 1f03df4124f2e28e63c6d1ed6cab3204665a0fb5.
 - Broad in-game testing is in progress on the exact current addon build; automated/compiler limitations above remain separate from the user runtime results.
 
 ### Current Issues / Validation Debt
+- History reconciliation for the panel regression: 0.1.31 communication-spam changes and 0.1.32 joiner-announced discovery made no Guide/Tourist row-layout changes. 0.1.33 flight/protocol-v3 changed instruction records and added FLIGHT but likewise left the panel row renderer unchanged. Therefore the original 0.1.33 visible failure was not introduced by a direct panel-layout edit. Runtime diagnostics proved pending records, row count, parent height, row shown/alpha and FontString text contents were correct while the Tourist text remained visually absent. The fragile renderer dependency is the normal instruction FontString anchored through a marker FontString whose width is then set to 0. 0.1.39 removes that dependency only for Tourist instruction text and restores the known-good 0.1.32 Guide/disparity path.
 - 0.1.26 live legacy Guide recovery is user-verified, but completion was demonstrated not to persist across leave/rejoin; 0.1.27 persists successful recovered completion and requires runtime verification across leave/rejoin, reload, and relog.
 - The 0.1.25 held-native tick/class-icon/cross regression is fixed and user-accepted in 0.1.26. The old binary icon-strip mechanic itself is now intentionally retired in 0.1.27 and replaced globally by per-player progress rows; the new binary presentation is runtime-untested.
 - Protocol remains v2 and SavedVariables schema remains 3; 0.1.27 changes only local persistence/presentation. Both clients should use the exact 0.1.27 build for retest.
@@ -358,6 +359,7 @@ Exact addon-affecting commit: 1f03df4124f2e28e63c6d1ed6cab3204665a0fb5.
 ## Testing
 
 ### Latest Runtime Result
+- 0.1.39-dev implemented / runtime pending: code history was traced from the last clearly healthy 0.1.30/0.1.32 panel state through the spam/discovery and flight changes. No direct panel-layout edit occurred in 0.1.31, 0.1.32 or 0.1.33. 0.1.39 therefore avoids another shared rewrite: Guide/disparity rendering uses the exact 0.1.32 row text behavior, while Tourist instruction text/strike are isolated onto direct main-window regions so they cannot depend on the zero-width marker anchor. The existing Tourist Done button remains on the existing row frame.
 - 0.1.37-dev runtime FAIL: the broad direct-anchor rewrite regressed previously working Guide quest/instruction behavior. User reports quests in the Guide no longer work. 0.1.38-dev immediately reverts the shared row rewrite and restores the exact 0.1.36 row implementation; do not continue testing 0.1.37.
 - 0.1.36-dev runtime FAIL / root cause narrowed to UI geometry: manual Tourist `Done` initially appeared to work, but when the Guide accepted two quests the Tourist box showed no corresponding instruction text while two `Done` buttons/row controls rendered displaced in the middle of the screen. When the Tourist accepted those two quests, the displaced controls/rows disappeared normally. This proves the ACCEPT records, synchronization, pending state, matching and consumption paths were correct; the remaining defect was row-region anchoring/presentation. 0.1.37-dev removes the intermediate child row frames and anchors marker/text/disparity/button regions directly to the main Guide/Tourist window.
 - 0.1.35-dev runtime FAIL after initial rendering recovery: Gaia's Tourist rows became visible, but when she selected the matching flight, text disappeared from all entries while the row slots and `Done` buttons remained. This indicates the underlying pending rows survived but the shared instruction FontString render state was invalidated during completion/refresh. 0.1.36-dev replaced the dynamically re-anchored shared text region with fixed normal/disparity FontStrings and explicit Show/Hide state, but 0.1.36 still reproduced a broader geometry failure on new ACCEPT rows.
@@ -583,15 +585,15 @@ GH8. **PASS — Local completion/removal historical hold without synthetic track
 GH9. **UNTESTED / SKIP-eligible — Ambiguous complex objective mapping.** If a held objective has multiple database sources that cannot be matched safely by localized objective text, verify PFQG prefers tracker-only guidance over showing unrelated map nodes. The deferred Mrs Dalson's Diary / Outhouse / Locked Cabinet chain is not a test target for this case.
 
 ### Next Implementation / Runtime Sequence
-1. Update both Guide and Tourist to exact 0.1.38-dev / 421d0bc915fd36d406c4bf821bfceeb778d7a0c3.
-2. Verify the Guide quest/instruction behavior is restored to the pre-0.1.37 state. Do not proceed with further UI changes until this is confirmed.
-3. Reproduce the Tourist rendering defect with Guide ACCEPT instructions and observe only the Tourist presentation. Treat correct instruction creation, synchronization and consumption as already demonstrated unless new evidence contradicts that.
-4. Implement the next fix on a Tourist-only presentation path or another narrowly isolated surface; do not alter the Guide row architecture again.
-5. After Tourist rows are stable, resume matching ACCEPT/TURNIN and FLIGHT completion validation.
+1. Update both Guide and Tourist to exact 0.1.39-dev / 708fcaefb6575eb28777032109d1c285097d6405.
+2. While paired, have the Guide accept two ordinary quests. Confirm the Guide window still behaves normally and the Tourist shows both instruction texts plus aligned `Done` buttons inside the Tourist box.
+3. Have the Tourist accept one matching quest. Verify only that Tourist row completes/removes and the other instruction remains visible; then accept the second and verify it clears normally.
+4. If ACCEPT rendering/completion passes, create one FLIGHT instruction and verify the Tourist text renders correctly before attempting automatic flight completion.
+5. Complete the matching FLIGHT and verify only that row clears and the Guide receives the durable completion acknowledgement.
 6. Continue normal play. GH5 remains pending only until a suitable multi-objective world quest arises; GH9 remains skip-eligible. `Strange Sources` and the Mrs Dalson's Diary / Outhouse / Locked Cabinet anomaly remain deferred.
 
 ## Planned / Next Work
-1. Confirm 0.1.38-dev restores Guide behavior first. Then isolate the Tourist-only rendering defect without changing the shared Guide row path.
+1. Runtime-test 0.1.39-dev Guide preservation + isolated Tourist rendering first; do not make further shared row-layout changes unless new evidence requires them.
 2. Record exact PASS/FAIL observations in DEV_PROGRESS.md; do not upgrade untested matrix items from static evidence.
 3. Continue only remaining relevant gaps: GH5 when available, GH9 if naturally encountered, and any current protocol-v3 regression that appears during normal play.
 4. Fix only demonstrated defects, bumping the dev version for every addon-affecting revision.
@@ -612,4 +614,4 @@ GH9. **UNTESTED / SKIP-eligible — Ambiguous complex objective mapping.** If a 
 - External/runtime prerequisite: pfQuest.
 
 ## Exact Next Step
-Update both clients to exact 0.1.38-dev / 421d0bc915fd36d406c4bf821bfceeb778d7a0c3 and verify the Guide can again create/display quest instructions as it did before 0.1.37. 0.1.38 is a rollback build: it restores the exact 0.1.36 row implementation and intentionally does not claim to fix the Tourist rendering defect. Once Guide behavior is confirmed restored, fix only the Tourist presentation path. No canonical Lua 5.0.3 compiler pass was run.
+Update both clients to exact 0.1.39-dev / 708fcaefb6575eb28777032109d1c285097d6405. While paired, have the Guide accept two ordinary quests. PASS requires: Guide instructions still render normally; Tourist instruction text appears inside the Tourist box beside its existing `Done` buttons; no text/controls appear elsewhere; accepting each quest on the Tourist removes only its matching row. If that passes, retry one FLIGHT instruction. Static history/diff review completed; no canonical Lua 5.0.3 compiler pass was run.
