@@ -4981,6 +4981,7 @@ local function BuildTouristDisplayRows()
       seq = seq,
       text = GuideTouristInstructionText(instruction),
       actionText = L.INSTRUCTION_DONE or "Done",
+      targetNpcName = Trim(SafeString(instruction and instruction.npcName)),
       completing = false
     })
     present[seq] = true
@@ -4992,6 +4993,7 @@ local function BuildTouristDisplayRows()
         seq = tonumber(seq) or 0,
         text = GuideTouristInstructionText(completion.instruction),
         actionText = nil,
+        targetNpcName = Trim(SafeString(completion.instruction and completion.instruction.npcName)),
         completing = true,
         completion = completion
       })
@@ -5024,6 +5026,19 @@ local function EnsureTouristRow(index)
   row.text:SetJustifyH("LEFT")
   CopyGroupTrackerFont(guideTouristUI.title, row.text, 12)
   row.text:SetTextColor(1, 1, 1, 1)
+
+  row.target = CreateFrame("Button", nil, row.frame)
+  row.target:SetPoint("LEFT", row.frame, "LEFT", 4, 0)
+  row.target:SetWidth(180)
+  row.target:SetHeight(20)
+  row.target:SetScript("OnClick", function()
+    if row.targetNpcName
+      and row.targetNpcName ~= ""
+      and type(TargetByName) == "function" then
+      TargetByName(row.targetNpcName, 1)
+    end
+  end)
+  row.target:Hide()
 
   row.strike = row.frame:CreateTexture(nil, "OVERLAY")
   row.strike:SetPoint("LEFT", row.text, "LEFT", 0, 0)
@@ -5086,12 +5101,21 @@ local function RefreshTouristWindow(session)
     row.frame:SetPoint("TOPLEFT", guideTouristUI.frame, "TOPLEFT", 8, -28 - ((index - 1) * 20))
     row.frame:SetAlpha(1)
     row.seq = entry.seq
+    row.targetNpcName = entry.targetNpcName
     row.text:SetText(entry.text or "")
     row.text:SetWidth(entry.actionText and 180 or 238)
     row.text:Show()
     row.strike:Hide()
+    row.target:SetWidth(entry.actionText and 180 or 238)
+    row.target:Hide()
     row.actionLabel:SetText(entry.actionText or "")
     row.action:Hide()
+
+    if row.targetNpcName
+      and row.targetNpcName ~= ""
+      and type(TargetByName) == "function" then
+      row.target:Show()
+    end
 
     if entry.actionText then
       row.action:Show()
@@ -5141,6 +5165,19 @@ local function EnsureGuideTouristRow(index)
   row.text:SetHeight(20)
   row.text:SetJustifyH("LEFT")
   row.text:SetTextColor(1, 1, 1)
+
+  row.target = CreateFrame("Button", nil, row.frame)
+  row.target:SetPoint("LEFT", row.frame, "LEFT", 4, 0)
+  row.target:SetWidth(238)
+  row.target:SetHeight(20)
+  row.target:SetScript("OnClick", function()
+    if row.targetNpcName
+      and row.targetNpcName ~= ""
+      and type(TargetByName) == "function" then
+      TargetByName(row.targetNpcName, 1)
+    end
+  end)
+  row.target:Hide()
 
   row.strike = row.frame:CreateTexture(nil, "OVERLAY")
   row.strike:SetPoint("LEFT", row.text, "LEFT", 0, 0)
@@ -5336,6 +5373,8 @@ local function RefreshGuideTouristWindow()
     row.text:SetTextColor(1, 1, 1)
     row.text:SetWidth(238)
     row.strike:Hide()
+    row.target:Hide()
+    row.targetNpcName = nil
     row.action:Hide()
     row.disparityKey = nil
     row.disparityHidden = false
@@ -5364,6 +5403,10 @@ local function RefreshGuideTouristWindow()
       row.marker:SetText("")
       row.marker:SetWidth(0)
       row.text:SetText(GuideTouristInstructionText(entry.instruction))
+      row.targetNpcName = Trim(SafeString(entry.instruction and entry.instruction.npcName))
+      if row.targetNpcName ~= "" and type(TargetByName) == "function" then
+        row.target:Show()
+      end
 
       if session.mode == "TOURIST" and not entry.completing then
         row.touristInstructionSeq = row.seq
