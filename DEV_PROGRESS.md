@@ -6,7 +6,7 @@
 - Latest addon-affecting development commit: 3678188b435d9253ee3df8ccbcc74641cb049eeb — 0.1.41-dev separates Tourist presentation from the shared Guide row renderer. Tourist instructions are first converted into prepared display rows (`text`, `actionText`, `seq`, completion state), then rendered by a dedicated Tourist row pool that does not inspect protocol/session records or use the old zero-width marker path. Guide rows remain on the existing renderer. NPC names with a resolvable pfQuest unit level are colour-coded through pfQuest/Vanilla difficulty colour into the requested green/yellow/orange/red palette; unavailable levels remain uncoloured. Runtime validation pending.
 - Handoff checkpoint: the current dev head carrying this status file; always verify the actual remote branch head before resuming.
 - Stable baseline: None. main remains exactly bootstrap commit 4c5c63f074923266566c36c51ce2718d0060166f and is not a runtime release.
-- Goal: runtime-verify the 0.1.41-dev structural Tourist display-model -> renderer split, including visible Tourist instruction text/action labels, ordinary completion feedback, and NPC-name colour presentation where level data is available; then resume FLIGHT validation.
+- Goal: 0.1.41-dev basic Tourist presentation is runtime-PASS. Finish focused validation of Tourist completion/fade, NPC-name colour presentation, and FLIGHT automatic completion without changing the now-working display-model -> renderer split.
 - Scope boundary: the user explicitly requested post-Phase-6 refinements through the existing owners: Guide reverse-completion feedback, Tourist manual Done, instruction NPC presentation, unified per-player Group Progress rows for both binary and count objectives, dormant/durable Guide sessions, and PFQG-owned group-held objective/map tracking. The old binary tick/cross + remote icon-column presentation is intentionally retired as of 0.1.27-dev. As of 0.1.41 the Tourist panel follows a prepared display-model -> renderer boundary instead of interpreting instruction/session records inside row rendering; NPC-name green/yellow/orange/red colouring is part of that presentation layer.
 
 ## Current Design / Development Contract
@@ -360,6 +360,7 @@ Exact addon-affecting commit: 1f03df4124f2e28e63c6d1ed6cab3204665a0fb5.
 ## Testing
 
 ### Latest Runtime Result
+- 0.1.41-dev runtime PASS for the structural Tourist presentation boundary: user reports the Tourist panel now works, and the Tourist can also see the Guide's shared quest objectives. This validates visible Tourist row presentation and confirms shared quest/objective state is reaching the Tourist under the dedicated prepared-model renderer. This report does not yet separately validate completion fade/removal, NPC-name difficulty colours, or FLIGHT automatic completion.
 - 0.1.40-dev runtime FAIL: using the byte-for-byte 0.1.32 renderer still produced no Tourist instruction text; only the blank row/action control appeared. This demonstrates that restoring the old shared renderer alone is insufficient. 0.1.41-dev now moves Tourist presentation onto a prepared display model and dedicated row pool while leaving Guide rendering separate.
 - 0.1.39-dev runtime FAIL with semantics intact: Guide accepting a quest displayed correctly in the Guide panel. The Tourist panel created the corresponding row/button shell but both instruction text and button caption were blank. When the Tourist handed in/completed the matching quest, the Guide row struck through normally. This confirms the instruction and reverse-completion pipelines are functioning while Tourist row text rendering remains broken. 0.1.40 replaces the entire renderer trio with the exact 0.1.32 implementation while leaving current data/protocol/transport behavior intact.
 - 0.1.39-dev implemented / runtime pending: code history was traced from the last clearly healthy 0.1.30/0.1.32 panel state through the spam/discovery and flight changes. No direct panel-layout edit occurred in 0.1.31, 0.1.32 or 0.1.33. 0.1.39 therefore avoids another shared rewrite: Guide/disparity rendering uses the exact 0.1.32 row text behavior, while Tourist instruction text/strike are isolated onto direct main-window regions so they cannot depend on the zero-width marker anchor. The existing Tourist Done button remains on the existing row frame.
@@ -588,22 +589,23 @@ GH8. **PASS — Local completion/removal historical hold without synthetic track
 GH9. **UNTESTED / SKIP-eligible — Ambiguous complex objective mapping.** If a held objective has multiple database sources that cannot be matched safely by localized objective text, verify PFQG prefers tracker-only guidance over showing unrelated map nodes. The deferred Mrs Dalson's Diary / Outhouse / Locked Cabinet chain is not a test target for this case.
 
 ### Next Implementation / Runtime Sequence
-1. Update both Guide and Tourist to exact 0.1.41-dev / 3678188b435d9253ee3df8ccbcc74641cb049eeb.
-2. While paired, have the Guide accept one ordinary quest. Confirm the Guide row still behaves normally and the Tourist row now shows prepared instruction text plus a visible `Done` action label inside the Tourist panel.
-3. If that instruction resolves to an NPC with pfQuest level data, verify only the NPC name is coloured green/yellow/orange/red according to relative difficulty; quest text and the yellow `!/?` marker should retain their existing colours. If level data is unavailable, the NPC name may remain uncoloured.
-4. Have the Tourist complete the matching quest. Verify the Tourist row strikes/fades/removes through the dedicated Tourist row pool and the Guide receives the normal reverse-completion feedback.
-5. If ordinary ACCEPT/TURNIN presentation passes, create and complete one FLIGHT instruction and verify the Tourist-specific renderer handles it without affecting Guide rows.
+1. Keep both clients on exact 0.1.41-dev / 3678188b435d9253ee3df8ccbcc74641cb049eeb; basic Tourist panel rendering and shared objective visibility are now runtime-PASS.
+2. Complete one currently visible matching quest on the Tourist. Verify the Tourist row strikes/fades/removes and the Guide receives the normal reverse-completion feedback.
+3. Observe an instruction with a resolvable NPC level. Verify only the NPC name is coloured green/yellow/orange/red according to relative difficulty; quest text and the yellow `!/?` marker retain their existing colours. If level data is unavailable, the NPC name may remain uncoloured.
+4. Create one FLIGHT instruction from the Guide and verify it renders visibly on the Tourist through the dedicated renderer.
+5. Have the Tourist take the same destination. Verify only that FLIGHT row completes/removes and the Guide receives the durable completion acknowledgement. A different destination must not falsely complete it.
 6. Continue normal play. GH5 remains pending only until a suitable multi-objective world quest arises; GH9 remains skip-eligible. `Strange Sources` and the Mrs Dalson's Diary / Outhouse / Locked Cabinet anomaly remain deferred.
 
 ## Planned / Next Work
-1. Runtime-test 0.1.41-dev as the first structural Tourist presentation build: verify prepared model text, dedicated Tourist row/action rendering, completion fade/removal, and Guide preservation.
-2. Treat the prepared Tourist display model as the new Phase 5 boundary; do not move protocol/session interpretation back into the Tourist row renderer. If 0.1.41 still fails, diagnose the prepared model values versus live font objects rather than modifying Guide layout.
+1. Preserve the 0.1.41 prepared Tourist display-model -> renderer boundary; basic Tourist rendering and shared objective visibility are runtime-PASS.
+2. Finish focused validation of Tourist completion fade/removal and Guide reverse acknowledgement.
 3. Validate NPC-name green/yellow/orange/red presentation using pfQuest unit level data and its difficulty-colour semantics; unresolved/missing level data must remain safe and uncoloured.
-4. Record exact PASS/FAIL observations in DEV_PROGRESS.md; do not upgrade untested matrix items from static evidence.
-5. Continue only remaining relevant gaps: GH5 when available, GH9 if naturally encountered, and any current protocol-v3 regression that appears during normal play.
-6. Fix only demonstrated defects, bumping the dev version for every addon-affecting revision.
-7. Keep the linked Mrs Dalson's Diary / Outhouse / Locked Cabinet anomaly deferred.
-8. After a known-good runtime state exists, review release/promotion readiness separately; do not treat development checks as a runtime test.
+4. Validate FLIGHT rendering and matching automatic completion on the dedicated Tourist renderer, including wrong-destination non-completion.
+5. Record exact PASS/FAIL observations in DEV_PROGRESS.md; do not upgrade untested matrix items from static evidence.
+6. Continue only remaining relevant gaps: GH5 when available, GH9 if naturally encountered, and any current protocol-v3 regression that appears during normal play.
+7. Fix only demonstrated defects, bumping the dev version for every addon-affecting revision.
+8. Keep the linked Mrs Dalson's Diary / Outhouse / Locked Cabinet anomaly deferred.
+9. After a known-good runtime state exists, review release/promotion readiness separately; do not treat development checks as a runtime test.
 
 ## Deferred / Out of Scope
 - Raid-FPS investigation is pinned unless the issue recurs with a stronger PFQG correlation; current observation is confounded by several recently updated addons.
@@ -619,4 +621,4 @@ GH9. **UNTESTED / SKIP-eligible — Ambiguous complex objective mapping.** If a 
 - External/runtime prerequisite: pfQuest.
 
 ## Exact Next Step
-Update both clients to exact 0.1.41-dev / 3678188b435d9253ee3df8ccbcc74641cb049eeb. Have the Guide accept one ordinary quest. PASS requires: Guide row unchanged; Tourist prepared instruction text visible inside its dedicated row; `Done` action label visible; no displaced/blank shared row; and, when pfQuest has a resolvable NPC level, only the NPC name uses the requested green/yellow/orange/red difficulty colour. Complete the quest on the Tourist and verify its row strikes/fades/removes while the Guide receives the usual reverse-completion feedback. If this passes, retry one FLIGHT instruction. Static structure review passed; no canonical Lua 5.0.3 compiler pass was run.
+Keep both clients on exact 0.1.41-dev / 3678188b435d9253ee3df8ccbcc74641cb049eeb. Basic Tourist panel rendering and Guide-objective visibility are runtime-PASS. Next complete one visible matching quest on the Tourist and verify Tourist strike/fade/removal plus Guide reverse-completion feedback. Then observe NPC-name difficulty colouring if a resolvable NPC is available, and finally retry one matching FLIGHT instruction. No canonical Lua 5.0.3 compiler pass was run.
