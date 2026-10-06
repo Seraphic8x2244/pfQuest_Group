@@ -7,7 +7,7 @@
 - Handoff checkpoint: the current dev head carrying this status file; always verify the actual remote branch head before resuming.
 - Stable baseline: None. main remains exactly bootstrap commit 4c5c63f074923266566c36c51ce2718d0060166f and is not a runtime release.
 - Goal: runtime-verify the exact 0.1.32 panel renderer under the current 0.1.40 codebase; if Tourist text still fails, stop treating the renderer implementation itself as the root cause and investigate the non-UI state/event changes that altered when/how it is refreshed.
-- Scope boundary: the user explicitly requested post-Phase-6 refinements through the existing owners: Guide reverse-completion feedback, Tourist manual Done, instruction NPC presentation, unified per-player Group Progress rows for both binary and count objectives, dormant/durable Guide sessions, and PFQG-owned group-held objective/map tracking. The old binary tick/cross + remote icon-column presentation is intentionally retired as of 0.1.27-dev.
+- Scope boundary: the user explicitly requested post-Phase-6 refinements through the existing owners: Guide reverse-completion feedback, Tourist manual Done, instruction NPC presentation, unified per-player Group Progress rows for both binary and count objectives, dormant/durable Guide sessions, and PFQG-owned group-held objective/map tracking. The old binary tick/cross + remote icon-column presentation is intentionally retired as of 0.1.27-dev. The next Guide/Tourist UI revision must prefer a clean prepared display-model -> renderer boundary over incremental row-layout patches; NPC-name green/yellow/orange/red colouring is queued with that cleanup.
 
 ## Current Design / Development Contract
 
@@ -595,11 +595,13 @@ GH9. **UNTESTED / SKIP-eligible — Ambiguous complex objective mapping.** If a 
 
 ## Planned / Next Work
 1. Runtime-test the exact restored 0.1.32 renderer on 0.1.40-dev. If it still fails only on Tourist, shift investigation away from layout code and into the post-0.1.30 event/state changes.
-2. Record exact PASS/FAIL observations in DEV_PROGRESS.md; do not upgrade untested matrix items from static evidence.
-3. Continue only remaining relevant gaps: GH5 when available, GH9 if naturally encountered, and any current protocol-v3 regression that appears during normal play.
-4. Fix only demonstrated defects, bumping the dev version for every addon-affecting revision.
-5. Keep the linked Mrs Dalson's Diary / Outhouse / Locked Cabinet anomaly deferred.
-6. After a known-good runtime state exists, review release/promotion readiness separately; do not treat development checks as a runtime test.
+2. The next addon-affecting patch after the 0.1.40 result must be a structural cleanup, not another presentation bandage: build explicit Guide/Tourist display-row data outside the frame refresh path (for example prepared text/action/button/completion fields), then make the panel renderer consume that prepared model without interpreting protocol/session records itself. Preserve the established Phase 4 instruction ownership and Phase 5 presentation ownership.
+3. Queue NPC-name colour coding for that next patch: instruction rows should support green/yellow/orange/red NPC-name presentation. Define the authoritative NPC-level/source and exact difficulty thresholds before implementation; do not hard-code speculative colours when level data is unavailable.
+4. Record exact PASS/FAIL observations in DEV_PROGRESS.md; do not upgrade untested matrix items from static evidence.
+5. Continue only remaining relevant gaps: GH5 when available, GH9 if naturally encountered, and any current protocol-v3 regression that appears during normal play.
+6. Fix only demonstrated defects, bumping the dev version for every addon-affecting revision.
+7. Keep the linked Mrs Dalson's Diary / Outhouse / Locked Cabinet anomaly deferred.
+8. After a known-good runtime state exists, review release/promotion readiness separately; do not treat development checks as a runtime test.
 
 ## Deferred / Out of Scope
 - Raid-FPS investigation is pinned unless the issue recurs with a stronger PFQG correlation; current observation is confounded by several recently updated addons.
