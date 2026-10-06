@@ -3213,6 +3213,100 @@ function Addon.RefreshGroupHoldNodes()
   end
 end
 
+function Addon.FindTooltipLocalQuest(meta)
+  local numericQuestID = tonumber(meta and meta.questid)
+  local title = SafeString(meta and meta.quest)
+  local key
+  local quest
+
+  if not questState.ready or title == "" then
+    return nil
+  end
+
+  if numericQuestID then
+    quest = questState.quests[QuestKey(numericQuestID, title)]
+    if quest then
+      return quest
+    end
+  end
+
+  for key, quest in pairs(questState.quests or {}) do
+    if quest.title == title and (not numericQuestID or not quest.questID) then
+      return quest
+    end
+  end
+
+  return nil
+end
+
+function Addon.AppendGroupProgressTooltip(meta, tooltip)
+  local localQuest = Addon.FindTooltipLocalQuest(meta)
+  local peers = GetCompatibleGroupPeers()
+  local sharedPeers = {}
+  local localName = playerName or UnitName("player") or "Player"
+  local _, localClassToken = UnitClass("player")
+  local peerIndex
+  local peerInfo
+  local remoteQuest
+  local objectiveIndex
+  local localObjective
+  local remoteObjective
+  local progressText
+
+  if not localQuest then
+    return false
+  end
+
+  for peerIndex = 1, table.getn(peers) do
+    peerInfo = peers[peerIndex]
+    remoteQuest = FindRemoteTrackerQuest(peerInfo.questState, localQuest)
+    if remoteQuest then
+      peerInfo.remoteQuest = remoteQuest
+      table.insert(sharedPeers, peerInfo)
+    end
+  end
+
+  if table.getn(sharedPeers) == 0 then
+    return false
+  end
+
+  tooltip = tooltip or GameTooltip
+  tooltip:AddLine(" ")
+  tooltip:AddLine(L.GROUP_PROGRESS_TOOLTIP or "Group Progress", 1, 0.82, 0)
+
+  for objectiveIndex = 1, table.getn(localQuest.objectives or {}) do
+    localObjective = localQuest.objectives[objectiveIndex]
+    if localObjective then
+      tooltip:AddLine("|cffffffff- " .. SafeString(localObjective.text) .. "|r", 1, 1, 1)
+      tooltip:AddLine(
+        "  |cff" .. GroupClassColorHex(localClassToken) .. SafeString(localName) .. ":|r "
+          .. Addon.GroupHoldProgressText(localObjective),
+        1, 1, 1
+      )
+
+      for peerIndex = 1, table.getn(sharedPeers) do
+        peerInfo = sharedPeers[peerIndex]
+        remoteObjective = peerInfo.remoteQuest
+          and peerInfo.remoteQuest.objectives
+          and peerInfo.remoteQuest.objectives[objectiveIndex]
+        if remoteObjective then
+          progressText = Addon.GroupHoldProgressText(remoteObjective)
+        else
+          progressText = "|cffaaaaaa--|r"
+        end
+        tooltip:AddLine(
+          "  |cff" .. GroupClassColorHex(peerInfo.classToken) .. SafeString(peerInfo.name) .. ":|r "
+            .. progressText,
+          1, 1, 1
+        )
+      end
+    end
+  end
+
+  tooltip:Show()
+  return true
+end
+
 function Addon.ShowGroupHoldTooltip(meta, tooltip)
   local need = meta and Addon.groupHoldNeedByKey and Addon.groupHoldNeedByKey[meta.pfqGroupNeedKey]
   local localName = playerName or UnitName("player") or "Player"
@@ -3253,11 +3347,17 @@ function Addon.InstallGroupHoldMapTooltip()
 
   Addon.originalGroupHoldShowTooltip = pfMap.ShowTooltip
   pfMap.ShowTooltip = function(self, meta, tooltip)
+    local result
+
     if meta and meta.addon == "PFQGROUP" then
       return Addon.ShowGroupHoldTooltip(meta, tooltip)
     end
 
-    return Addon.originalGroupHoldShowTooltip(self, meta, tooltip)
+    result = Addon.originalGroupHoldShowTooltip(self, meta, tooltip)
+    if meta and meta.quest then
+      Addon.AppendGroupProgressTooltip(meta, tooltip)
+    end
+    return result
   end
 
   Addon.groupHoldMapTooltipInstalled = true
