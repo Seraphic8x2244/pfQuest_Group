@@ -4914,22 +4914,6 @@ local function SetGuideDisparityHidden(disparityKey, hidden)
   end
 end
 
-local function SetGuideTouristRowAlpha(row, alpha)
-  row.marker:SetAlpha(alpha)
-  row.text:SetAlpha(alpha)
-  row.disparityText:SetAlpha(alpha)
-  row.strike:SetAlpha(alpha)
-  row.action:SetAlpha(alpha)
-end
-
-local function HideGuideTouristRow(row)
-  row.marker:Hide()
-  row.text:Hide()
-  row.disparityText:Hide()
-  row.strike:Hide()
-  row.action:Hide()
-end
-
 local function EnsureGuideTouristRow(index)
   local row = guideTouristUI.rows[index]
 
@@ -4938,33 +4922,40 @@ local function EnsureGuideTouristRow(index)
   end
 
   row = {}
+  row.frame = CreateFrame("Frame", nil, guideTouristUI.frame)
+  row.frame:SetWidth(264)
+  row.frame:SetHeight(20)
 
-  row.marker = guideTouristUI.frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+  row.marker = row.frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+  row.marker:SetPoint("LEFT", row.frame, "LEFT", 0, 0)
   row.marker:SetWidth(18)
   row.marker:SetHeight(20)
   row.marker:SetJustifyH("CENTER")
   row.marker:SetTextColor(1, 0.82, 0)
 
-  row.text = guideTouristUI.frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+  row.text = row.frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+  row.text:SetPoint("LEFT", row.frame, "LEFT", 4, 0)
   row.text:SetWidth(238)
   row.text:SetHeight(20)
   row.text:SetJustifyH("LEFT")
   row.text:SetTextColor(1, 1, 1)
 
-  row.disparityText = guideTouristUI.frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+  row.disparityText = row.frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+  row.disparityText:SetPoint("LEFT", row.marker, "RIGHT", 4, 0)
   row.disparityText:SetWidth(180)
   row.disparityText:SetHeight(20)
   row.disparityText:SetJustifyH("LEFT")
   row.disparityText:SetTextColor(1, 1, 1)
   row.disparityText:Hide()
 
-  row.strike = guideTouristUI.frame:CreateTexture(nil, "OVERLAY")
+  row.strike = row.frame:CreateTexture(nil, "OVERLAY")
   row.strike:SetPoint("LEFT", row.text, "LEFT", 0, 0)
   row.strike:SetHeight(1)
   row.strike:SetTexture(1, 0.82, 0)
   row.strike:Hide()
 
-  row.action = CreateFrame("Button", nil, guideTouristUI.frame, "UIPanelButtonTemplate")
+  row.action = CreateFrame("Button", nil, row.frame, "UIPanelButtonTemplate")
+  row.action:SetPoint("RIGHT", row.frame, "RIGHT", 0, 0)
   row.action:SetWidth(52)
   row.action:SetHeight(18)
   row.action:SetScript("OnClick", function()
@@ -5033,7 +5024,7 @@ local function RefreshGuideTouristWindow()
       guideTouristUI.showHiddenButton:Hide()
     end
     for index = 1, table.getn(guideTouristUI.rows) do
-      HideGuideTouristRow(guideTouristUI.rows[index])
+      guideTouristUI.rows[index].frame:Hide()
     end
     guideTouristUI.frame:Hide()
     return
@@ -5135,18 +5126,11 @@ local function RefreshGuideTouristWindow()
   for index = 1, table.getn(display) do
     entry = display[index]
     row = EnsureGuideTouristRow(index)
-    row.marker:ClearAllPoints()
-    row.marker:SetPoint("TOPLEFT", guideTouristUI.frame, "TOPLEFT", 8, -28 - ((index - 1) * 20))
-    row.text:ClearAllPoints()
-    row.text:SetPoint("TOPLEFT", guideTouristUI.frame, "TOPLEFT", 12, -28 - ((index - 1) * 20))
-    row.disparityText:ClearAllPoints()
-    row.disparityText:SetPoint("TOPLEFT", guideTouristUI.frame, "TOPLEFT", 30, -28 - ((index - 1) * 20))
-    row.action:ClearAllPoints()
-    row.action:SetPoint("TOPRIGHT", guideTouristUI.frame, "TOPRIGHT", -8, -29 - ((index - 1) * 20))
-    SetGuideTouristRowAlpha(row, 1)
+    row.frame:ClearAllPoints()
+    row.frame:SetPoint("TOPLEFT", guideTouristUI.frame, "TOPLEFT", 8, -28 - ((index - 1) * 20))
+    row.frame:SetAlpha(1)
     row.marker:SetTextColor(1, 0.82, 0)
     row.marker:SetWidth(18)
-    row.marker:Show()
     row.text:SetTextColor(1, 1, 1)
     row.text:SetWidth(238)
     row.text:Hide()
@@ -5175,7 +5159,7 @@ local function RefreshGuideTouristWindow()
       row.action:SetText(row.disparityHidden and (L.DISPARITY_UNHIDE or "Unhide") or (L.DISPARITY_HIDE or "Hide"))
       row.action:Show()
       if row.disparityHidden then
-        SetGuideTouristRowAlpha(row, 0.55)
+        row.frame:SetAlpha(0.55)
       end
     else
       row.seq = tonumber(entry.instruction and entry.instruction.seq) or 0
@@ -5198,10 +5182,11 @@ local function RefreshGuideTouristWindow()
       end
     end
 
+    row.frame:Show()
   end
 
   for index = table.getn(display) + 1, table.getn(guideTouristUI.rows) do
-    HideGuideTouristRow(guideTouristUI.rows[index])
+    guideTouristUI.rows[index].frame:Hide()
   end
 
   if session.mode == "GUIDE" and hiddenCount > 0 and guideTouristUI.showHiddenButton then
@@ -5286,7 +5271,7 @@ local function UpdateGuideTouristCompletion()
           alpha = 0
         end
       end
-      SetGuideTouristRowAlpha(completion.row, alpha)
+      completion.row.frame:SetAlpha(alpha)
     end
   end
 
