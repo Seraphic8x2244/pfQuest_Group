@@ -42,6 +42,7 @@ local guideTouristUI = {
   frame = nil,
   title = nil,
   rows = {},
+  touristRows = {},
   completing = {},
   completed = {},
   completionDuration = 0.9,
@@ -4674,6 +4675,55 @@ function Addon.HandleFlightAction(flightName)
 end
 
 
+local function GuideTouristNpcDisplayName(instruction, npcName)
+  local mobID = tonumber(instruction and instruction.mobID)
+  local unitData
+  local npcLevel
+  local color
+  local red
+  local green
+  local colorCode
+
+  if npcName == "" or not mobID then
+    return npcName
+  end
+
+  if pfDB and pfDB.units and pfDB.units.data then
+    unitData = pfDB.units.data[mobID]
+  end
+  npcLevel = tonumber(unitData and unitData.lvl)
+  if not npcLevel then
+    return npcName
+  end
+
+  if pfQuestCompat and type(pfQuestCompat.GetDifficultyColor) == "function" then
+    color = pfQuestCompat.GetDifficultyColor(npcLevel)
+  elseif type(GetQuestDifficultyColor) == "function" then
+    color = GetQuestDifficultyColor(npcLevel)
+  end
+  if not color then
+    return npcName
+  end
+
+  red = tonumber(color.r) or 0
+  green = tonumber(color.g) or 0
+  if red >= 0.9 then
+    if green < 0.3 then
+      colorCode = "|cffff3333"
+    elseif green < 0.9 then
+      colorCode = "|cffff8040"
+    else
+      colorCode = "|cffffff00"
+    end
+  else
+    -- The requested panel palette has no gray/trivial state, so lower
+    -- difficulty NPCs intentionally fold into green.
+    colorCode = "|cff40bf40"
+  end
+
+  return colorCode .. npcName .. "|r"
+end
+
 local function GuideTouristInstructionText(instruction)
   local text
   local marker = instruction and instruction.actionType == "ACCEPT" and "!" or "?"
@@ -4724,6 +4774,7 @@ local function GuideTouristInstructionText(instruction)
   end
 
   if shortNPC ~= "" then
+    shortNPC = GuideTouristNpcDisplayName(instruction, shortNPC)
     return string.format(L.INSTRUCTION_WITH_NPC or "%s |cffffd100%s|r %s", shortNPC, marker, text)
   end
 
@@ -4914,6 +4965,157 @@ local function SetGuideDisparityHidden(disparityKey, hidden)
   end
 end
 
+local function BuildTouristDisplayRows()
+  local instructions = Addon.GetTouristInstructions()
+  local display = {}
+  local present = {}
+  local index
+  local seq
+  local instruction
+  local completion
+
+  for index = 1, table.getn(instructions) do
+    instruction = instructions[index]
+    seq = tonumber(instruction and instruction.seq) or 0
+    table.insert(display, {
+      seq = seq,
+      text = GuideTouristInstructionText(instruction),
+      actionText = L.INSTRUCTION_DONE or "Done",
+      completing = false
+    })
+    present[seq] = true
+  end
+
+  for seq, completion in pairs(guideTouristUI.completing) do
+    if not present[seq] then
+      table.insert(display, {
+        seq = tonumber(seq) or 0,
+        text = GuideTouristInstructionText(completion.instruction),
+        actionText = nil,
+        completing = true,
+        completion = completion
+      })
+    end
+  end
+
+  table.sort(display, function(left, right)
+    return (tonumber(left.seq) or 0) < (tonumber(right.seq) or 0)
+  end)
+
+  return display
+end
+
+local function EnsureTouristRow(index)
+  local row = guideTouristUI.touristRows[index]
+
+  if row then
+    return row
+  end
+
+  row = {}
+  row.frame = CreateFrame("Frame", nil, guideTouristUI.frame)
+  row.frame:SetWidth(264)
+  row.frame:SetHeight(20)
+
+  row.text = row.frame:CreateFontString(nil, "OVERLAY")
+  row.text:SetPoint("LEFT", row.frame, "LEFT", 4, 0)
+  row.text:SetWidth(180)
+  row.text:SetHeight(20)
+  row.text:SetJustifyH("LEFT")
+  CopyGroupTrackerFont(guideTouristUI.title, row.text, 12)
+  row.text:SetTextColor(1, 1, 1, 1)
+
+  row.strike = row.frame:CreateTexture(nil, "OVERLAY")
+  row.strike:SetPoint("LEFT", row.text, "LEFT", 0, 0)
+  row.strike:SetHeight(1)
+  row.strike:SetTexture(1, 0.82, 0)
+  row.strike:Hide()
+
+  row.action = CreateFrame("Button", nil, row.frame, "UIPanelButtonTemplate")
+  row.action:SetPoint("RIGHT", row.frame, "RIGHT", 0, 0)
+  row.action:SetWidth(52)
+  row.action:SetHeight(18)
+  row.action:SetText("")
+  row.action:SetScript("OnClick", function()
+    if row.seq then
+      CompleteTouristInstruction(row.seq)
+    end
+  end)
+  row.action:Hide()
+
+  row.actionLabel = row.action:CreateFontString(nil, "OVERLAY")
+  row.actionLabel:SetPoint("CENTER", row.action, "CENTER", 0, 0)
+  CopyGroupTrackerFont(guideTouristUI.title, row.actionLabel, 12)
+  row.actionLabel:SetTextColor(1, 0.82, 0, 1)
+
+  guideTouristUI.touristRows[index] = row
+  return row
+end
+
+local function HideTouristRows()
+  local index
+
+  for index = 1, table.getn(guideTouristUI.touristRows) do
+    guideTouristUI.touristRows[index].frame:Hide()
+  end
+end
+
+local function RefreshTouristWindow(session)
+  local display = BuildTouristDisplayRows()
+  local index
+  local entry
+  local row
+
+  guideTouristUI.title:SetText(string.format(
+    L.WINDOW_TITLE_TOURIST or "Tourist: %s",
+    SafeString(session and session.guideName)
+  ))
+  guideTouristUI.showHidden = false
+  if guideTouristUI.showHiddenButton then
+    guideTouristUI.showHiddenButton:Hide()
+  end
+
+  for index = 1, table.getn(guideTouristUI.rows) do
+    guideTouristUI.rows[index].frame:Hide()
+  end
+
+  for index = 1, table.getn(display) do
+    entry = display[index]
+    row = EnsureTouristRow(index)
+    row.frame:ClearAllPoints()
+    row.frame:SetPoint("TOPLEFT", guideTouristUI.frame, "TOPLEFT", 8, -28 - ((index - 1) * 20))
+    row.frame:SetAlpha(1)
+    row.seq = entry.seq
+    row.text:SetText(entry.text or "")
+    row.text:SetWidth(entry.actionText and 180 or 238)
+    row.text:Show()
+    row.strike:Hide()
+    row.actionLabel:SetText(entry.actionText or "")
+    row.action:Hide()
+
+    if entry.actionText then
+      row.action:Show()
+    end
+
+    if entry.completing then
+      row.strike:SetWidth(math.min(row.text:GetStringWidth(), 238))
+      row.strike:Show()
+      if entry.completion then
+        entry.completion.row = row
+      end
+    end
+
+    row.frame:Show()
+  end
+
+  for index = table.getn(display) + 1, table.getn(guideTouristUI.touristRows) do
+    guideTouristUI.touristRows[index].frame:Hide()
+  end
+
+  guideTouristUI.frame:SetHeight(34 + (table.getn(display) * 20))
+  guideTouristUI.frame:Show()
+end
+
 local function EnsureGuideTouristRow(index)
   local row = guideTouristUI.rows[index]
 
@@ -5018,6 +5220,7 @@ local function RefreshGuideTouristWindow()
     for index = 1, table.getn(guideTouristUI.rows) do
       guideTouristUI.rows[index].frame:Hide()
     end
+    HideTouristRows()
     guideTouristUI.frame:Hide()
     return
   end
@@ -5029,6 +5232,13 @@ local function RefreshGuideTouristWindow()
     guideTouristUI.sessionKey = sessionKey
     guideTouristUI.showHidden = false
   end
+
+  if session.mode == "TOURIST" then
+    RefreshTouristWindow(session)
+    return
+  end
+
+  HideTouristRows()
 
   if session.mode == "GUIDE" then
     title = L.WINDOW_TITLE_GUIDE or "Guide"
