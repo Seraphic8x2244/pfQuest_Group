@@ -357,6 +357,7 @@ local function NormalizeInstructionStore(store, session)
   local guideEligible = {}
   local guideAcknowledged = {}
   local guideCompleted = {}
+  local guideRemoved = {}
   local guideEligibilityKnown = {}
   local consumed = {}
   local guideCursor = tonumber(session and session.guideActionSeq) or 0
@@ -459,6 +460,15 @@ local function NormalizeInstructionStore(store, session)
       end
     end
 
+    if sameGuideSession and type(store.guideRemoved) == "table" then
+      for key, record in pairs(store.guideRemoved) do
+        seq = tonumber(key)
+        if record and seq and guideRecords[seq] then
+          guideRemoved[math.floor(seq)] = true
+        end
+      end
+    end
+
     for seq in pairs(guideRecords) do
       if guideEligibilityKnown[seq] then
         hasEligible = false
@@ -481,6 +491,7 @@ local function NormalizeInstructionStore(store, session)
     store.guideEligible = guideEligible
     store.guideAcknowledged = guideAcknowledged
     store.guideCompleted = guideCompleted
+    store.guideRemoved = guideRemoved
     store.guideEligibilityKnown = guideEligibilityKnown
   else
     store.guideSessionId = nil
@@ -489,6 +500,7 @@ local function NormalizeInstructionStore(store, session)
     store.guideEligible = {}
     store.guideAcknowledged = {}
     store.guideCompleted = {}
+    store.guideRemoved = {}
     store.guideEligibilityKnown = {}
   end
 
@@ -3545,7 +3557,9 @@ local function InstructionSnapshot()
 
     for seq, instruction in pairs(store.guideRecords or {}) do
       seq = tonumber(seq)
-      if seq and not (store.guideCompleted and store.guideCompleted[seq]) then
+      if seq
+        and not (store.guideCompleted and store.guideCompleted[seq])
+        and not (store.guideRemoved and store.guideRemoved[seq]) then
         pending[seq] = instruction
       end
     end
@@ -3658,7 +3672,8 @@ local function FilterRemoteInstructionCompletions(peer, sessionId, consumed)
       and seq > baseline
       and seq <= cursor
       and store.guideRecords
-      and store.guideRecords[seq] then
+      and store.guideRecords[seq]
+      and not (store.guideRemoved and store.guideRemoved[seq]) then
       output[seq] = true
     end
   end
@@ -4133,7 +4148,9 @@ function Addon.GetGuideInstructions()
 
   for seq, instruction in pairs(store.guideRecords or {}) do
     seq = tonumber(seq)
-    if seq and not (store.guideCompleted and store.guideCompleted[seq]) then
+    if seq
+      and not (store.guideCompleted and store.guideCompleted[seq])
+      and not (store.guideRemoved and store.guideRemoved[seq]) then
       pending[seq] = instruction
     end
   end
@@ -4337,7 +4354,10 @@ function Addon.RecordGuideInstructionCompletions(sender, sessionId, consumed)
   for seq in pairs(consumed or {}) do
     seq = tonumber(seq)
     eligible = seq and store.guideEligible and store.guideEligible[seq]
-    if seq and eligible and eligible[senderKey] then
+    if seq
+      and eligible
+      and eligible[senderKey]
+      and not (store.guideRemoved and store.guideRemoved[seq]) then
       acknowledged = store.guideAcknowledged[seq] or {}
       store.guideAcknowledged[seq] = acknowledged
       if not acknowledged[senderKey] then
@@ -4578,6 +4598,7 @@ function Addon.CreateGuideInstruction(record)
   store = Addon.db.instructions
   store.guideSessionId = session.guideSessionId
   store.guideRecords[seq] = instruction
+  store.guideRemoved[seq] = nil
   Addon.CaptureGuideInstructionEligibility(session, seq)
   session.revision = session.revision + 1
   Addon.SendDelta("instructions", EncodeInstructionWire("D", session.guideSessionId, seq, {
@@ -4586,6 +4607,44 @@ function Addon.CreateGuideInstruction(record)
   BroadcastSessionDelta()
   Emit("SESSION_CHANGED", Addon.GetSession())
   Emit("GUIDE_INSTRUCTION_CREATED", CopyInstruction(instruction))
+  Emit("GUIDE_INSTRUCTIONS_CHANGED", Addon.GetGuideInstructions())
+  return true
+end
+
+function Addon.RemoveGuideInstruction(seq)
+  local session = Addon.db and Addon.db.session
+  local store = Addon.db and Addon.db.instructions
+
+  seq = tonumber(seq)
+  if not session
+    or session.mode ~= "GUIDE"
+    or not session.guideSessionId
+    or not store
+    or store.guideSessionId ~= session.guideSessionId
+    or not seq then
+    return false
+  end
+
+  seq = math.floor(seq)
+  if not store.guideRecords
+    or not store.guideRecords[seq]
+    or (store.guideCompleted and store.guideCompleted[seq])
+    or (store.guideRemoved and store.guideRemoved[seq]) then
+    return false
+  end
+
+  store.guideRemoved = store.guideRemoved or {}
+  store.guideRemoved[seq] = true
+  guideTouristUI.completing[seq] = nil
+  guideTouristUI.completed[seq] = nil
+
+  -- Removal changes the authoritative pending instruction set without
+  -- advancing the Guide action cursor. A full state snapshot is therefore
+  -- the existing protocol-v3 representation of the new set.
+  if Addon.HasCompatiblePeer() then
+    SendFullState()
+  end
+
   Emit("GUIDE_INSTRUCTIONS_CHANGED", Addon.GetGuideInstructions())
   return true
 end
@@ -5192,6 +5251,8 @@ local function EnsureGuideTouristRow(index)
   row.action:SetScript("OnClick", function()
     if row.disparityKey then
       SetGuideDisparityHidden(row.disparityKey, not row.disparityHidden)
+    elseif row.guideInstructionSeq then
+      Addon.RemoveGuideInstruction(row.guideInstructionSeq)
     elseif row.touristInstructionSeq then
       CompleteTouristInstruction(row.touristInstructionSeq)
     end
@@ -5378,6 +5439,7 @@ local function RefreshGuideTouristWindow()
     row.action:Hide()
     row.disparityKey = nil
     row.disparityHidden = false
+    row.guideInstructionSeq = nil
     row.touristInstructionSeq = nil
 
     if entry.kind == "disparity" then
@@ -5408,10 +5470,11 @@ local function RefreshGuideTouristWindow()
         row.target:Show()
       end
 
-      if session.mode == "TOURIST" and not entry.completing then
-        row.touristInstructionSeq = row.seq
+      if not entry.completing then
+        row.guideInstructionSeq = row.seq
         row.text:SetWidth(180)
-        row.action:SetText(L.INSTRUCTION_DONE or "Done")
+        row.target:SetWidth(180)
+        row.action:SetText(L.INSTRUCTION_REMOVE or "Remove")
         row.action:Show()
       end
 
