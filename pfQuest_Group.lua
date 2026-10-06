@@ -4933,26 +4933,34 @@ local function EnsureGuideTouristRow(index)
   row.marker:SetJustifyH("CENTER")
   row.marker:SetTextColor(1, 0.82, 0)
 
+  -- Keep the proven 0.1.32 Guide/disparity text path unchanged.
   row.text = row.frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-  row.text:SetPoint("LEFT", row.frame, "LEFT", 4, 0)
+  row.text:SetPoint("LEFT", row.marker, "RIGHT", 4, 0)
   row.text:SetWidth(238)
   row.text:SetHeight(20)
   row.text:SetJustifyH("LEFT")
   row.text:SetTextColor(1, 1, 1)
 
-  row.disparityText = row.frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-  row.disparityText:SetPoint("LEFT", row.marker, "RIGHT", 4, 0)
-  row.disparityText:SetWidth(180)
-  row.disparityText:SetHeight(20)
-  row.disparityText:SetJustifyH("LEFT")
-  row.disparityText:SetTextColor(1, 1, 1)
-  row.disparityText:Hide()
+  -- Tourist instruction text uses a separate region owned directly by the
+  -- main window. It never depends on the zero-width instruction marker.
+  row.touristText = guideTouristUI.frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+  row.touristText:SetWidth(180)
+  row.touristText:SetHeight(20)
+  row.touristText:SetJustifyH("LEFT")
+  row.touristText:SetTextColor(1, 1, 1)
+  row.touristText:Hide()
 
   row.strike = row.frame:CreateTexture(nil, "OVERLAY")
   row.strike:SetPoint("LEFT", row.text, "LEFT", 0, 0)
   row.strike:SetHeight(1)
   row.strike:SetTexture(1, 0.82, 0)
   row.strike:Hide()
+
+  row.touristStrike = guideTouristUI.frame:CreateTexture(nil, "OVERLAY")
+  row.touristStrike:SetPoint("LEFT", row.touristText, "LEFT", 0, 0)
+  row.touristStrike:SetHeight(1)
+  row.touristStrike:SetTexture(1, 0.82, 0)
+  row.touristStrike:Hide()
 
   row.action = CreateFrame("Button", nil, row.frame, "UIPanelButtonTemplate")
   row.action:SetPoint("RIGHT", row.frame, "RIGHT", 0, 0)
@@ -5025,6 +5033,8 @@ local function RefreshGuideTouristWindow()
     end
     for index = 1, table.getn(guideTouristUI.rows) do
       guideTouristUI.rows[index].frame:Hide()
+      guideTouristUI.rows[index].touristText:Hide()
+      guideTouristUI.rows[index].touristStrike:Hide()
     end
     guideTouristUI.frame:Hide()
     return
@@ -5133,11 +5143,15 @@ local function RefreshGuideTouristWindow()
     row.marker:SetWidth(18)
     row.text:SetTextColor(1, 1, 1)
     row.text:SetWidth(238)
-    row.text:Hide()
-    row.disparityText:SetTextColor(1, 1, 1)
-    row.disparityText:SetWidth(180)
-    row.disparityText:Hide()
+    row.touristText:ClearAllPoints()
+    row.touristText:SetPoint("TOPLEFT", guideTouristUI.frame, "TOPLEFT", 12, -28 - ((index - 1) * 20))
+    row.touristText:SetTextColor(1, 1, 1)
+    row.touristText:SetWidth(180)
+    row.touristText:SetAlpha(1)
+    row.touristText:Hide()
     row.strike:Hide()
+    row.touristStrike:SetAlpha(1)
+    row.touristStrike:Hide()
     row.action:Hide()
     row.disparityKey = nil
     row.disparityHidden = false
@@ -5150,12 +5164,12 @@ local function RefreshGuideTouristWindow()
       row.disparityHidden = disparity.hidden and true or false
       row.marker:SetText("!")
       row.marker:SetTextColor(1, 0.35, 0.15)
-      row.disparityText:SetText(string.format(
+      row.text:SetWidth(180)
+      row.text:SetText(string.format(
         L.DISPARITY_MISSING_QUEST or "%s missing: %s",
         SafeString(disparity.playerName),
         SafeString(disparity.quest and disparity.quest.title)
       ))
-      row.disparityText:Show()
       row.action:SetText(row.disparityHidden and (L.DISPARITY_UNHIDE or "Unhide") or (L.DISPARITY_HIDE or "Hide"))
       row.action:Show()
       if row.disparityHidden then
@@ -5165,20 +5179,32 @@ local function RefreshGuideTouristWindow()
       row.seq = tonumber(entry.instruction and entry.instruction.seq) or 0
       row.marker:SetText("")
       row.marker:SetWidth(0)
-      row.text:SetText(GuideTouristInstructionText(entry.instruction))
-      row.text:Show()
 
-      if session.mode == "TOURIST" and not entry.completing then
-        row.touristInstructionSeq = row.seq
-        row.text:SetWidth(180)
-        row.action:SetText(L.INSTRUCTION_DONE or "Done")
-        row.action:Show()
-      end
+      if session.mode == "TOURIST" then
+        row.text:SetText("")
+        row.touristText:SetText(GuideTouristInstructionText(entry.instruction))
+        if entry.completing then
+          row.touristText:SetWidth(238)
+        else
+          row.touristInstructionSeq = row.seq
+          row.touristText:SetWidth(180)
+          row.action:SetText(L.INSTRUCTION_DONE or "Done")
+          row.action:Show()
+        end
+        row.touristText:Show()
 
-      if entry.completing then
-        row.strike:SetWidth(math.min(row.text:GetStringWidth(), 238))
-        row.strike:Show()
-        entry.completion.row = row
+        if entry.completing then
+          row.touristStrike:SetWidth(math.min(row.touristText:GetStringWidth(), 238))
+          row.touristStrike:Show()
+          entry.completion.row = row
+        end
+      else
+        row.text:SetText(GuideTouristInstructionText(entry.instruction))
+        if entry.completing then
+          row.strike:SetWidth(math.min(row.text:GetStringWidth(), 238))
+          row.strike:Show()
+          entry.completion.row = row
+        end
       end
     end
 
@@ -5187,6 +5213,8 @@ local function RefreshGuideTouristWindow()
 
   for index = table.getn(display) + 1, table.getn(guideTouristUI.rows) do
     guideTouristUI.rows[index].frame:Hide()
+    guideTouristUI.rows[index].touristText:Hide()
+    guideTouristUI.rows[index].touristStrike:Hide()
   end
 
   if session.mode == "GUIDE" and hiddenCount > 0 and guideTouristUI.showHiddenButton then
@@ -5272,6 +5300,8 @@ local function UpdateGuideTouristCompletion()
         end
       end
       completion.row.frame:SetAlpha(alpha)
+      completion.row.touristText:SetAlpha(alpha)
+      completion.row.touristStrike:SetAlpha(alpha)
     end
   end
 
