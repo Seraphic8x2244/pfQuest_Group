@@ -4940,6 +4940,14 @@ local function EnsureGuideTouristRow(index)
   row.text:SetJustifyH("LEFT")
   row.text:SetTextColor(1, 1, 1)
 
+  row.disparityText = row.frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+  row.disparityText:SetPoint("LEFT", row.marker, "RIGHT", 4, 0)
+  row.disparityText:SetWidth(180)
+  row.disparityText:SetHeight(20)
+  row.disparityText:SetJustifyH("LEFT")
+  row.disparityText:SetTextColor(1, 1, 1)
+  row.disparityText:Hide()
+
   row.strike = row.frame:CreateTexture(nil, "OVERLAY")
   row.strike:SetPoint("LEFT", row.text, "LEFT", 0, 0)
   row.strike:SetHeight(1)
@@ -5123,10 +5131,12 @@ local function RefreshGuideTouristWindow()
     row.frame:SetAlpha(1)
     row.marker:SetTextColor(1, 0.82, 0)
     row.marker:SetWidth(18)
-    row.text:ClearAllPoints()
-    row.text:SetPoint("LEFT", row.frame, "LEFT", 4, 0)
     row.text:SetTextColor(1, 1, 1)
     row.text:SetWidth(238)
+    row.text:Hide()
+    row.disparityText:SetTextColor(1, 1, 1)
+    row.disparityText:SetWidth(180)
+    row.disparityText:Hide()
     row.strike:Hide()
     row.action:Hide()
     row.disparityKey = nil
@@ -5140,14 +5150,12 @@ local function RefreshGuideTouristWindow()
       row.disparityHidden = disparity.hidden and true or false
       row.marker:SetText("!")
       row.marker:SetTextColor(1, 0.35, 0.15)
-      row.text:ClearAllPoints()
-      row.text:SetPoint("LEFT", row.marker, "RIGHT", 4, 0)
-      row.text:SetWidth(180)
-      row.text:SetText(string.format(
+      row.disparityText:SetText(string.format(
         L.DISPARITY_MISSING_QUEST or "%s missing: %s",
         SafeString(disparity.playerName),
         SafeString(disparity.quest and disparity.quest.title)
       ))
+      row.disparityText:Show()
       row.action:SetText(row.disparityHidden and (L.DISPARITY_UNHIDE or "Unhide") or (L.DISPARITY_HIDE or "Hide"))
       row.action:Show()
       if row.disparityHidden then
@@ -5158,6 +5166,7 @@ local function RefreshGuideTouristWindow()
       row.marker:SetText("")
       row.marker:SetWidth(0)
       row.text:SetText(GuideTouristInstructionText(entry.instruction))
+      row.text:Show()
 
       if session.mode == "TOURIST" and not entry.completing then
         row.touristInstructionSeq = row.seq
