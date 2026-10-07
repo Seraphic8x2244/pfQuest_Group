@@ -52,6 +52,7 @@ local guideTouristUI = {
   sessionKey = nil,
   showHidden = false,
   showHiddenButton = nil,
+  resizeGrip = nil,
   refresh = nil
 }
 
@@ -564,6 +565,8 @@ local function NormalizeUIState(state)
   end
   window.x = tonumber(window.x) or 0
   window.y = tonumber(window.y) or 0
+  window.width = math.max(280, tonumber(window.width) or 280)
+  window.height = math.max(34, tonumber(window.height) or 34)
 
   return state
 end
@@ -5027,6 +5030,9 @@ end
 
 local function GuideTouristInstructionText(instruction)
   local text
+  local fullText
+  local markerText
+  local markerAt
   local marker = instruction and instruction.actionType == "ACCEPT" and "!" or "?"
   local npcName = Trim(SafeString(instruction and instruction.npcName))
 
@@ -5076,10 +5082,21 @@ local function GuideTouristInstructionText(instruction)
 
   if shortNPC ~= "" then
     shortNPC = GuideTouristNpcDisplayName(instruction, shortNPC)
-    return string.format(L.INSTRUCTION_WITH_NPC or "%s |cffffd100%s|r %s", shortNPC, marker, text)
+    fullText = string.format(L.INSTRUCTION_WITH_NPC or "%s |cffffd100%s|r %s", shortNPC, marker, text)
+  else
+    fullText = string.format(L.INSTRUCTION_WITHOUT_NPC or "|cffffd100%s|r %s", marker, text)
   end
 
-  return string.format(L.INSTRUCTION_WITHOUT_NPC or "|cffffd100%s|r %s", marker, text)
+  markerText = "|cffffd100" .. marker .. "|r"
+  markerAt = string.find(fullText, markerText, 1, true)
+  if markerAt then
+    return fullText,
+      string.sub(fullText, 1, markerAt - 1),
+      marker,
+      string.sub(fullText, markerAt + string.len(markerText))
+  end
+
+  return fullText
 end
 
 local function GuideInstructionAllTouristsComplete(session, instruction)
@@ -5454,13 +5471,21 @@ local function BuildTouristDisplayRows()
   local seq
   local instruction
   local completion
+  local text
+  local prefixText
+  local markerText
+  local suffixText
 
   for index = 1, table.getn(instructions) do
     instruction = instructions[index]
     seq = tonumber(instruction and instruction.seq) or 0
+    text, prefixText, markerText, suffixText = GuideTouristInstructionText(instruction)
     table.insert(display, {
       seq = seq,
-      text = GuideTouristInstructionText(instruction),
+      text = text,
+      prefixText = prefixText,
+      markerText = markerText,
+      suffixText = suffixText,
       actionText = L.INSTRUCTION_DONE or "Done",
       targetNpcName = Trim(SafeString(instruction and instruction.npcName)),
       completing = false
@@ -5470,9 +5495,13 @@ local function BuildTouristDisplayRows()
 
   for seq, completion in pairs(guideTouristUI.completing) do
     if not present[seq] then
+      text, prefixText, markerText, suffixText = GuideTouristInstructionText(completion.instruction)
       table.insert(display, {
         seq = tonumber(seq) or 0,
-        text = GuideTouristInstructionText(completion.instruction),
+        text = text,
+        prefixText = prefixText,
+        markerText = markerText,
+        suffixText = suffixText,
         actionText = nil,
         targetNpcName = Trim(SafeString(completion.instruction and completion.instruction.npcName)),
         completing = true,
@@ -5490,6 +5519,9 @@ end
 
 local function EnsureTouristRow(index)
   local row = guideTouristUI.touristRows[index]
+  local fontPath
+  local fontSize
+  local fontFlags
 
   if row then
     return row
@@ -5507,6 +5539,27 @@ local function EnsureTouristRow(index)
   row.text:SetJustifyH("LEFT")
   CopyGroupTrackerFont(guideTouristUI.title, row.text, 12)
   row.text:SetTextColor(1, 1, 1, 1)
+
+  row.inlineMarker = row.frame:CreateFontString(nil, "OVERLAY")
+  row.inlineMarker:SetHeight(20)
+  row.inlineMarker:SetJustifyH("LEFT")
+  row.inlineMarker:SetTextColor(1, 0.82, 0, 1)
+  fontPath, fontSize, fontFlags = row.text:GetFont()
+  if fontPath then
+    if fontFlags then
+      row.inlineMarker:SetFont(fontPath, 15, fontFlags)
+    else
+      row.inlineMarker:SetFont(fontPath, 15)
+    end
+  end
+  row.inlineMarker:Hide()
+
+  row.inlineSuffix = row.frame:CreateFontString(nil, "OVERLAY")
+  row.inlineSuffix:SetHeight(20)
+  row.inlineSuffix:SetJustifyH("LEFT")
+  CopyGroupTrackerFont(row.text, row.inlineSuffix, 12)
+  row.inlineSuffix:SetTextColor(1, 1, 1, 1)
+  row.inlineSuffix:Hide()
 
   row.target = CreateFrame("Button", nil, row.frame)
   row.target:SetPoint("LEFT", row.frame, "LEFT", 4, 0)
@@ -5546,6 +5599,39 @@ local function EnsureTouristRow(index)
 
   guideTouristUI.touristRows[index] = row
   return row
+end
+
+local function RenderGuideTouristInstructionText(row, text, prefixText, markerText, suffixText, availableWidth)
+  local prefixWidth
+  local markerWidth
+  local textWidth
+
+  row.text:SetWidth(availableWidth)
+  row.text:SetText(prefixText or text or "")
+  row.text:Show()
+  row.inlineMarker:Hide()
+  row.inlineSuffix:Hide()
+
+  textWidth = math.min(row.text:GetStringWidth(), availableWidth)
+  if markerText then
+    prefixWidth = textWidth
+    row.inlineMarker:ClearAllPoints()
+    row.inlineMarker:SetPoint("LEFT", row.text, "LEFT", prefixWidth, 0)
+    row.inlineMarker:SetWidth(30)
+    row.inlineMarker:SetText(markerText)
+    markerWidth = math.max(1, row.inlineMarker:GetStringWidth())
+    row.inlineMarker:SetWidth(markerWidth)
+    row.inlineMarker:Show()
+
+    row.inlineSuffix:ClearAllPoints()
+    row.inlineSuffix:SetPoint("LEFT", row.inlineMarker, "RIGHT", 0, 0)
+    row.inlineSuffix:SetWidth(math.max(0, availableWidth - prefixWidth - markerWidth))
+    row.inlineSuffix:SetText(suffixText or "")
+    row.inlineSuffix:Show()
+    textWidth = math.min(availableWidth, prefixWidth + markerWidth + row.inlineSuffix:GetStringWidth())
+  end
+
+  row.renderedTextWidth = textWidth
 end
 
 local function EnsureSingleObjectiveRow(index)
@@ -5689,6 +5775,8 @@ local function RefreshTouristWindow(session)
   local entry
   local row
   local alertCount
+  local desiredHeight
+  local savedHeight
 
   guideTouristUI.title:SetText(string.format(
     L.WINDOW_TITLE_TOURIST or "Tourist: %s",
@@ -5711,9 +5799,14 @@ local function RefreshTouristWindow(session)
     row.frame:SetAlpha(1)
     row.seq = entry.seq
     row.targetNpcName = entry.targetNpcName
-    row.text:SetText(entry.text or "")
-    row.text:SetWidth(entry.actionText and 180 or 238)
-    row.text:Show()
+    RenderGuideTouristInstructionText(
+      row,
+      entry.text,
+      entry.prefixText,
+      entry.markerText,
+      entry.suffixText,
+      entry.actionText and 180 or 238
+    )
     row.strike:Hide()
     row.target:SetWidth(entry.actionText and 180 or 238)
     row.target:Hide()
@@ -5731,7 +5824,7 @@ local function RefreshTouristWindow(session)
     end
 
     if entry.completing then
-      row.strike:SetWidth(math.min(row.text:GetStringWidth(), 238))
+      row.strike:SetWidth(math.min(row.renderedTextWidth or row.text:GetStringWidth(), 238))
       row.strike:Show()
       if entry.completion then
         entry.completion.row = row
@@ -5746,12 +5839,20 @@ local function RefreshTouristWindow(session)
   end
 
   alertCount = RenderSingleObjectiveRows(alerts, table.getn(display), false)
-  guideTouristUI.frame:SetHeight(34 + ((table.getn(display) + alertCount) * 20))
+  desiredHeight = 34 + ((table.getn(display) + alertCount) * 20)
+  savedHeight = Addon.db
+    and Addon.db.ui
+    and Addon.db.ui.guideWindow
+    and tonumber(Addon.db.ui.guideWindow.height)
+  guideTouristUI.frame:SetHeight(math.max(desiredHeight, savedHeight or desiredHeight))
   guideTouristUI.frame:Show()
 end
 
 local function EnsureGuideTouristRow(index)
   local row = guideTouristUI.rows[index]
+  local fontPath
+  local fontSize
+  local fontFlags
 
   if row then
     return row
@@ -5775,6 +5876,27 @@ local function EnsureGuideTouristRow(index)
   row.text:SetHeight(20)
   row.text:SetJustifyH("LEFT")
   row.text:SetTextColor(1, 1, 1)
+
+  row.inlineMarker = row.frame:CreateFontString(nil, "OVERLAY")
+  row.inlineMarker:SetHeight(20)
+  row.inlineMarker:SetJustifyH("LEFT")
+  row.inlineMarker:SetTextColor(1, 0.82, 0, 1)
+  fontPath, fontSize, fontFlags = row.text:GetFont()
+  if fontPath then
+    if fontFlags then
+      row.inlineMarker:SetFont(fontPath, 15, fontFlags)
+    else
+      row.inlineMarker:SetFont(fontPath, 15)
+    end
+  end
+  row.inlineMarker:Hide()
+
+  row.inlineSuffix = row.frame:CreateFontString(nil, "OVERLAY")
+  row.inlineSuffix:SetHeight(20)
+  row.inlineSuffix:SetJustifyH("LEFT")
+  CopyGroupTrackerFont(row.text, row.inlineSuffix, 12)
+  row.inlineSuffix:SetTextColor(1, 1, 1, 1)
+  row.inlineSuffix:Hide()
 
   row.target = CreateFrame("Button", nil, row.frame)
   row.target:SetPoint("LEFT", row.frame, "LEFT", 4, 0)
@@ -5814,7 +5936,7 @@ local function EnsureGuideTouristRow(index)
   return row
 end
 
-local function SaveGuideTouristWindowPosition()
+local function SaveGuideTouristWindowPosition(saveSize)
   local state
   local point
   local relativeTo
@@ -5833,6 +5955,11 @@ local function SaveGuideTouristWindowPosition()
   state.relativePoint = relativePoint or state.point
   state.x = tonumber(x) or 0
   state.y = tonumber(y) or 0
+
+  if saveSize then
+    state.width = math.max(280, tonumber(guideTouristUI.frame:GetWidth()) or 280)
+    state.height = math.max(34, tonumber(guideTouristUI.frame:GetHeight()) or 34)
+  end
 end
 
 local function RefreshGuideTouristWindow()
@@ -5853,6 +5980,12 @@ local function RefreshGuideTouristWindow()
   local alerts = {}
   local alertCount = 0
   local hiddenCount = 0
+  local instructionText
+  local prefixText
+  local markerText
+  local suffixText
+  local desiredHeight
+  local savedHeight
 
   if not guideTouristUI.frame then
     return
@@ -5988,6 +6121,8 @@ local function RefreshGuideTouristWindow()
     row.marker:SetWidth(18)
     row.text:SetTextColor(1, 1, 1)
     row.text:SetWidth(238)
+    row.inlineMarker:Hide()
+    row.inlineSuffix:Hide()
     row.strike:Hide()
     row.target:Hide()
     row.targetNpcName = nil
@@ -6019,7 +6154,16 @@ local function RefreshGuideTouristWindow()
       row.seq = tonumber(entry.instruction and entry.instruction.seq) or 0
       row.marker:SetText("")
       row.marker:SetWidth(0)
-      row.text:SetText(GuideTouristInstructionText(entry.instruction))
+      instructionText, prefixText, markerText, suffixText = GuideTouristInstructionText(entry.instruction)
+      RenderGuideTouristInstructionText(
+        row,
+        instructionText,
+        prefixText,
+        markerText,
+        suffixText,
+        entry.completing and 238 or 180
+      )
+      row.target:SetWidth(entry.completing and 238 or 180)
       row.targetNpcName = Trim(SafeString(entry.instruction and entry.instruction.npcName))
       if row.targetNpcName ~= "" and type(TargetByName) == "function" then
         row.target:Show()
@@ -6027,14 +6171,12 @@ local function RefreshGuideTouristWindow()
 
       if not entry.completing then
         row.guideInstructionSeq = row.seq
-        row.text:SetWidth(180)
-        row.target:SetWidth(180)
         row.action:SetText(L.INSTRUCTION_REMOVE or "Remove")
         row.action:Show()
       end
 
       if entry.completing then
-        row.strike:SetWidth(math.min(row.text:GetStringWidth(), 238))
+        row.strike:SetWidth(math.min(row.renderedTextWidth or row.text:GetStringWidth(), 238))
         row.strike:Show()
         entry.completion.row = row
       end
@@ -6056,14 +6198,19 @@ local function RefreshGuideTouristWindow()
       guideTouristUI.showHiddenButton:SetText(string.format(L.DISPARITY_SHOW_HIDDEN or "Show Hidden (%d)", hiddenCount))
     end
     guideTouristUI.showHiddenButton:Show()
-    guideTouristUI.frame:SetHeight(58 + ((table.getn(display) + alertCount) * 20))
+    desiredHeight = 58 + ((table.getn(display) + alertCount) * 20)
   else
     if guideTouristUI.showHiddenButton then
       guideTouristUI.showHiddenButton:Hide()
     end
-    guideTouristUI.frame:SetHeight(34 + ((table.getn(display) + alertCount) * 20))
+    desiredHeight = 34 + ((table.getn(display) + alertCount) * 20)
   end
 
+  savedHeight = Addon.db
+    and Addon.db.ui
+    and Addon.db.ui.guideWindow
+    and tonumber(Addon.db.ui.guideWindow.height)
+  guideTouristUI.frame:SetHeight(math.max(desiredHeight, savedHeight or desiredHeight))
   guideTouristUI.frame:Show()
 end
 
@@ -6151,10 +6298,12 @@ local function InitializeGuideTouristWindow()
   state = Addon.db.ui.guideWindow
 
   guideTouristUI.frame = CreateFrame("Frame", "pfQuest_GroupGuideTouristFrame", UIParent)
-  guideTouristUI.frame:SetWidth(280)
-  guideTouristUI.frame:SetHeight(34)
+  guideTouristUI.frame:SetWidth(state.width)
+  guideTouristUI.frame:SetHeight(state.height)
   guideTouristUI.frame:SetFrameStrata("DIALOG")
   guideTouristUI.frame:SetMovable(true)
+  guideTouristUI.frame:SetResizable(true)
+  guideTouristUI.frame:SetMinResize(280, 34)
   guideTouristUI.frame:EnableMouse(true)
   guideTouristUI.frame:RegisterForDrag("LeftButton")
   guideTouristUI.frame:SetBackdrop({
@@ -6190,6 +6339,22 @@ local function InitializeGuideTouristWindow()
     RefreshGuideTouristWindow()
   end)
   guideTouristUI.showHiddenButton:Hide()
+
+  guideTouristUI.resizeGrip = CreateFrame("Button", nil, guideTouristUI.frame)
+  guideTouristUI.resizeGrip:SetPoint("BOTTOMRIGHT", guideTouristUI.frame, "BOTTOMRIGHT", -3, 3)
+  guideTouristUI.resizeGrip:SetWidth(16)
+  guideTouristUI.resizeGrip:SetHeight(16)
+  guideTouristUI.resizeGrip:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
+  guideTouristUI.resizeGrip:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
+  guideTouristUI.resizeGrip:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
+  guideTouristUI.resizeGrip:SetScript("OnMouseDown", function()
+    guideTouristUI.frame:StartSizing("BOTTOMRIGHT")
+  end)
+  guideTouristUI.resizeGrip:SetScript("OnMouseUp", function()
+    guideTouristUI.frame:StopMovingOrSizing()
+    SaveGuideTouristWindowPosition(true)
+    RefreshGuideTouristWindow()
+  end)
 
   guideTouristUI.frame:SetScript("OnDragStart", function()
     guideTouristUI.frame:StartMoving()
