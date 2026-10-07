@@ -2,11 +2,11 @@
 
 ## Current
 - Branch: dev.
-- Version: 0.1.45-dev from pfQuest_Group.toc.
-- Latest addon-affecting development commit: 6bc93f498c90b1b66b2918a9993e33c10285d346 — 0.1.45-dev implements the derived shared single-item/object acquisition alert without adding a protocol instruction or state component. Qualifying objectives are only `item`/`object` with `required == 1`; `monster`/kill and multi-count objectives are excluded. A live paired-Guide remote quest delta from incomplete -> complete plays `Sound\\Interface\\levelup2.wav` once on the Tourist when the Tourist has the matching quest; full snapshots do not play it. Phase 5 now uses a dedicated objective-alert row pool with the Vanilla `INV_Misc_Bag_08` icon: Guide rows show one X/check status per active matching Tourist plus the normalized objective label; Tourist rows show bag + label. Tourist completion changes the Guide X to a check and strikes the Tourist row; when every active matching Tourist is complete, the Guide row is struck. Completed alert rows remain struck while the matching quest/objective still exists and disappear naturally when the quest state no longer supplies the alert.
+- Version: 0.1.46-dev from pfQuest_Group.toc.
+- Latest addon-affecting development commit: 74a7e9d336a3936bfe170f807a71e4dacb279875 — 0.1.46-dev keeps the 0.1.45 shared single-item/object alert behavior and switches its 16x16 row icon from the generic inventory bag to pfQuest's own `Interface\\AddOns\\pfQuest\\img\\icon_npc` texture, matching the small loot-source icon used in pfQuest's item database. No protocol/state/rendering behavior changed beyond that texture path.
 - Handoff checkpoint: the current dev head carrying this status file; always verify the actual remote branch head before resuming.
 - Stable baseline: None. main remains exactly bootstrap commit 4c5c63f074923266566c36c51ce2718d0060166f and is not a runtime release.
-- Goal: runtime-test 0.1.45 shared single-item/object alert semantics and `levelup2.wav` cue without disturbing the stable Group Progress tracker/tooltips or Guide/Tourist instruction renderer. NPC click-targeting, Guide `Remove`, and FLIGHT validation remain pending and should follow after the focused 0.1.45 alert check.
+- Goal: runtime-test 0.1.46 shared single-item/object alert semantics, pfQuest `icon_npc` presentation, and `levelup2.wav` cue without disturbing the stable Group Progress tracker/tooltips or Guide/Tourist instruction renderer. NPC click-targeting, Guide `Remove`, and FLIGHT validation remain pending and should follow after the focused 0.1.46 alert check.
 - Scope boundary: the user explicitly requested post-Phase-6 refinements through the existing owners: Guide reverse-completion feedback, Tourist manual Done, instruction NPC presentation, unified per-player Group Progress rows for both binary and count objectives, dormant/durable Guide sessions, and PFQG-owned group-held objective/map tracking. The old binary tick/cross + remote icon-column presentation is intentionally retired as of 0.1.27-dev. As of 0.1.41 the Tourist panel follows a prepared display-model -> renderer boundary instead of interpreting instruction/session records inside row rendering; NPC-name green/yellow/orange/red colouring is part of that presentation layer.
 
 ## Current Design / Development Contract
@@ -597,7 +597,7 @@ GH8. **PASS — Local completion/removal historical hold without synthetic track
 GH9. **UNTESTED / SKIP-eligible — Ambiguous complex objective mapping.** If a held objective has multiple database sources that cannot be matched safely by localized objective text, verify PFQG prefers tracker-only guidance over showing unrelated map nodes. The deferred Mrs Dalson's Diary / Outhouse / Locked Cabinet chain is not a test target for this case.
 
 ### Next Implementation / Runtime Sequence
-1. Update both Guide and Tourist to exact 0.1.45-dev / 6bc93f498c90b1b66b2918a9993e33c10285d346.
+1. Update both Guide and Tourist to exact 0.1.46-dev / 74a7e9d336a3936bfe170f807a71e4dacb279875.
 2. Use a shared quest with a single-count item/object objective. Before acquisition, no bag alert row should exist.
 3. Have the Guide complete that objective from 0/1 -> 1/1. PASS requires exactly one Tourist `levelup2.wav` cue, a Guide bag row with one X/check slot per active matching Tourist plus the objective label, and a Tourist bag row with the same label.
 4. Have one Tourist complete the same objective. Their Tourist bag row should become struck and the corresponding Guide-side X should become a check. With multiple active matching Tourists, only that Tourist's mark changes.
@@ -608,7 +608,7 @@ GH9. **UNTESTED / SKIP-eligible — Ambiguous complex objective mapping.** If a 
 9. Continue normal play. GH5 remains pending only until a suitable multi-objective world quest arises; GH9 remains skip-eligible. `Strange Sources` and the Mrs Dalson's Diary / Outhouse / Locked Cabinet anomaly remain deferred.
 
 ## Planned / Next Work
-1. Runtime-test 0.1.45 shared single-item/object acquisition alert end-to-end, including sound-on-live-delta, Guide X/check progression, Tourist strike, final Guide strike, reload/resync silence, and 1/1-kill/multi-count exclusion.
+1. Runtime-test 0.1.46 shared single-item/object acquisition alert end-to-end, including pfQuest `icon_npc` artwork, sound-on-live-delta, Guide X/check progression, Tourist strike, final Guide strike, reload/resync silence, and 1/1-kill/multi-count exclusion.
 2. Preserve the stable bidirectional Group Progress tracker/tooltips and the prepared Tourist display-model -> renderer boundary; the new objective-alert rows are intentionally a separate Phase-5 row pool.
 3. Runtime-test the carried NPC click-targeting on both Guide and Tourist instruction rows.
 4. Runtime-test Guide `Remove` as authoritative instruction cancellation: it must remove the same pending row for Guide and Tourist, persist across resync/reload, and remain distinct from completion acknowledgement.
@@ -633,4 +633,4 @@ GH9. **UNTESTED / SKIP-eligible — Ambiguous complex objective mapping.** If a 
 - External/runtime prerequisite: pfQuest.
 
 ## Exact Next Step
-Update both clients to exact 0.1.45-dev / 6bc93f498c90b1b66b2918a9993e33c10285d346. Test one shared 0/1 item/object objective: Guide completion should play `Sound\\Interface\\levelup2.wav` once on the Tourist and create bag rows; Tourist completion should strike their row and change the Guide X to a check; the final matching Tourist should make the Guide row strike. Reload/resync must not replay the sound. A 1/1 kill and any >1 objective must not trigger. After that, continue NPC targeting, Guide `Remove`, ordinary completion, and FLIGHT. No canonical Lua 5.0.3 compiler pass was run.
+Update both clients to exact 0.1.46-dev / 74a7e9d336a3936bfe170f807a71e4dacb279875. Test one shared 0/1 item/object objective: Guide completion should play `Sound\\Interface\\levelup2.wav` once on the Tourist and create rows using pfQuest's small `icon_npc` loot-source artwork; Tourist completion should strike their row and change the Guide X to a check; the final matching Tourist should make the Guide row strike. Reload/resync must not replay the sound. A 1/1 kill and any >1 objective must not trigger. After that, continue NPC targeting, Guide `Remove`, ordinary completion, and FLIGHT. No canonical Lua 5.0.3 compiler pass was run.
