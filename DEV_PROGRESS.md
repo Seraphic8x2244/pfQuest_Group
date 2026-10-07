@@ -609,15 +609,16 @@ GH9. **UNTESTED / SKIP-eligible — Ambiguous complex objective mapping.** If a 
 
 ## Planned / Next Work
 1. Runtime-test 0.1.46 shared single-item/object acquisition alert end-to-end, including pfQuest `icon_npc` artwork, sound-on-live-delta, Guide X/check progression, Tourist strike, final Guide strike, reload/resync silence, and 1/1-kill/multi-count exclusion.
-2. Preserve the stable bidirectional Group Progress tracker/tooltips and the prepared Tourist display-model -> renderer boundary; the new objective-alert rows are intentionally a separate Phase-5 row pool.
-3. Runtime-test the carried NPC click-targeting on both Guide and Tourist instruction rows.
-4. Runtime-test Guide `Remove` as authoritative instruction cancellation: it must remove the same pending row for Guide and Tourist, persist across resync/reload, and remain distinct from completion acknowledgement.
-5. Validate FLIGHT rendering and matching automatic completion on the dedicated Tourist renderer, including wrong-destination non-completion.
-6. Record exact PASS/FAIL observations in DEV_PROGRESS.md; do not upgrade untested matrix items from static evidence.
-7. Continue only remaining relevant gaps: GH5 when available, GH9 if naturally encountered, and any current protocol-v3 regression that appears during normal play.
-8. Fix only demonstrated defects, bumping the dev version for every addon-affecting revision.
-9. Keep the linked Mrs Dalson's Diary / Outhouse / Locked Cabinet anomaly deferred.
-10. After a known-good runtime state exists, review release/promotion readiness separately; do not treat development checks as a runtime test.
+2. **Agreed Phase-5 panel usability refinement, intentionally split into three checkpointed implementation passes to keep each development chat bounded:** (a) enlarge only the inline ACCEPT/TURNIN `!` / `?` marker from the current 12 pt presentation to about 15 pt while keeping all ordinary instruction text at 12 pt, and add persisted width/height plus a bottom-right resize grip; (b) replace auto-growing content height with a resizable viewport and vertical-only scrolling/mouse-wheel support when rows exceed available height, with no horizontal scrollbar; (c) add width-aware display truncation after the existing >18-character NPC-name abbreviation, reserving control/status space first and ellipsizing only the rendered text while preserving the raw full NPC name for exact click-targeting. Preserve the existing clean `Fly to %s` presentation and the dedicated instruction/objective row ownership boundaries.
+3. Preserve the stable bidirectional Group Progress tracker/tooltips and the prepared Tourist display-model -> renderer boundary; the new objective-alert rows are intentionally a separate Phase-5 row pool.
+4. Runtime-test the carried NPC click-targeting on both Guide and Tourist instruction rows.
+5. Runtime-test Guide `Remove` as authoritative instruction cancellation: it must remove the same pending row for Guide and Tourist, persist across resync/reload, and remain distinct from completion acknowledgement.
+6. Validate FLIGHT rendering and matching automatic completion on the dedicated Tourist renderer, including wrong-destination non-completion.
+7. Record exact PASS/FAIL observations in DEV_PROGRESS.md; do not upgrade untested matrix items from static evidence.
+8. Continue only remaining relevant gaps: GH5 when available, GH9 if naturally encountered, and any current protocol-v3 regression that appears during normal play.
+9. Fix only demonstrated defects, bumping the dev version for every addon-affecting revision.
+10. Keep the linked Mrs Dalson's Diary / Outhouse / Locked Cabinet anomaly deferred.
+11. After a known-good runtime state exists, review release/promotion readiness separately; do not treat development checks as a runtime test.
 
 ## Deferred / Out of Scope
 - Raid-FPS investigation is pinned unless the issue recurs with a stronger PFQG correlation; current observation is confounded by several recently updated addons.
