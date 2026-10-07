@@ -2,11 +2,11 @@
 
 ## Current
 - Branch: dev.
-- Version: 0.1.46-dev from pfQuest_Group.toc.
-- Latest addon-affecting development commit: 74a7e9d336a3936bfe170f807a71e4dacb279875 — 0.1.46-dev keeps the 0.1.45 shared single-item/object alert behavior and switches its 16x16 row icon from the generic inventory bag to pfQuest's own `Interface\\AddOns\\pfQuest\\img\\icon_npc` texture, matching the small loot-source icon used in pfQuest's item database. No protocol/state/rendering behavior changed beyond that texture path.
+- Version: 0.1.47-dev from pfQuest_Group.toc.
+- Latest addon-affecting development commit: 068fa089caa8406c35031071f6846a792dbdb126 — Phase-5 panel usability Pass 1. ACCEPT/TURNIN inline `!` / `?` markers render separately at 15 pt while surrounding instruction text remains on the existing 12 pt path; the Guide/Tourist frame has a stock bottom-right resize grip; width/height are persisted in the existing per-character UI state. The current content-driven auto-grow remains in place and a saved enlarged height acts as a minimum. No scrolling, mouse-wheel handling, ScrollFrame, or width-aware truncation was added.
 - Handoff checkpoint: the current dev head carrying this status file; always verify the actual remote branch head before resuming.
 - Stable baseline: None. main remains exactly bootstrap commit 4c5c63f074923266566c36c51ce2718d0060166f and is not a runtime release.
-- Goal: runtime-test 0.1.46 shared single-item/object alert semantics, pfQuest `icon_npc` presentation, and `levelup2.wav` cue without disturbing the stable Group Progress tracker/tooltips or Guide/Tourist instruction renderer. NPC click-targeting, Guide `Remove`, and FLIGHT validation remain pending and should follow after the focused 0.1.46 alert check.
+- Goal: runtime-test 0.1.47 Phase-5 panel usability Pass 1 without disturbing the stable Guide/Tourist renderer, then continue the still-pending 0.1.46 shared single-item/object alert check. NPC click-targeting, Guide `Remove`, and FLIGHT validation remain pending.
 - Scope boundary: the user explicitly requested post-Phase-6 refinements through the existing owners: Guide reverse-completion feedback, Tourist manual Done, instruction NPC presentation, unified per-player Group Progress rows for both binary and count objectives, dormant/durable Guide sessions, and PFQG-owned group-held objective/map tracking. The old binary tick/cross + remote icon-column presentation is intentionally retired as of 0.1.27-dev. As of 0.1.41 the Tourist panel follows a prepared display-model -> renderer boundary instead of interpreting instruction/session records inside row rendering; NPC-name green/yellow/orange/red colouring is part of that presentation layer.
 
 ## Current Design / Development Contract
@@ -129,6 +129,8 @@
 - No Phase 4a/4b/2/5 owner was replaced or duplicated.
 
 ## Recent Relevant Commits
+- 068fa089caa8406c35031071f6846a792dbdb126 — 0.1.47-dev Phase-5 panel usability Pass 1: 15 pt inline ACCEPT/TURNIN marker, bottom-right resize grip, and persisted Guide/Tourist panel width/height; no scrolling or truncation.
+- 74a7e9d336a3936bfe170f807a71e4dacb279875 — 0.1.46-dev switch the shared single-item/object alert row to pfQuest's `icon_npc` artwork.
 - 1f03df4124f2e28e63c6d1ed6cab3204665a0fb5 — 0.1.27-dev persist recovered legacy Guide completion and migrate binary objectives to unified per-player progress rows.
 - 4b1b1bb17b0cfbfc9e1f9864e343745f351454fa — 0.1.26-dev fix for legacy Guide wake completion fallback and group-held native objective presentation.
 - e168712cccb9959646491073393df1639e00a5d5 — 0.1.25-dev persisted PFQG group-held tracker/map/minimap/tooltip guidance with schema-3 Phase-2 last-known state.
@@ -179,6 +181,7 @@
 - Guide ACCEPT/TURNIN instruction creation passed, but NPC-name presentation remains unverified. The current instruction row renderer shows only quest title; `npcName` is still carried in instruction state when resolvable.
 
 ### Implemented / Awaiting Runtime Test
+- 0.1.47-dev Phase-5 panel usability Pass 1: Guide and Tourist ACCEPT/TURNIN rows split only the inline yellow action marker into a dedicated 15 pt FontString while leaving ordinary row text on the existing 12 pt path. FLIGHT keeps the existing `Fly to %s` text path. The shared panel now restores/saves width and height and exposes a bottom-right stock resize grip. Content still auto-grows vertically; saved enlarged height is respected as a minimum until the separate scrolling/viewport pass. Scrolling and truncation are intentionally not implemented.
 - 0.1.29-dev supplemental-node visibility fix: lower pfQuest source searches still receive `cluster=true` so PFQGROUP nodes bypass pfQuest's shared unified clustering cache, but after insertion PFQG clears the stored node metadata's `cluster` display flag for that private need key. This separates cache-isolation semantics from pfQuest's user-facing cluster visibility settings; the node remains in the PFQGROUP namespace and keeps its private need key/tooltip metadata.
 - 0.1.28-dev group-hold relevance fix: a current local equivalent quest now qualifies the held-objective path even if `groupHold.localTracked` was not captured before pfQuest removed the completed objective row. If the local quest is no longer present, the previous same-session `localSeen + localTracked` requirement remains. This targets the demonstrated case where a Tourist finished an objective while the Guide still needed it but the Tourist saw no retained Guide objective.
 - 0.1.27-dev legacy completion permanence: a successful pre-durable live recovery now writes `guideCompleted[seq]`, and normalization preserves stored completed markers for valid records in the same Guide session. Fresh durable instructions continue to use fixed eligibility snapshots and do not use this fallback.
@@ -333,12 +336,24 @@ Exact addon-affecting commit: 1f03df4124f2e28e63c6d1ed6cab3204665a0fb5.
 - Transport/component structure unchanged apart from protocol version: exactly one source call to `SendAddonMessage` remains, and no new synchronized component was added.
 - Canonical Lua 5.0.3 compiler check was not run in this connector-only environment; do not claim a compiler pass.
 
+### Static / Automated Checks — 0.1.47-dev Phase-5 Panel Usability Pass 1
+Exact addon-affecting commit: 068fa089caa8406c35031071f6846a792dbdb126.
+- Version discipline: passed; 0.1.46-dev -> 0.1.47-dev in the same addon-affecting commit.
+- Scope check: the commit changes only `pfQuest_Group.lua` and `pfQuest_Group.toc`.
+- Marker presentation check: Guide and Tourist instruction row constructors each create a dedicated inline action-marker FontString using the existing row font path/flags at 15 pt; ordinary Tourist text and suffix remain on the existing 12 pt font path. The existing Guide normal-text path is unchanged.
+- FLIGHT check: `L.INSTRUCTION_FLIGHT or "|cffffd100Fly|r to %s"` remains unchanged and does not receive the enlarged action-marker treatment.
+- Resize persistence check: `guideWindow.width` / `height` normalize into the existing UI state, initialize the panel size, and are saved when the bottom-right grip finishes sizing. Position-only drag still saves position without overwriting size.
+- Pass-boundary check: no `OnMouseWheel` handler or `ScrollFrame` was introduced; no width-aware ellipsizing/truncation behavior was added.
+- Vertical behavior remains intentionally transitional for Pass 1: content-driven auto-grow is retained and saved enlarged height is treated as a minimum. Shrinking below required content height is deferred until the scrolling/viewport pass.
+- Canonical Lua 5.0.3 full-file compiler pass was not run because the connector-backed repository/checker files are not available in the executable environment; this is static inspection only, not an in-game PASS.
+
 ### Checks Not Actually Runnable
 - Exact full-file Lua 5.3.6 parser smoke: not run against the committed pfQuest_Group.lua blob because GitHub connector-backed repository bytes are not materialized into the executable container.
 - Canonical Lua 5.0.3 compiler check: not run / unavailable against the exact Phase 6 blob. Seraphic8x2244/VanillaTemplate main at 6980e95476a72c47a461f7c78ce9e4f649c829f contains the canonical tools/lua50 checker and vendored Lua 5.0.3 source, and the executable environment has a working C compiler, but the private connector-backed checker/source and addon blob are not mounted into that executable environment.
 - Broad in-game testing is in progress on the exact current addon build; automated/compiler limitations above remain separate from the user runtime results.
 
 ### Current Issues / Validation Debt
+- 0.1.47-dev Phase-5 panel usability Pass 1 is implemented but runtime-pending. Validate 15 pt ACCEPT/TURNIN markers on both Guide and Tourist, ordinary 12 pt text/unchanged FLIGHT presentation, bottom-right resizing, and width/height persistence across reload. Pass 2 scrolling/viewport and Pass 3 truncation remain deliberately unimplemented.
 - 0.1.45-dev shared single-item/object alert is runtime-pending. Static inspection confirms the sound path is `Sound\\Interface\\levelup2.wav`, sound playback occurs only in remote quest delta application (not full-sync application), the qualifier is strictly `required == 1` plus `item`/`object`, and the new presentation uses a separate objective-row pool rather than modifying the stable instruction-row layout. The rows currently remain visibly struck after completion until the matching quest/objective leaves synchronized state; there is no completion fade in this first implementation.
 - 0.1.43-dev runtime observation: both clients see each other's quest/objective progress in the tracker and the user describes that path as very stable, but map/minimap tooltip presentation is asymmetric. The Guide sees Gaia's progress through PFQGROUP's retained Group Hold node tooltip; Gaia's ordinary incomplete pfQuest node still uses pfQuest's native local-only tooltip and therefore does not show the Guide's progress. 0.1.44 fixes the presentation boundary by augmenting ordinary pfQuest quest tooltips with the same synchronized group-progress model instead of creating duplicate PFQGROUP nodes or changing Group Hold semantics.
 - 0.1.43-dev Guide removal is runtime-pending. The Guide `Remove` button sets a distinct durable removal flag rather than faking completion; Guide/Tourist pending snapshots omit removed records, and late Tourist completion acknowledgements for those records are ignored. The existing full-state snapshot is intentionally used to propagate the changed authoritative pending set because protocol-v3 instruction deltas are append-only and do not encode removals.
@@ -363,6 +378,7 @@ Exact addon-affecting commit: 1f03df4124f2e28e63c6d1ed6cab3204665a0fb5.
 ## Testing
 
 ### Latest Runtime Result
+- 0.1.47-dev implemented / runtime pending: Phase-5 panel usability Pass 1 only. No in-game result has been reported yet for the enlarged inline action marker, resize grip, or persisted dimensions.
 - 0.1.45-dev implemented / runtime pending: shared single-item/object alert now derives entirely from synchronized quest state. Tourist one-shot audio uses `Sound\\Interface\\levelup2.wav` on a live Guide incomplete -> complete delta only. Guide/Tourist bag rows and X/check/strike presentation are derived locally from current matching quest state; no new protocol wire/state was introduced.
 - 0.1.44-dev runtime PASS: user confirms the symmetric shared-quest map/minimap tooltip now works. Together with the prior tracker report, bidirectional Group Progress presentation is currently described as stable.
 - 0.1.43-dev runtime PASS for bidirectional Group Progress tracker stability: user reports both Guide and Tourist consistently see each other in the quest tracker and describes it as very stable. Runtime FAIL/ASYMMETRY for map tooltip presentation: Guide receives Gaia progress in a PFQGROUP tooltip, while Gaia does not receive the Guide's progress on her ordinary pfQuest quest node. State synchronization is therefore not implicated; 0.1.44 targets only native tooltip augmentation.
@@ -597,19 +613,18 @@ GH8. **PASS — Local completion/removal historical hold without synthetic track
 GH9. **UNTESTED / SKIP-eligible — Ambiguous complex objective mapping.** If a held objective has multiple database sources that cannot be matched safely by localized objective text, verify PFQG prefers tracker-only guidance over showing unrelated map nodes. The deferred Mrs Dalson's Diary / Outhouse / Locked Cabinet chain is not a test target for this case.
 
 ### Next Implementation / Runtime Sequence
-1. Update both Guide and Tourist to exact 0.1.46-dev / 74a7e9d336a3936bfe170f807a71e4dacb279875.
-2. Use a shared quest with a single-count item/object objective. Before acquisition, no bag alert row should exist.
-3. Have the Guide complete that objective from 0/1 -> 1/1. PASS requires exactly one Tourist `levelup2.wav` cue, a Guide bag row with one X/check slot per active matching Tourist plus the objective label, and a Tourist bag row with the same label.
-4. Have one Tourist complete the same objective. Their Tourist bag row should become struck and the corresponding Guide-side X should become a check. With multiple active matching Tourists, only that Tourist's mark changes.
-5. When the final active matching Tourist completes it, all Guide marks should be checks and the Guide bag row should become struck. Struck rows may remain until the matching quest/objective leaves synchronized state.
-6. Reload/resync while the objective is already complete. Rows may reconstruct from synchronized state, but the Tourist sound must not replay.
-7. Verify a 1/1 monster kill and any item/object objective requiring more than one do not create these alert rows or sounds.
-8. Then continue the carried checks: NPC click-targeting, Guide `Remove`, one ordinary instruction completion, and one matching FLIGHT instruction.
-9. Continue normal play. GH5 remains pending only until a suitable multi-objective world quest arises; GH9 remains skip-eligible. `Strange Sources` and the Mrs Dalson's Diary / Outhouse / Locked Cabinet anomaly remain deferred.
+1. Update both Guide and Tourist to exact 0.1.47-dev / 068fa089caa8406c35031071f6846a792dbdb126.
+2. Create or observe one ACCEPT and one TURNIN instruction on both Guide and Tourist. PASS requires the inline yellow `!` / `?` to be visibly about 15 pt while the NPC/quest text remains at the existing 12 pt size. Confirm `Fly to %s` still looks unchanged.
+3. Drag the bottom-right resize grip wider and taller. Reload the UI/client and confirm the saved width and enlarged height return. Position dragging should continue to work. Do not expect the panel to stay shorter than its current content yet; that belongs to Pass 2 scrolling/viewport.
+4. Watch for PFQG Lua errors during steps 2-3. Record exact PASS/FAIL observations before starting any scrolling or truncation work.
+5. Then run the pending shared single-item/object alert check carried from 0.1.46: Guide 0/1 item/object completion should play `levelup2.wav` once on the Tourist, create the expected `icon_npc` rows, update Guide X/check state as matching Tourists complete, and remain silent on reload/resync.
+6. Verify a 1/1 monster kill and any item/object objective requiring more than one do not create those alert rows or sounds.
+7. Continue the carried checks: NPC click-targeting, Guide `Remove`, one ordinary instruction completion, and one matching FLIGHT instruction.
+8. Continue normal play. GH5 remains pending only until a suitable multi-objective world quest arises; GH9 remains skip-eligible. `Strange Sources` and the Mrs Dalson's Diary / Outhouse / Locked Cabinet anomaly remain deferred.
 
 ## Planned / Next Work
 1. Runtime-test 0.1.46 shared single-item/object acquisition alert end-to-end, including pfQuest `icon_npc` artwork, sound-on-live-delta, Guide X/check progression, Tourist strike, final Guide strike, reload/resync silence, and 1/1-kill/multi-count exclusion.
-2. **Agreed Phase-5 panel usability refinement, intentionally split into three checkpointed implementation passes to keep each development chat bounded:** (a) enlarge only the inline ACCEPT/TURNIN `!` / `?` marker from the current 12 pt presentation to about 15 pt while keeping all ordinary instruction text at 12 pt, and add persisted width/height plus a bottom-right resize grip; (b) replace auto-growing content height with a resizable viewport and vertical-only scrolling/mouse-wheel support when rows exceed available height, with no horizontal scrollbar; (c) add width-aware display truncation after the existing >18-character NPC-name abbreviation, reserving control/status space first and ellipsizing only the rendered text while preserving the raw full NPC name for exact click-targeting. Preserve the existing clean `Fly to %s` presentation and the dedicated instruction/objective row ownership boundaries.
+2. **Agreed Phase-5 panel usability refinement, intentionally split into three checkpointed implementation passes:** (a) **IMPLEMENTED / RUNTIME PENDING in 0.1.47-dev** — enlarge only inline ACCEPT/TURNIN `!` / `?` to about 15 pt while ordinary text remains 12 pt, add persisted width/height and a bottom-right resize grip; (b) **NOT IMPLEMENTED** — replace auto-growing content height with a resizable viewport and vertical-only scrolling/mouse-wheel support when rows exceed available height, with no horizontal scrollbar; (c) **NOT IMPLEMENTED** — add width-aware display truncation after the existing >18-character NPC-name abbreviation, reserving control/status space first and ellipsizing only rendered text while preserving the raw full NPC name for exact click-targeting. Preserve the existing clean `Fly to %s` presentation and dedicated instruction/objective row ownership boundaries.
 3. Preserve the stable bidirectional Group Progress tracker/tooltips and the prepared Tourist display-model -> renderer boundary; the new objective-alert rows are intentionally a separate Phase-5 row pool.
 4. Runtime-test the carried NPC click-targeting on both Guide and Tourist instruction rows.
 5. Runtime-test Guide `Remove` as authoritative instruction cancellation: it must remove the same pending row for Guide and Tourist, persist across resync/reload, and remain distinct from completion acknowledgement.
@@ -634,4 +649,4 @@ GH9. **UNTESTED / SKIP-eligible — Ambiguous complex objective mapping.** If a 
 - External/runtime prerequisite: pfQuest.
 
 ## Exact Next Step
-Update both clients to exact 0.1.46-dev / 74a7e9d336a3936bfe170f807a71e4dacb279875. Test one shared 0/1 item/object objective: Guide completion should play `Sound\\Interface\\levelup2.wav` once on the Tourist and create rows using pfQuest's small `icon_npc` loot-source artwork; Tourist completion should strike their row and change the Guide X to a check; the final matching Tourist should make the Guide row strike. Reload/resync must not replay the sound. A 1/1 kill and any >1 objective must not trigger. After that, continue NPC targeting, Guide `Remove`, ordinary completion, and FLIGHT. No canonical Lua 5.0.3 compiler pass was run.
+Update both clients to exact 0.1.47-dev / 068fa089caa8406c35031071f6846a792dbdb126 and runtime-test Phase-5 panel usability Pass 1 only: verify ACCEPT/TURNIN inline `!` / `?` markers are about 15 pt while ordinary NPC/quest text remains 12 pt; verify `Fly to %s` remains unchanged; enlarge the panel with the bottom-right grip and reload to confirm width/height persistence. Do not implement or expect vertical scrolling, mouse-wheel support, horizontal scrolling, or width-aware truncation yet. After recording Pass-1 results, return to the pending shared 0/1 item/object alert and carried NPC-targeting / Guide `Remove` / FLIGHT checks. No canonical Lua 5.0.3 compiler pass was run.
