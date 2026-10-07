@@ -12,6 +12,8 @@ local DB_SCHEMA_VERSION = 3
 local CHUNK_SIZE = 180
 local MAX_CHUNKS = 64
 local INCOMING_TIMEOUT = 30
+local SINGLE_OBJECTIVE_SOUND = "Sound\\Interface\\levelup2.wav"
+local SINGLE_OBJECTIVE_ICON = "Interface\\Icons\\INV_Misc_Bag_08"
 
 local frame = CreateFrame("Frame")
 local questScanFrame = CreateFrame("Frame")
@@ -43,6 +45,7 @@ local guideTouristUI = {
   title = nil,
   rows = {},
   touristRows = {},
+  objectiveRows = {},
   completing = {},
   completed = {},
   completionDuration = 0.9,
@@ -1579,6 +1582,132 @@ local function QuestSnapshot()
   return EncodeQuestWire("S", questState.revision, questState.quests)
 end
 
+local function SingleObjectiveDone(objective)
+  local current
+  local required
+
+  if not objective then
+    return false
+  end
+
+  if objective.done then
+    return true
+  end
+
+  current = tonumber(objective.current) or 0
+  required = tonumber(objective.required) or 0
+  return required > 0 and current >= required
+end
+
+local function IsSharedSingleObjective(objective)
+  local objectiveType = string.lower(SafeString(objective and objective.objectiveType))
+  local required = tonumber(objective and objective.required) or 0
+
+  return required == 1 and (objectiveType == "item" or objectiveType == "object")
+end
+
+local function FindQuestStateMatch(state, sourceQuest)
+  local key
+  local quest
+
+  if not state or not state.ready or not sourceQuest then
+    return nil
+  end
+
+  if sourceQuest.questID then
+    quest = state.quests and state.quests[QuestKey(sourceQuest.questID, sourceQuest.title)]
+    if quest then
+      return quest
+    end
+  end
+
+  for key, quest in pairs(state.quests or {}) do
+    if quest.title == sourceQuest.title and (not sourceQuest.questID or not quest.questID) then
+      return quest
+    end
+  end
+
+  return nil
+end
+
+local function FindQuestObjective(quest, objectiveIndex)
+  local index
+  local objective
+
+  objectiveIndex = tonumber(objectiveIndex)
+  if not quest or not objectiveIndex then
+    return nil
+  end
+
+  for index = 1, table.getn(quest.objectives or {}) do
+    objective = quest.objectives[index]
+    if tonumber(objective and objective.index) == objectiveIndex then
+      return objective
+    end
+  end
+
+  return nil
+end
+
+local function RemoteGuideSingleObjectiveCompleted(sender, previousQuest, nextQuest)
+  local session = Addon.db and Addon.db.session
+  local senderKey = NormalizeName(sender)
+  local guideKey
+  local peer
+  local remoteSession
+  local localQuest
+  local index
+  local nextObjective
+  local previousObjective
+  local localObjective
+
+  if not session
+    or session.mode ~= "TOURIST"
+    or not session.guideName
+    or not session.guideSessionId
+    or session.joinBaseline == nil
+    or not previousQuest
+    or not nextQuest then
+    return false
+  end
+
+  guideKey = NormalizeName(session.guideName)
+  if not senderKey or senderKey ~= guideKey then
+    return false
+  end
+
+  peer = peers[senderKey]
+  remoteSession = peer and peer.session
+  if not peer
+    or not peer.compatible
+    or not remoteSession
+    or remoteSession.mode ~= "GUIDE"
+    or remoteSession.guideSessionId ~= session.guideSessionId then
+    return false
+  end
+
+  localQuest = FindQuestStateMatch(questState, nextQuest)
+  if not localQuest then
+    return false
+  end
+
+  for index = 1, table.getn(nextQuest.objectives or {}) do
+    nextObjective = nextQuest.objectives[index]
+    if IsSharedSingleObjective(nextObjective) and SingleObjectiveDone(nextObjective) then
+      previousObjective = FindQuestObjective(previousQuest, nextObjective.index or index)
+      localObjective = FindQuestObjective(localQuest, nextObjective.index or index)
+      if previousObjective
+        and localObjective
+        and IsSharedSingleObjective(localObjective)
+        and not SingleObjectiveDone(previousObjective) then
+        return true
+      end
+    end
+  end
+
+  return false
+end
+
 local function ApplyRemoteQuestFull(sender, payload)
   local decoded = DecodeQuestWire(payload, "S")
   local senderKey = NormalizeName(sender)
@@ -1645,7 +1774,15 @@ local function ApplyRemoteQuestDelta(sender, payload)
     return
   end
 
+  local playSingleObjectiveCue = false
+  local previousQuest
+
   for key, quest in pairs(decoded.quests) do
+    previousQuest = peer.questState.quests[key]
+    if not playSingleObjectiveCue
+      and RemoteGuideSingleObjectiveCompleted(sender, previousQuest, quest) then
+      playSingleObjectiveCue = true
+    end
     peer.questState.quests[key] = quest
   end
 
@@ -1655,6 +1792,11 @@ local function ApplyRemoteQuestDelta(sender, payload)
 
   peer.questState.revision = decoded.revision
   peer.questState.ready = true
+
+  if playSingleObjectiveCue and type(PlaySoundFile) == "function" then
+    PlaySoundFile(SINGLE_OBJECTIVE_SOUND)
+  end
+
   Emit("REMOTE_QUEST_STATE_CHANGED", sender, CopyQuestState(peer.questState))
 end
 
@@ -5124,6 +5266,186 @@ local function SetGuideDisparityHidden(disparityKey, hidden)
   end
 end
 
+local function SingleObjectiveAlertText(quest, objective)
+  local text = Trim(SafeString(objective and objective.text))
+
+  if text ~= "" then
+    return text
+  end
+
+  return SafeString(quest and quest.title)
+end
+
+local function BuildGuideSingleObjectiveAlerts(session)
+  local output = {}
+  local guideKey
+  local questKey
+  local quest
+  local objectiveIndex
+  local objective
+  local participants
+  local allComplete
+  local partyIndex
+  local unit
+  local name
+  local normalized
+  local member
+  local peer
+  local remoteSession
+  local remoteQuest
+  local remoteObjective
+
+  if not session
+    or session.mode ~= "GUIDE"
+    or not session.guideSessionId
+    or not questState.ready then
+    return output
+  end
+
+  guideKey = NormalizeName(playerName)
+
+  for questKey, quest in pairs(questState.quests or {}) do
+    for objectiveIndex = 1, table.getn(quest.objectives or {}) do
+      objective = quest.objectives[objectiveIndex]
+      if IsSharedSingleObjective(objective) and SingleObjectiveDone(objective) then
+        participants = {}
+        allComplete = true
+
+        for partyIndex = 1, 4 do
+          unit = "party" .. partyIndex
+          if UnitExists(unit) then
+            name = UnitName(unit)
+            normalized = NormalizeName(name)
+            member = normalized and party[normalized]
+            peer = normalized and peers[normalized]
+            remoteSession = peer and peer.session
+
+            if member
+              and peer
+              and peer.compatible
+              and remoteSession
+              and remoteSession.mode == "TOURIST"
+              and NormalizeName(remoteSession.guideName) == guideKey
+              and remoteSession.guideSessionId == session.guideSessionId
+              and remoteSession.joinBaseline ~= nil
+              and peer.questState
+              and peer.questState.ready then
+              remoteQuest = FindRemoteTrackerQuest(peer.questState, quest)
+              remoteObjective = remoteQuest and FindQuestObjective(remoteQuest, objective.index or objectiveIndex)
+              if remoteObjective and IsSharedSingleObjective(remoteObjective) then
+                table.insert(participants, {
+                  partyIndex = partyIndex,
+                  name = peer.name or member.name or name,
+                  complete = SingleObjectiveDone(remoteObjective)
+                })
+                if not SingleObjectiveDone(remoteObjective) then
+                  allComplete = false
+                end
+              end
+            end
+          end
+        end
+
+        if table.getn(participants) > 0 then
+          table.insert(output, {
+            key = SafeString(quest.key or questKey) .. "#" .. SafeString(objective.index or objectiveIndex),
+            quest = quest,
+            objective = objective,
+            text = SingleObjectiveAlertText(quest, objective),
+            participants = participants,
+            complete = allComplete
+          })
+        end
+      end
+    end
+  end
+
+  table.sort(output, function(left, right)
+    local leftTitle = string.lower(SafeString(left.quest and left.quest.title))
+    local rightTitle = string.lower(SafeString(right.quest and right.quest.title))
+
+    if leftTitle ~= rightTitle then
+      return leftTitle < rightTitle
+    end
+
+    return SafeString(left.key) < SafeString(right.key)
+  end)
+
+  return output
+end
+
+local function BuildTouristSingleObjectiveAlerts(session)
+  local output = {}
+  local guideKey
+  local peer
+  local remoteSession
+  local questKey
+  local guideQuest
+  local localQuest
+  local objectiveIndex
+  local guideObjective
+  local localObjective
+
+  if not session
+    or session.mode ~= "TOURIST"
+    or not session.guideName
+    or not session.guideSessionId
+    or session.joinBaseline == nil
+    or not questState.ready then
+    return output
+  end
+
+  guideKey = NormalizeName(session.guideName)
+  peer = guideKey and peers[guideKey]
+  remoteSession = peer and peer.session
+  if not peer
+    or not peer.compatible
+    or not remoteSession
+    or remoteSession.mode ~= "GUIDE"
+    or remoteSession.guideSessionId ~= session.guideSessionId
+    or not peer.questState
+    or not peer.questState.ready then
+    return output
+  end
+
+  for questKey, guideQuest in pairs(peer.questState.quests or {}) do
+    localQuest = FindRemoteTrackerQuest(questState, guideQuest)
+    if localQuest then
+      for objectiveIndex = 1, table.getn(guideQuest.objectives or {}) do
+        guideObjective = guideQuest.objectives[objectiveIndex]
+        localObjective = FindQuestObjective(localQuest, guideObjective and (guideObjective.index or objectiveIndex))
+        if guideObjective
+          and localObjective
+          and IsSharedSingleObjective(guideObjective)
+          and IsSharedSingleObjective(localObjective)
+          and SingleObjectiveDone(guideObjective) then
+          table.insert(output, {
+            key = SafeString(guideQuest.key or questKey) .. "#" .. SafeString(guideObjective.index or objectiveIndex),
+            quest = guideQuest,
+            objective = guideObjective,
+            text = SingleObjectiveAlertText(guideQuest, guideObjective),
+            participants = nil,
+            complete = SingleObjectiveDone(localObjective)
+          })
+        end
+      end
+    end
+  end
+
+  table.sort(output, function(left, right)
+    local leftTitle = string.lower(SafeString(left.quest and left.quest.title))
+    local rightTitle = string.lower(SafeString(right.quest and right.quest.title))
+
+    if leftTitle ~= rightTitle then
+      return leftTitle < rightTitle
+    end
+
+    return SafeString(left.key) < SafeString(right.key)
+  end)
+
+  return output
+end
+
 local function BuildTouristDisplayRows()
   local instructions = Addon.GetTouristInstructions()
   local display = {}
@@ -5226,6 +5548,132 @@ local function EnsureTouristRow(index)
   return row
 end
 
+local function EnsureSingleObjectiveRow(index)
+  local row = guideTouristUI.objectiveRows[index]
+  local slotIndex
+  local xText
+  local check
+
+  if row then
+    return row
+  end
+
+  row = {}
+  row.frame = CreateFrame("Frame", nil, guideTouristUI.frame)
+  row.frame:SetWidth(264)
+  row.frame:SetHeight(20)
+
+  row.icon = row.frame:CreateTexture(nil, "ARTWORK")
+  row.icon:SetPoint("LEFT", row.frame, "LEFT", 1, 0)
+  row.icon:SetWidth(16)
+  row.icon:SetHeight(16)
+  row.icon:SetTexture(SINGLE_OBJECTIVE_ICON)
+
+  row.statusX = {}
+  row.statusCheck = {}
+  for slotIndex = 1, 4 do
+    xText = row.frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    xText:SetPoint("LEFT", row.frame, "LEFT", 21 + ((slotIndex - 1) * 12), 0)
+    xText:SetWidth(10)
+    xText:SetHeight(18)
+    xText:SetJustifyH("CENTER")
+    xText:SetText("X")
+    xText:SetTextColor(1, 0.25, 0.2)
+    xText:Hide()
+    row.statusX[slotIndex] = xText
+
+    check = row.frame:CreateTexture(nil, "OVERLAY")
+    check:SetPoint("LEFT", row.frame, "LEFT", 21 + ((slotIndex - 1) * 12), 0)
+    check:SetWidth(11)
+    check:SetHeight(11)
+    check:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
+    check:SetVertexColor(0.25, 1, 0.25)
+    check:Hide()
+    row.statusCheck[slotIndex] = check
+  end
+
+  row.text = row.frame:CreateFontString(nil, "OVERLAY")
+  row.text:SetHeight(20)
+  row.text:SetJustifyH("LEFT")
+  CopyGroupTrackerFont(guideTouristUI.title, row.text, 12)
+  row.text:SetTextColor(1, 1, 1, 1)
+
+  row.strike = row.frame:CreateTexture(nil, "OVERLAY")
+  row.strike:SetHeight(1)
+  row.strike:SetTexture(1, 0.82, 0)
+  row.strike:Hide()
+
+  guideTouristUI.objectiveRows[index] = row
+  return row
+end
+
+local function HideSingleObjectiveRows()
+  local index
+
+  for index = 1, table.getn(guideTouristUI.objectiveRows) do
+    guideTouristUI.objectiveRows[index].frame:Hide()
+  end
+end
+
+local function RenderSingleObjectiveRows(alerts, startIndex, guideMode)
+  local index
+  local row
+  local alert
+  local slotIndex
+  local participant
+  local textLeft
+
+  for index = 1, table.getn(alerts) do
+    alert = alerts[index]
+    row = EnsureSingleObjectiveRow(index)
+    row.frame:ClearAllPoints()
+    row.frame:SetPoint("TOPLEFT", guideTouristUI.frame, "TOPLEFT", 8, -28 - ((startIndex + index - 1) * 20))
+    row.frame:SetAlpha(1)
+
+    for slotIndex = 1, 4 do
+      row.statusX[slotIndex]:Hide()
+      row.statusCheck[slotIndex]:Hide()
+    end
+
+    if guideMode then
+      for slotIndex = 1, math.min(4, table.getn(alert.participants or {})) do
+        participant = alert.participants[slotIndex]
+        if participant.complete then
+          row.statusCheck[slotIndex]:Show()
+        else
+          row.statusX[slotIndex]:Show()
+        end
+      end
+      textLeft = 71
+    else
+      textLeft = 21
+    end
+
+    row.text:ClearAllPoints()
+    row.text:SetPoint("LEFT", row.frame, "LEFT", textLeft, 0)
+    row.text:SetWidth(258 - textLeft)
+    row.text:SetText(alert.text or "")
+    row.text:Show()
+
+    row.strike:ClearAllPoints()
+    row.strike:SetPoint("LEFT", row.text, "LEFT", 0, 0)
+    row.strike:SetWidth(math.min(row.text:GetStringWidth(), 258 - textLeft))
+    if alert.complete then
+      row.strike:Show()
+    else
+      row.strike:Hide()
+    end
+
+    row.frame:Show()
+  end
+
+  for index = table.getn(alerts) + 1, table.getn(guideTouristUI.objectiveRows) do
+    guideTouristUI.objectiveRows[index].frame:Hide()
+  end
+
+  return table.getn(alerts)
+end
+
 local function HideTouristRows()
   local index
 
@@ -5236,9 +5684,11 @@ end
 
 local function RefreshTouristWindow(session)
   local display = BuildTouristDisplayRows()
+  local alerts = BuildTouristSingleObjectiveAlerts(session)
   local index
   local entry
   local row
+  local alertCount
 
   guideTouristUI.title:SetText(string.format(
     L.WINDOW_TITLE_TOURIST or "Tourist: %s",
@@ -5295,7 +5745,8 @@ local function RefreshTouristWindow(session)
     guideTouristUI.touristRows[index].frame:Hide()
   end
 
-  guideTouristUI.frame:SetHeight(34 + (table.getn(display) * 20))
+  alertCount = RenderSingleObjectiveRows(alerts, table.getn(display), false)
+  guideTouristUI.frame:SetHeight(34 + ((table.getn(display) + alertCount) * 20))
   guideTouristUI.frame:Show()
 end
 
@@ -5399,6 +5850,8 @@ local function RefreshGuideTouristWindow()
   local entry
   local title
   local disparity
+  local alerts = {}
+  local alertCount = 0
   local hiddenCount = 0
 
   if not guideTouristUI.frame then
@@ -5419,6 +5872,7 @@ local function RefreshGuideTouristWindow()
       guideTouristUI.rows[index].frame:Hide()
     end
     HideTouristRows()
+    HideSingleObjectiveRows()
     guideTouristUI.frame:Hide()
     return
   end
@@ -5442,6 +5896,7 @@ local function RefreshGuideTouristWindow()
     title = L.WINDOW_TITLE_GUIDE or "Guide"
     instructions = Addon.GetGuideInstructions()
     disparities = BuildGuideDisparities(session)
+    alerts = BuildGuideSingleObjectiveAlerts(session)
   else
     title = string.format(L.WINDOW_TITLE_TOURIST or "Tourist: %s", SafeString(session.guideName))
     instructions = Addon.GetTouristInstructions()
@@ -5592,6 +6047,8 @@ local function RefreshGuideTouristWindow()
     guideTouristUI.rows[index].frame:Hide()
   end
 
+  alertCount = RenderSingleObjectiveRows(alerts, table.getn(display), true)
+
   if session.mode == "GUIDE" and hiddenCount > 0 and guideTouristUI.showHiddenButton then
     if guideTouristUI.showHidden then
       guideTouristUI.showHiddenButton:SetText(L.DISPARITY_HIDE_HIDDEN or "Hide Hidden")
@@ -5599,12 +6056,12 @@ local function RefreshGuideTouristWindow()
       guideTouristUI.showHiddenButton:SetText(string.format(L.DISPARITY_SHOW_HIDDEN or "Show Hidden (%d)", hiddenCount))
     end
     guideTouristUI.showHiddenButton:Show()
-    guideTouristUI.frame:SetHeight(58 + (table.getn(display) * 20))
+    guideTouristUI.frame:SetHeight(58 + ((table.getn(display) + alertCount) * 20))
   else
     if guideTouristUI.showHiddenButton then
       guideTouristUI.showHiddenButton:Hide()
     end
-    guideTouristUI.frame:SetHeight(34 + (table.getn(display) * 20))
+    guideTouristUI.frame:SetHeight(34 + ((table.getn(display) + alertCount) * 20))
   end
 
   guideTouristUI.frame:Show()
