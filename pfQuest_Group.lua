@@ -59,7 +59,7 @@ local guideTouristUI = {
   defaultWidth = 300,
   defaultHeight = 154,
   minWidth = 300,
-  minHeight = 54,
+  minHeight = 74,
   refresh = nil
 }
 
