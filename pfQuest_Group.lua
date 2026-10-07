@@ -13,7 +13,7 @@ local CHUNK_SIZE = 180
 local MAX_CHUNKS = 64
 local INCOMING_TIMEOUT = 30
 local SINGLE_OBJECTIVE_SOUND = "Sound\\Interface\\levelup2.wav"
-local SINGLE_OBJECTIVE_ICON = "Interface\\Icons\\INV_Misc_Bag_08"
+local SINGLE_OBJECTIVE_ICON = "Interface\\AddOns\\pfQuest\\img\\icon_npc"
 
 local frame = CreateFrame("Frame")
 local questScanFrame = CreateFrame("Frame")
