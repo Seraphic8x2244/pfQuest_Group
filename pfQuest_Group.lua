@@ -5619,37 +5619,144 @@ local function EnsureTouristRow(index)
   return row
 end
 
+guideTouristUI.GetRowWidth = function()
+  local viewportWidth = guideTouristUI.scrollFrame and tonumber(guideTouristUI.scrollFrame:GetWidth())
+  local frameWidth
+
+  if not viewportWidth or viewportWidth <= 0 then
+    frameWidth = guideTouristUI.frame and tonumber(guideTouristUI.frame:GetWidth())
+      or guideTouristUI.defaultWidth
+    viewportWidth = math.max(1, frameWidth - 22)
+  end
+
+  if guideTouristUI.scrollChild then
+    guideTouristUI.scrollChild:SetWidth(viewportWidth)
+  end
+
+  return math.max(1, viewportWidth - 14)
+end
+
+guideTouristUI.EllipsizeFontString = function(fontString, text, maxWidth)
+  local rawText = SafeString(text)
+  local availableWidth = math.max(0, tonumber(maxWidth) or 0)
+  local measureWidth = 10000
+  local fullWidth
+  local ellipsis = "..."
+  local ellipsisWidth
+  local rendered = ellipsis
+  local renderedWidth = 0
+  local prefix = ""
+  local activeColor = false
+  local stringIndex = 1
+  local stringLength = string.len(rawText)
+  local token
+  local candidate
+  local candidateWidth
+
+  if availableWidth <= 0 then
+    fontString:SetWidth(1)
+    fontString:SetText("")
+    return "", 0, rawText ~= ""
+  end
+
+  fontString:SetWidth(measureWidth)
+  fontString:SetText(rawText)
+  fullWidth = fontString:GetStringWidth()
+  if fullWidth <= availableWidth then
+    fontString:SetWidth(availableWidth)
+    fontString:SetText(rawText)
+    return rawText, fullWidth, false
+  end
+
+  fontString:SetText(ellipsis)
+  ellipsisWidth = fontString:GetStringWidth()
+  if ellipsisWidth > availableWidth then
+    fontString:SetWidth(availableWidth)
+    fontString:SetText("")
+    return "", 0, true
+  end
+  renderedWidth = ellipsisWidth
+
+  while stringIndex <= stringLength do
+    token = string.sub(rawText, stringIndex, stringIndex + 1)
+    if token == "|c" and stringIndex + 9 <= stringLength then
+      prefix = prefix .. string.sub(rawText, stringIndex, stringIndex + 9)
+      activeColor = true
+      stringIndex = stringIndex + 10
+    elseif token == "|r" then
+      prefix = prefix .. token
+      activeColor = false
+      stringIndex = stringIndex + 2
+    else
+      prefix = prefix .. string.sub(rawText, stringIndex, stringIndex)
+      candidate = prefix .. ellipsis .. (activeColor and "|r" or "")
+      fontString:SetText(candidate)
+      candidateWidth = fontString:GetStringWidth()
+      if candidateWidth > availableWidth then
+        break
+      end
+      rendered = candidate
+      renderedWidth = candidateWidth
+      stringIndex = stringIndex + 1
+    end
+  end
+
+  fontString:SetWidth(availableWidth)
+  fontString:SetText(rendered)
+  return rendered, renderedWidth, true
+end
+
 local function RenderGuideTouristInstructionText(row, text, prefixText, markerText, suffixText, availableWidth)
   local prefixWidth
   local markerWidth
+  local suffixWidth
   local textWidth
+  local prefixTruncated
+  local remainingWidth
+  local ignored
 
-  row.text:SetWidth(availableWidth)
-  row.text:SetText(prefixText or text or "")
+  availableWidth = math.max(1, tonumber(availableWidth) or 1)
   row.text:Show()
   row.inlineMarker:Hide()
   row.inlineSuffix:Hide()
 
-  textWidth = math.min(row.text:GetStringWidth(), availableWidth)
-  if markerText then
-    prefixWidth = textWidth
-    row.inlineMarker:ClearAllPoints()
-    row.inlineMarker:SetPoint("LEFT", row.text, "LEFT", prefixWidth, 0)
-    row.inlineMarker:SetWidth(30)
-    row.inlineMarker:SetText(markerText)
-    markerWidth = math.max(1, row.inlineMarker:GetStringWidth())
-    row.inlineMarker:SetWidth(markerWidth)
-    row.inlineMarker:Show()
-
-    row.inlineSuffix:ClearAllPoints()
-    row.inlineSuffix:SetPoint("LEFT", row.inlineMarker, "RIGHT", 0, 0)
-    row.inlineSuffix:SetWidth(math.max(0, availableWidth - prefixWidth - markerWidth))
-    row.inlineSuffix:SetText(suffixText or "")
-    row.inlineSuffix:Show()
-    textWidth = math.min(availableWidth, prefixWidth + markerWidth + row.inlineSuffix:GetStringWidth())
+  if not markerText then
+    ignored, textWidth = guideTouristUI.EllipsizeFontString(row.text, text or "", availableWidth)
+    row.renderedTextWidth = textWidth
+    return
   end
 
-  row.renderedTextWidth = textWidth
+  row.inlineMarker:ClearAllPoints()
+  row.inlineMarker:SetWidth(10000)
+  row.inlineMarker:SetText(markerText)
+  markerWidth = math.max(1, row.inlineMarker:GetStringWidth())
+  row.inlineMarker:SetWidth(markerWidth)
+
+  ignored, prefixWidth, prefixTruncated = guideTouristUI.EllipsizeFontString(
+    row.text,
+    prefixText or "",
+    math.max(1, availableWidth - markerWidth)
+  )
+  row.inlineMarker:SetPoint("LEFT", row.text, "LEFT", prefixWidth, 0)
+  row.inlineMarker:Show()
+
+  remainingWidth = math.max(0, availableWidth - prefixWidth - markerWidth)
+  if prefixTruncated or remainingWidth <= 0 then
+    row.inlineSuffix:SetWidth(1)
+    row.inlineSuffix:SetText("")
+    suffixWidth = 0
+  else
+    row.inlineSuffix:ClearAllPoints()
+    row.inlineSuffix:SetPoint("LEFT", row.inlineMarker, "RIGHT", 0, 0)
+    ignored, suffixWidth = guideTouristUI.EllipsizeFontString(
+      row.inlineSuffix,
+      suffixText or "",
+      remainingWidth
+    )
+    row.inlineSuffix:Show()
+  end
+
+  row.renderedTextWidth = math.min(availableWidth, prefixWidth + markerWidth + suffixWidth)
 end
 
 local function EnsureSingleObjectiveRow(index)
@@ -5726,12 +5833,17 @@ local function RenderSingleObjectiveRows(alerts, startIndex, guideMode)
   local slotIndex
   local participant
   local textLeft
+  local rowWidth = guideTouristUI.GetRowWidth()
+  local textWidth
+  local renderedWidth
+  local ignored
 
   for index = 1, table.getn(alerts) do
     alert = alerts[index]
     row = EnsureSingleObjectiveRow(index)
     row.frame:ClearAllPoints()
     row.frame:SetPoint("TOPLEFT", guideTouristUI.scrollChild, "TOPLEFT", 8, -((startIndex + index - 1) * 20))
+    row.frame:SetWidth(rowWidth)
     row.frame:SetAlpha(1)
 
     for slotIndex = 1, 4 do
@@ -5753,15 +5865,15 @@ local function RenderSingleObjectiveRows(alerts, startIndex, guideMode)
       textLeft = 21
     end
 
+    textWidth = math.max(1, rowWidth - textLeft - 6)
     row.text:ClearAllPoints()
     row.text:SetPoint("LEFT", row.frame, "LEFT", textLeft, 0)
-    row.text:SetWidth(258 - textLeft)
-    row.text:SetText(alert.text or "")
+    ignored, renderedWidth = guideTouristUI.EllipsizeFontString(row.text, alert.text or "", textWidth)
     row.text:Show()
 
     row.strike:ClearAllPoints()
     row.strike:SetPoint("LEFT", row.text, "LEFT", 0, 0)
-    row.strike:SetWidth(math.min(row.text:GetStringWidth(), 258 - textLeft))
+    row.strike:SetWidth(renderedWidth)
     if alert.complete then
       row.strike:Show()
     else
@@ -5783,6 +5895,7 @@ guideTouristUI.UpdateScrollContent = function(rowCount, reserveFooter)
     return
   end
 
+  guideTouristUI.GetRowWidth()
   guideTouristUI.scrollChild:SetHeight(math.max(
     1,
     ((tonumber(rowCount) or 0) * 20) + (reserveFooter and 24 or 0)
@@ -5804,6 +5917,8 @@ local function RefreshTouristWindow(session)
   local entry
   local row
   local alertCount
+  local rowWidth
+  local textWidth
 
   guideTouristUI.title:SetText(string.format(
     L.WINDOW_TITLE_TOURIST or "Tourist: %s",
@@ -5818,24 +5933,27 @@ local function RefreshTouristWindow(session)
     guideTouristUI.rows[index].frame:Hide()
   end
 
+  rowWidth = guideTouristUI.GetRowWidth()
   for index = 1, table.getn(display) do
     entry = display[index]
     row = EnsureTouristRow(index)
     row.frame:ClearAllPoints()
     row.frame:SetPoint("TOPLEFT", guideTouristUI.scrollChild, "TOPLEFT", 8, -((index - 1) * 20))
+    row.frame:SetWidth(rowWidth)
     row.frame:SetAlpha(1)
     row.seq = entry.seq
     row.targetNpcName = entry.targetNpcName
+    textWidth = math.max(1, rowWidth - 26 - (entry.actionText and 58 or 0))
     RenderGuideTouristInstructionText(
       row,
       entry.text,
       entry.prefixText,
       entry.markerText,
       entry.suffixText,
-      entry.actionText and 180 or 238
+      textWidth
     )
     row.strike:Hide()
-    row.target:SetWidth(entry.actionText and 180 or 238)
+    row.target:SetWidth(textWidth)
     row.target:Hide()
     row.actionLabel:SetText(entry.actionText or "")
     row.action:Hide()
@@ -5851,7 +5969,7 @@ local function RefreshTouristWindow(session)
     end
 
     if entry.completing then
-      row.strike:SetWidth(math.min(row.renderedTextWidth or row.text:GetStringWidth(), 238))
+      row.strike:SetWidth(math.min(row.renderedTextWidth or row.text:GetStringWidth(), textWidth))
       row.strike:Show()
       if entry.completion then
         entry.completion.row = row
@@ -6012,6 +6130,10 @@ local function RefreshGuideTouristWindow()
   local prefixText
   local markerText
   local suffixText
+  local rowWidth
+  local textWidth
+  local renderedWidth
+  local ignored
 
   if not guideTouristUI.frame then
     return
@@ -6142,16 +6264,18 @@ local function RefreshGuideTouristWindow()
     guideTouristUI.showHidden = false
   end
 
+  rowWidth = guideTouristUI.GetRowWidth()
   for index = 1, table.getn(display) do
     entry = display[index]
     row = EnsureGuideTouristRow(index)
     row.frame:ClearAllPoints()
     row.frame:SetPoint("TOPLEFT", guideTouristUI.scrollChild, "TOPLEFT", 8, -((index - 1) * 20))
+    row.frame:SetWidth(rowWidth)
     row.frame:SetAlpha(1)
     row.marker:SetTextColor(1, 0.82, 0)
     row.marker:SetWidth(18)
     row.text:SetTextColor(1, 1, 1)
-    row.text:SetWidth(238)
+    row.text:SetWidth(math.max(1, rowWidth - 26))
     row.inlineMarker:Hide()
     row.inlineSuffix:Hide()
     row.strike:Hide()
@@ -6170,12 +6294,13 @@ local function RefreshGuideTouristWindow()
       row.disparityHidden = disparity.hidden and true or false
       row.marker:SetText("!")
       row.marker:SetTextColor(1, 0.35, 0.15)
-      row.text:SetWidth(180)
-      row.text:SetText(string.format(
+      textWidth = math.max(1, rowWidth - 26 - 58)
+      ignored, renderedWidth = guideTouristUI.EllipsizeFontString(row.text, string.format(
         L.DISPARITY_MISSING_QUEST or "%s missing: %s",
         SafeString(disparity.playerName),
         SafeString(disparity.quest and disparity.quest.title)
-      ))
+      ), textWidth)
+      row.renderedTextWidth = renderedWidth
       row.action:SetText(row.disparityHidden and (L.DISPARITY_UNHIDE or "Unhide") or (L.DISPARITY_HIDE or "Hide"))
       row.action:Show()
       if row.disparityHidden then
@@ -6186,15 +6311,16 @@ local function RefreshGuideTouristWindow()
       row.marker:SetText("")
       row.marker:SetWidth(0)
       instructionText, prefixText, markerText, suffixText = GuideTouristInstructionText(entry.instruction)
+      textWidth = math.max(1, rowWidth - 26 - (entry.completing and 0 or 58))
       RenderGuideTouristInstructionText(
         row,
         instructionText,
         prefixText,
         markerText,
         suffixText,
-        entry.completing and 238 or 180
+        textWidth
       )
-      row.target:SetWidth(entry.completing and 238 or 180)
+      row.target:SetWidth(textWidth)
       row.targetNpcName = Trim(SafeString(entry.instruction and entry.instruction.npcName))
       if row.targetNpcName ~= "" and type(TargetByName) == "function" then
         row.target:Show()
@@ -6207,7 +6333,7 @@ local function RefreshGuideTouristWindow()
       end
 
       if entry.completing then
-        row.strike:SetWidth(math.min(row.renderedTextWidth or row.text:GetStringWidth(), 238))
+        row.strike:SetWidth(math.min(row.renderedTextWidth or row.text:GetStringWidth(), textWidth))
         row.strike:Show()
         entry.completion.row = row
       end
