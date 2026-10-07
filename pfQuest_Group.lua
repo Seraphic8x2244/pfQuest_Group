@@ -53,6 +53,13 @@ local guideTouristUI = {
   showHidden = false,
   showHiddenButton = nil,
   resizeGrip = nil,
+  scrollFrame = nil,
+  scrollChild = nil,
+  scrollBar = nil,
+  defaultWidth = 300,
+  defaultHeight = 154,
+  minWidth = 300,
+  minHeight = 74,
   refresh = nil
 }
 
@@ -565,8 +572,19 @@ local function NormalizeUIState(state)
   end
   window.x = tonumber(window.x) or 0
   window.y = tonumber(window.y) or 0
-  window.width = math.max(280, tonumber(window.width) or 280)
-  window.height = math.max(34, tonumber(window.height) or 34)
+  window.width = tonumber(window.width)
+  if not window.width or window.width <= 280 then
+    window.width = guideTouristUI.defaultWidth
+  else
+    window.width = math.max(guideTouristUI.minWidth, window.width)
+  end
+
+  window.height = tonumber(window.height)
+  if not window.height or window.height <= 34 then
+    window.height = guideTouristUI.defaultHeight
+  else
+    window.height = math.max(guideTouristUI.minHeight, window.height)
+  end
 
   return state
 end
@@ -5528,7 +5546,7 @@ local function EnsureTouristRow(index)
   end
 
   row = {}
-  row.frame = CreateFrame("Frame", nil, guideTouristUI.frame)
+  row.frame = CreateFrame("Frame", nil, guideTouristUI.scrollChild)
   row.frame:SetWidth(264)
   row.frame:SetHeight(20)
 
@@ -5645,7 +5663,7 @@ local function EnsureSingleObjectiveRow(index)
   end
 
   row = {}
-  row.frame = CreateFrame("Frame", nil, guideTouristUI.frame)
+  row.frame = CreateFrame("Frame", nil, guideTouristUI.scrollChild)
   row.frame:SetWidth(264)
   row.frame:SetHeight(20)
 
@@ -5713,7 +5731,7 @@ local function RenderSingleObjectiveRows(alerts, startIndex, guideMode)
     alert = alerts[index]
     row = EnsureSingleObjectiveRow(index)
     row.frame:ClearAllPoints()
-    row.frame:SetPoint("TOPLEFT", guideTouristUI.frame, "TOPLEFT", 8, -28 - ((startIndex + index - 1) * 20))
+    row.frame:SetPoint("TOPLEFT", guideTouristUI.scrollChild, "TOPLEFT", 8, -((startIndex + index - 1) * 20))
     row.frame:SetAlpha(1)
 
     for slotIndex = 1, 4 do
@@ -5760,6 +5778,17 @@ local function RenderSingleObjectiveRows(alerts, startIndex, guideMode)
   return table.getn(alerts)
 end
 
+guideTouristUI.UpdateScrollContent = function(rowCount, reserveFooter)
+  if not guideTouristUI.scrollChild then
+    return
+  end
+
+  guideTouristUI.scrollChild:SetHeight(math.max(
+    1,
+    ((tonumber(rowCount) or 0) * 20) + (reserveFooter and 24 or 0)
+  ))
+end
+
 local function HideTouristRows()
   local index
 
@@ -5775,8 +5804,6 @@ local function RefreshTouristWindow(session)
   local entry
   local row
   local alertCount
-  local desiredHeight
-  local savedHeight
 
   guideTouristUI.title:SetText(string.format(
     L.WINDOW_TITLE_TOURIST or "Tourist: %s",
@@ -5795,7 +5822,7 @@ local function RefreshTouristWindow(session)
     entry = display[index]
     row = EnsureTouristRow(index)
     row.frame:ClearAllPoints()
-    row.frame:SetPoint("TOPLEFT", guideTouristUI.frame, "TOPLEFT", 8, -28 - ((index - 1) * 20))
+    row.frame:SetPoint("TOPLEFT", guideTouristUI.scrollChild, "TOPLEFT", 8, -((index - 1) * 20))
     row.frame:SetAlpha(1)
     row.seq = entry.seq
     row.targetNpcName = entry.targetNpcName
@@ -5839,12 +5866,7 @@ local function RefreshTouristWindow(session)
   end
 
   alertCount = RenderSingleObjectiveRows(alerts, table.getn(display), false)
-  desiredHeight = 34 + ((table.getn(display) + alertCount) * 20)
-  savedHeight = Addon.db
-    and Addon.db.ui
-    and Addon.db.ui.guideWindow
-    and tonumber(Addon.db.ui.guideWindow.height)
-  guideTouristUI.frame:SetHeight(math.max(desiredHeight, savedHeight or desiredHeight))
+  guideTouristUI.UpdateScrollContent(table.getn(display) + alertCount, false)
   guideTouristUI.frame:Show()
 end
 
@@ -5859,7 +5881,7 @@ local function EnsureGuideTouristRow(index)
   end
 
   row = {}
-  row.frame = CreateFrame("Frame", nil, guideTouristUI.frame)
+  row.frame = CreateFrame("Frame", nil, guideTouristUI.scrollChild)
   row.frame:SetWidth(264)
   row.frame:SetHeight(20)
 
@@ -5957,8 +5979,14 @@ local function SaveGuideTouristWindowPosition(saveSize)
   state.y = tonumber(y) or 0
 
   if saveSize then
-    state.width = math.max(280, tonumber(guideTouristUI.frame:GetWidth()) or 280)
-    state.height = math.max(34, tonumber(guideTouristUI.frame:GetHeight()) or 34)
+    state.width = math.max(
+      guideTouristUI.minWidth,
+      tonumber(guideTouristUI.frame:GetWidth()) or guideTouristUI.defaultWidth
+    )
+    state.height = math.max(
+      guideTouristUI.minHeight,
+      tonumber(guideTouristUI.frame:GetHeight()) or guideTouristUI.defaultHeight
+    )
   end
 end
 
@@ -5984,8 +6012,6 @@ local function RefreshGuideTouristWindow()
   local prefixText
   local markerText
   local suffixText
-  local desiredHeight
-  local savedHeight
 
   if not guideTouristUI.frame then
     return
@@ -6016,6 +6042,11 @@ local function RefreshGuideTouristWindow()
     guideTouristUI.completed = {}
     guideTouristUI.sessionKey = sessionKey
     guideTouristUI.showHidden = false
+    if guideTouristUI.scrollBar then
+      guideTouristUI.scrollBar:SetValue(0)
+    elseif guideTouristUI.scrollFrame then
+      guideTouristUI.scrollFrame:SetVerticalScroll(0)
+    end
   end
 
   if session.mode == "TOURIST" then
@@ -6115,7 +6146,7 @@ local function RefreshGuideTouristWindow()
     entry = display[index]
     row = EnsureGuideTouristRow(index)
     row.frame:ClearAllPoints()
-    row.frame:SetPoint("TOPLEFT", guideTouristUI.frame, "TOPLEFT", 8, -28 - ((index - 1) * 20))
+    row.frame:SetPoint("TOPLEFT", guideTouristUI.scrollChild, "TOPLEFT", 8, -((index - 1) * 20))
     row.frame:SetAlpha(1)
     row.marker:SetTextColor(1, 0.82, 0)
     row.marker:SetWidth(18)
@@ -6198,19 +6229,16 @@ local function RefreshGuideTouristWindow()
       guideTouristUI.showHiddenButton:SetText(string.format(L.DISPARITY_SHOW_HIDDEN or "Show Hidden (%d)", hiddenCount))
     end
     guideTouristUI.showHiddenButton:Show()
-    desiredHeight = 58 + ((table.getn(display) + alertCount) * 20)
   else
     if guideTouristUI.showHiddenButton then
       guideTouristUI.showHiddenButton:Hide()
     end
-    desiredHeight = 34 + ((table.getn(display) + alertCount) * 20)
   end
 
-  savedHeight = Addon.db
-    and Addon.db.ui
-    and Addon.db.ui.guideWindow
-    and tonumber(Addon.db.ui.guideWindow.height)
-  guideTouristUI.frame:SetHeight(math.max(desiredHeight, savedHeight or desiredHeight))
+  guideTouristUI.UpdateScrollContent(
+    table.getn(display) + alertCount,
+    session.mode == "GUIDE" and hiddenCount > 0
+  )
   guideTouristUI.frame:Show()
 end
 
@@ -6303,7 +6331,7 @@ local function InitializeGuideTouristWindow()
   guideTouristUI.frame:SetFrameStrata("DIALOG")
   guideTouristUI.frame:SetMovable(true)
   guideTouristUI.frame:SetResizable(true)
-  guideTouristUI.frame:SetMinResize(280, 34)
+  guideTouristUI.frame:SetMinResize(guideTouristUI.minWidth, guideTouristUI.minHeight)
   guideTouristUI.frame:EnableMouse(true)
   guideTouristUI.frame:RegisterForDrag("LeftButton")
   guideTouristUI.frame:SetBackdrop({
@@ -6329,6 +6357,32 @@ local function InitializeGuideTouristWindow()
   guideTouristUI.title:SetHeight(16)
   guideTouristUI.title:SetJustifyH("LEFT")
   guideTouristUI.title:SetTextColor(1, 0.82, 0)
+
+  guideTouristUI.scrollFrame = CreateFrame(
+    "ScrollFrame",
+    "pfQuest_GroupGuideTouristScrollFrame",
+    guideTouristUI.frame,
+    "UIPanelScrollFrameTemplate"
+  )
+  guideTouristUI.scrollFrame:SetPoint("TOPLEFT", guideTouristUI.frame, "TOPLEFT", 0, -28)
+  guideTouristUI.scrollFrame:SetPoint("BOTTOMRIGHT", guideTouristUI.frame, "BOTTOMRIGHT", -22, 6)
+  guideTouristUI.scrollFrame.scrollBarHideable = 1
+  guideTouristUI.scrollFrame:EnableMouseWheel(true)
+
+  guideTouristUI.scrollChild = CreateFrame("Frame", nil, guideTouristUI.scrollFrame)
+  guideTouristUI.scrollChild:SetWidth(278)
+  guideTouristUI.scrollChild:SetHeight(1)
+  guideTouristUI.scrollFrame:SetScrollChild(guideTouristUI.scrollChild)
+
+  guideTouristUI.scrollBar = getglobal("pfQuest_GroupGuideTouristScrollFrameScrollBar")
+  guideTouristUI.scrollFrame:SetScript("OnMouseWheel", function()
+    local delta = tonumber(arg1) or 0
+    if guideTouristUI.scrollBar and delta ~= 0 then
+      guideTouristUI.scrollBar:SetValue(
+        guideTouristUI.scrollBar:GetValue() - (delta * 40)
+      )
+    end
+  end)
 
   guideTouristUI.showHiddenButton = CreateFrame("Button", nil, guideTouristUI.frame, "UIPanelButtonTemplate")
   guideTouristUI.showHiddenButton:SetPoint("BOTTOMLEFT", guideTouristUI.frame, "BOTTOMLEFT", 8, 7)
