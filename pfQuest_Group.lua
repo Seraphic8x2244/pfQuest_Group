@@ -5660,7 +5660,14 @@ local function EnsureTouristRow(index)
   row.gossipIcon:SetWidth(16)
   row.gossipIcon:SetHeight(16)
   row.gossipIcon:SetTexture("Interface\\GossipFrame\\GossipGossipIcon")
+  row.gossipIcon:SetTexCoord(0, 1, 1, 0)
   row.gossipIcon:Hide()
+
+  row.flightIcon = row.frame:CreateTexture(nil, "ARTWORK")
+  row.flightIcon:SetWidth(16)
+  row.flightIcon:SetHeight(16)
+  row.flightIcon:SetTexture("Interface\\TaxiFrame\\UI-Taxi-Icon-Green")
+  row.flightIcon:Hide()
 
   row.inlineSuffix = row.frame:CreateFontString(nil, "OVERLAY")
   row.inlineSuffix:SetHeight(20)
@@ -5883,7 +5890,8 @@ local function RenderChainedInstructionRow(row, instruction, width, controlWidth
   end
   row.inlineMarker:ClearAllPoints()
   row.gossipIcon:ClearAllPoints()
-  local actionMarker = gossip and row.gossipIcon or row.inlineMarker
+  local actionMarker = gossip and row.gossipIcon
+    or (flight and row.flightIcon or row.inlineMarker)
   if controlWidth > 0 then
     actionMarker:SetPoint("LEFT", row.action, "RIGHT", gap, 0)
   else
@@ -5893,13 +5901,16 @@ local function RenderChainedInstructionRow(row, instruction, width, controlWidth
   row.inlineMarker:SetText(marker or "?")
   markerWidth = math.max(12, row.inlineMarker:GetStringWidth())
   row.inlineMarker:SetWidth(markerWidth)
-  if gossip then
+  if gossip or flight then
     row.inlineMarker:Hide()
-    row.gossipIcon:Show()
+    row.gossipIcon:Hide()
+    row.flightIcon:Hide()
+    actionMarker:Show()
     markerWidth = 16
   else
     row.inlineMarker:Show()
     row.gossipIcon:Hide()
+    row.flightIcon:Hide()
   end
   remaining = math.max(0, width - controlWidth
     - (controlWidth > 0 and gap or 0) - markerWidth - gap - 2)
@@ -6261,7 +6272,14 @@ local function EnsureGuideTouristRow(index)
   row.gossipIcon:SetWidth(16)
   row.gossipIcon:SetHeight(16)
   row.gossipIcon:SetTexture("Interface\\GossipFrame\\GossipGossipIcon")
+  row.gossipIcon:SetTexCoord(0, 1, 1, 0)
   row.gossipIcon:Hide()
+
+  row.flightIcon = row.frame:CreateTexture(nil, "ARTWORK")
+  row.flightIcon:SetWidth(16)
+  row.flightIcon:SetHeight(16)
+  row.flightIcon:SetTexture("Interface\\TaxiFrame\\UI-Taxi-Icon-Green")
+  row.flightIcon:Hide()
 
   row.inlineSuffix = row.frame:CreateFontString(nil, "OVERLAY")
   row.inlineSuffix:SetHeight(20)
@@ -6930,7 +6948,23 @@ frame:SetScript("OnEvent", function()
     if (not npcName or npcName == "") and GossipFrameNpcNameText then
       npcName = GossipFrameNpcNameText:GetText()
     end
-    Addon.HandleGossipAction(npcName)
+    -- Flightmasters expose a taxi gossip option; do not create a redundant
+    -- talk reminder when the existing FLIGHT instruction owns the action.
+    local isFlightmaster = false
+    if type(GetNumGossipOptions) == "function"
+      and type(GetGossipOptions) == "function" then
+      local options = { GetGossipOptions() }
+      local optionIndex
+      for optionIndex = 2, table.getn(options), 2 do
+        if options[optionIndex] == "taxi" then
+          isFlightmaster = true
+          break
+        end
+      end
+    end
+    if not isFlightmaster then
+      Addon.HandleGossipAction(npcName)
+    end
   elseif event == "CHAT_MSG_ADDON" then
     ReceiveWire(arg1, arg2, arg3, arg4)
   end
