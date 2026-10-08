@@ -91,6 +91,18 @@
 - Tourist consumed sequence state remains persisted in the Phase 4b instruction store. Under protocol v2 a Tourist sends an idempotent completion delta when consuming a step and includes the consumed set in its instructions full snapshot, so missed acknowledgements can recover through the existing full-state path without a new scheduler or component.
 - Guide completion is derived only for Tourists paired to the same Guide session whose fixed joinBaseline is below that instruction sequence; Tourists who joined after the step do not block it. When all currently eligible paired Tourists have acknowledged the step, the Guide row uses the existing strike/fade/removal presentation. Acknowledgements seen by unrelated PARTY peers are ignored.
 
+### Phase-5 Guide/Tourist Row Layout Contract — Agreed / Not Yet Implemented
+- Canonical left-to-right order for instruction/objective rows is: `[control] [semantic action icon/marker] [optional NPC/source] [separator] [quest/objective text]`.
+- Layout must use a chained left-anchor flow, not absolute per-element x positions and not a control positioned from measured text width. The first visible element anchors to the row's left edge; every later element anchors to the previous visible element's right edge with a small fixed gap. This keeps the row compact and makes each element justify naturally as width changes.
+- Guide removable instruction example: `[-] [?] NPC Name - Quest Name`. The Guide `-` is the leftmost control. ACCEPT/pick-up, TURNIN/hand-in and single-item/object loot each use their own semantic marker/icon immediately after the control. The existing ACCEPT `!` / TURNIN `?` meaning is preserved unless a later explicitly approved artwork change replaces those markers; the 1/1 acquisition row uses the approved brown pfQuest item-bag artwork.
+- NPC/source text is contextual and optional. When present, it anchors immediately after the semantic icon/marker; the ` - ` separator anchors after the NPC/source. When no NPC/source applies, omit both NPC/source and separator and anchor the quest/objective text directly after the action icon/marker.
+- Horizontal-space priority is strict: (1) preserve the left control, (2) preserve the semantic action icon/marker, (3) shorten the NPC/source first using the existing NPC abbreviation/truncation rules, then hide the NPC/source and its separator entirely if required, and only then (4) ellipsize the quest/objective text. Quest/objective text is the primary information and receives all remaining width.
+- Raw NPC/source identity must remain separate from rendered text. Hiding, abbreviating or ellipsizing the displayed NPC name must never alter the full raw NPC name used by click-targeting / `TargetByName`.
+- FLIGHT follows the same chained grammar but has no NPC/source segment: control (where applicable) -> flight action marker/icon -> destination text. Do not fabricate an NPC or separator for FLIGHT.
+- Row types that are semantically different, especially Guide disparity Hide/Unhide rows, are exempt from this instruction/objective grammar and keep their own controls/layout unless explicitly redesigned.
+- Tourist rows should follow the same chained ordering principle. Where a Tourist control such as `Done` exists, it occupies the control position for that row rather than being laid out as an unrelated far-right element when this contract is implemented.
+- This contract is design-authoritative for the next Guide/Tourist row-layout revision but is not itself a runtime PASS and does not change addon version/state until implemented.
+
 ### Dormant Guide Lifecycle / Durable Completion — Implemented in 0.1.24-dev; 0.1.27 legacy-completion permanence awaiting retest
 - Persisted Guide mode/session remains stored across logout/reload, but Guide presentation is now runtime-dormant whenever no Tourist bound to that same Guide session is currently present. The Guide window hides and Guide ACCEPT/TURNIN instruction creation is suppressed while dormant; a matching Tourist reuses/wakes the existing persisted session rather than creating a new one.
 - The current behavior observed by the user is the defect motivating this change: logging in solo restored active Guide mode with a very large old instruction list; when Gaia later joined the party, synchronization caused many rows to cross off. The resume/synchronization behavior is desirable, but the solo-active presentation is not.
@@ -676,16 +688,17 @@ GH9. **UNTESTED / SKIP-eligible — Ambiguous complex objective mapping.** If a 
 5. Continue the carried Guide removal-semantics check, ordinary completion, GH5 when a suitable quest arises, and GH9 only if naturally encountered. Keep the Mrs Dalson's Diary / Outhouse / Locked Cabinet anomaly deferred.
 
 ## Planned / Next Work
-1. **Phase-5 panel usability refinement:** Passes 1-3 remain implemented; 0.1.50-dev adds the focused runtime-driven layout correction for scrollbar visibility/geometry/footer clearance and compact Guide removal control. Runtime is pending on the new delta.
-2. Retest the 0.1.50 layout correction first, then finish the combined Passes 1-3 runtime checklist before any further panel refinement.
-3. Runtime-test the shared single-item/object acquisition alert end-to-end on 0.1.51, including pfQuest brown `cluster_item` bag artwork, sound-on-live-delta, Guide X/check progression while somebody still needs it, immediate row removal when locally/all complete, reload/resync silence, and 1/1-kill/multi-count exclusion.
-4. Preserve the stable bidirectional Group Progress tracker/tooltips and the prepared Tourist display-model -> renderer boundary; objective-alert rows remain a separate Phase-5 row pool.
-5. Runtime-test carried NPC click-targeting on both Guide and Tourist instruction rows as part of the post-Pass-3 panel check.
-6. Runtime-test Guide `-` as the same authoritative instruction cancellation. FLIGHT rendering/matching already passed on 0.1.49; treat 0.1.50 as inherited behavior unless a regression appears.
-7. Continue only remaining relevant gaps: GH5 when available, GH9 if naturally encountered, and any current protocol-v3 regression that appears during normal play.
-8. Fix only demonstrated defects, bumping the dev version for every addon-affecting revision.
-9. Keep the linked Mrs Dalson's Diary / Outhouse / Locked Cabinet anomaly deferred.
-10. After a known-good runtime state exists, review release/promotion readiness separately; do not treat development checks as a runtime test.
+1. **Phase-5 chained row layout — AGREED / NOT IMPLEMENTED:** replace ad-hoc instruction/objective row positioning with the chained left-anchor contract above: control -> action icon/marker -> optional NPC/source -> separator -> primary quest/objective text, with NPC/source sacrificed before primary text under width pressure.
+2. **Phase-5 panel usability refinement:** Passes 1-3 remain implemented; 0.1.50-dev adds the focused runtime-driven layout correction for scrollbar visibility/geometry/footer clearance and compact Guide removal control. Runtime is pending on the new delta.
+3. Retest the 0.1.50 layout correction first, then finish the combined Passes 1-3 runtime checklist before any further panel refinement.
+4. Runtime-test the shared single-item/object acquisition alert end-to-end on 0.1.51, including pfQuest brown `cluster_item` bag artwork, sound-on-live-delta, Guide X/check progression while somebody still needs it, immediate row removal when locally/all complete, reload/resync silence, and 1/1-kill/multi-count exclusion.
+5. Preserve the stable bidirectional Group Progress tracker/tooltips and the prepared Tourist display-model -> renderer boundary; objective-alert rows remain a separate Phase-5 row pool.
+6. Runtime-test carried NPC click-targeting on both Guide and Tourist instruction rows as part of the post-Pass-3 panel check.
+7. Runtime-test Guide `-` as the same authoritative instruction cancellation. FLIGHT rendering/matching already passed on 0.1.49; treat 0.1.50 as inherited behavior unless a regression appears.
+8. Continue only remaining relevant gaps: GH5 when available, GH9 if naturally encountered, and any current protocol-v3 regression that appears during normal play.
+9. Fix only demonstrated defects, bumping the dev version for every addon-affecting revision.
+10. Keep the linked Mrs Dalson's Diary / Outhouse / Locked Cabinet anomaly deferred.
+11. After a known-good runtime state exists, review release/promotion readiness separately; do not treat development checks as a runtime test.
 
 ## Deferred / Out of Scope
 - Raid-FPS investigation is pinned unless the issue recurs with a stronger PFQG correlation; current observation is confounded by several recently updated addons.
@@ -701,4 +714,4 @@ GH9. **UNTESTED / SKIP-eligible — Ambiguous complex objective mapping.** If a 
 - External/runtime prerequisite: pfQuest.
 
 ## Exact Next Step
-Load exact 0.1.51-dev / 59608b75a3adcd199b3f0ede641f503cd7529771 on both clients. Re-test the 1/1 item/object alert with at least two separate 1/1 objectives: the icon must be the brown pfQuest item bag; the Tourist dinger should still fire on each live Guide completion; each row must disappear once that Tourist/all relevant Tourists complete it; completing the second objective must not bring the first row back. Then check reload/resync silence and the inherited 0.1.50 panel geometry. No canonical Lua 5.0.3 compiler pass was run.
+Load exact 0.1.51-dev / 59608b75a3adcd199b3f0ede641f503cd7529771 on both clients. Re-test the 1/1 item/object alert with at least two separate 1/1 objectives: the icon must be the brown pfQuest item bag; the Tourist dinger should still fire on each live Guide completion; each row must disappear once that Tourist/all relevant Tourists complete it; completing the second objective must not bring the first row back. Then check reload/resync silence and the inherited 0.1.50 panel geometry. After those focused runtime results, the next approved panel implementation is the Phase-5 chained row-layout contract recorded above. No canonical Lua 5.0.3 compiler pass was run.
