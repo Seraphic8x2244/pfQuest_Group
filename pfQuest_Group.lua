@@ -13,7 +13,7 @@ local CHUNK_SIZE = 180
 local MAX_CHUNKS = 64
 local INCOMING_TIMEOUT = 30
 local SINGLE_OBJECTIVE_SOUND = "Sound\\Interface\\levelup2.wav"
-local SINGLE_OBJECTIVE_ICON = "Interface\\AddOns\\pfQuest\\img\\icon_npc"
+local SINGLE_OBJECTIVE_ICON = "Interface\\AddOns\\pfQuest\\img\\cluster_item"
 
 local frame = CreateFrame("Frame")
 local questScanFrame = CreateFrame("Frame")
@@ -5381,7 +5381,7 @@ local function BuildGuideSingleObjectiveAlerts(session)
           end
         end
 
-        if table.getn(participants) > 0 then
+        if table.getn(participants) > 0 and not allComplete then
           table.insert(output, {
             key = SafeString(quest.key or questKey) .. "#" .. SafeString(objective.index or objectiveIndex),
             quest = quest,
@@ -5453,7 +5453,8 @@ local function BuildTouristSingleObjectiveAlerts(session)
           and localObjective
           and IsSharedSingleObjective(guideObjective)
           and IsSharedSingleObjective(localObjective)
-          and SingleObjectiveDone(guideObjective) then
+          and SingleObjectiveDone(guideObjective)
+          and not SingleObjectiveDone(localObjective) then
           table.insert(output, {
             key = SafeString(guideQuest.key or questKey) .. "#" .. SafeString(guideObjective.index or objectiveIndex),
             quest = guideQuest,
