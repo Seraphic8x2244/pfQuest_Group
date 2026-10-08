@@ -7,7 +7,7 @@ local L = pfQuest_Group_L or {}
 Addon.groupContextKey = nil
 
 local PROTOCOL_PREFIX = "PFQGROUP"
-local PROTOCOL_VERSION = 3
+local PROTOCOL_VERSION = 4
 local DB_SCHEMA_VERSION = 3
 local CHUNK_SIZE = 180
 local MAX_CHUNKS = 64
@@ -329,7 +329,7 @@ local function NormalizeInstructionRecord(record, fallbackSeq)
   seq = math.floor(seq)
 
   actionType = string.upper(SafeString(record.actionType))
-  if actionType ~= "ACCEPT" and actionType ~= "TURNIN" and actionType ~= "FLIGHT" then
+  if actionType ~= "ACCEPT" and actionType ~= "TURNIN" and actionType ~= "FLIGHT" and actionType ~= "GOSSIP" then
     return nil
   end
 
@@ -347,6 +347,20 @@ local function NormalizeInstructionRecord(record, fallbackSeq)
     mobID = nil
     questTitle = ""
     npcName = ""
+  elseif actionType == "GOSSIP" then
+    if Trim(npcName) == "" then
+      return nil
+    end
+    questID = nil
+    questTitle = ""
+    flightName = ""
+  elseif actionType == "GOSSIP" then
+    if Trim(npcName) == "" then
+      return nil
+    end
+    questID = nil
+    questTitle = ""
+    flightName = ""
   elseif not questID and questTitle == "" then
     return nil
   end
@@ -3605,7 +3619,8 @@ end
 local function EncodeInstructionRecord(instruction)
   local actionCode = instruction.actionType == "ACCEPT"
     and "A"
-    or (instruction.actionType == "TURNIN" and "T" or "F")
+    or (instruction.actionType == "TURNIN" and "T"
+      or (instruction.actionType == "GOSSIP" and "G" or "F"))
 
   return table.concat({
     "I",
@@ -3645,6 +3660,8 @@ local function DecodeInstructionRecord(record)
     actionType = "TURNIN"
   elseif fields[3] == "F" then
     actionType = "FLIGHT"
+  elseif fields[3] == "G" then
+    actionType = "GOSSIP"
   else
     return nil
   end
@@ -3851,6 +3868,11 @@ local function InstructionMatchesAction(instruction, actionType, quest, context)
     return instruction.flightName ~= ""
       and flightName ~= ""
       and instruction.flightName == flightName
+  end
+
+  if actionType == "GOSSIP" then
+    return Trim(SafeString(instruction.npcName)) ~= ""
+      and Trim(SafeString(instruction.npcName)) == Trim(SafeString(context and context.npcName))
   end
 
   actionQuestID = tonumber(context and context.questID) or tonumber(quest and quest.questID)
@@ -4996,6 +5018,55 @@ function Addon.HandleFlightAction(flightName)
   return CompleteTouristInstruction(pendingSeq)
 end
 
+function Addon.HandleGossipAction(npcName)
+  local session = Addon.db and Addon.db.session
+  local store = Addon.db and Addon.db.instructions
+  local seq
+  local instruction
+  local pendingSeq
+
+  npcName = Trim(SafeString(npcName))
+  if not session or npcName == "" then
+    return false
+  end
+
+  if session.mode == "GUIDE" and session.guideSessionId then
+    if not Addon.GuideHasActiveTourist(session) then
+      return false
+    end
+    if store and store.guideSessionId == session.guideSessionId then
+      for seq, instruction in pairs(store.guideRecords or {}) do
+        if instruction.actionType == "GOSSIP"
+          and instruction.npcName == npcName
+          and not (store.guideRemoved and store.guideRemoved[seq])
+          and not (store.guideCompleted and store.guideCompleted[seq]) then
+          return false
+        end
+      end
+    end
+    return Addon.CreateGuideInstruction({
+      actionType = "GOSSIP",
+      npcName = npcName
+    })
+  end
+
+  if session.mode ~= "TOURIST" or not session.guideSessionId or session.joinBaseline == nil then
+    return false
+  end
+
+  for seq, instruction in pairs(touristPendingInstructions) do
+    seq = tonumber(seq)
+    if seq and InstructionMatchesAction(instruction, "GOSSIP", nil, { npcName = npcName }) then
+      if not pendingSeq or seq < pendingSeq then
+        pendingSeq = seq
+      end
+    end
+  end
+  if pendingSeq then
+    return CompleteTouristInstruction(pendingSeq)
+  end
+  return false
+end
 
 local function GuideTouristNpcDisplayName(instruction, npcName)
   local mobID = tonumber(instruction and instruction.mobID)
@@ -5054,6 +5125,9 @@ local function GuideTouristInstructionText(instruction)
   local marker = instruction and instruction.actionType == "ACCEPT" and "!" or "?"
   local npcName = Trim(SafeString(instruction and instruction.npcName))
 
+  if instruction and instruction.actionType == "GOSSIP" then
+    return npcName, npcName, "", ""
+  end
   if instruction and instruction.actionType == "FLIGHT" then
     return string.format(
       L.INSTRUCTION_FLIGHT or "|cffffd100Fly|r to %s",
@@ -5575,6 +5649,12 @@ local function EnsureTouristRow(index)
   end
   row.inlineMarker:Hide()
 
+  row.gossipIcon = row.frame:CreateTexture(nil, "ARTWORK")
+  row.gossipIcon:SetWidth(16)
+  row.gossipIcon:SetHeight(16)
+  row.gossipIcon:SetTexture("Interface\\GossipFrame\\GossipGossipIcon")
+  row.gossipIcon:Hide()
+
   row.inlineSuffix = row.frame:CreateFontString(nil, "OVERLAY")
   row.inlineSuffix:SetHeight(20)
   row.inlineSuffix:SetJustifyH("LEFT")
@@ -5772,8 +5852,10 @@ end
 local function RenderChainedInstructionRow(row, instruction, width, controlWidth)
   local full, prefix, marker = GuideTouristInstructionText(instruction)
   local flight = instruction and instruction.actionType == "FLIGHT"
-  local npc = flight and "" or Trim(SafeString(prefix))
-  local primary = SafeString(instruction and instruction.questTitle)
+  local gossip = instruction and instruction.actionType == "GOSSIP"
+  local npc = (flight or gossip) and "" or Trim(SafeString(prefix))
+  local primary = gossip and Trim(SafeString(instruction.npcName))
+    or SafeString(instruction and instruction.questTitle)
   local gap = 4
   local markerWidth
   local remaining
@@ -5793,19 +5875,28 @@ local function RenderChainedInstructionRow(row, instruction, width, controlWidth
     primary = full
   end
   row.inlineMarker:ClearAllPoints()
+  row.gossipIcon:ClearAllPoints()
+  local actionMarker = gossip and row.gossipIcon or row.inlineMarker
   if controlWidth > 0 then
-    row.inlineMarker:SetPoint("LEFT", row.action, "RIGHT", gap, 0)
+    actionMarker:SetPoint("LEFT", row.action, "RIGHT", gap, 0)
   else
-    row.inlineMarker:SetPoint("LEFT", row.frame, "LEFT", 0, 0)
+    actionMarker:SetPoint("LEFT", row.frame, "LEFT", 0, 0)
   end
   row.inlineMarker:SetWidth(10000)
   row.inlineMarker:SetText(marker or "?")
   markerWidth = math.max(12, row.inlineMarker:GetStringWidth())
   row.inlineMarker:SetWidth(markerWidth)
-  row.inlineMarker:Show()
+  if gossip then
+    row.inlineMarker:Hide()
+    row.gossipIcon:Show()
+    markerWidth = 16
+  else
+    row.inlineMarker:Show()
+    row.gossipIcon:Hide()
+  end
   remaining = math.max(0, width - controlWidth
     - (controlWidth > 0 and gap or 0) - markerWidth - gap - 2)
-  anchor = row.inlineMarker
+  anchor = actionMarker
   row.text:Hide()
   row.separator:Hide()
   if npc ~= "" and remaining >= 126 then
@@ -5848,7 +5939,7 @@ local function RenderChainedInstructionRow(row, instruction, width, controlWidth
     row.target:Show()
   end
   row.strike:ClearAllPoints()
-  row.strike:SetPoint("LEFT", row.inlineMarker, "LEFT", 0, 0)
+  row.strike:SetPoint("LEFT", actionMarker, "LEFT", 0, 0)
   row.strike:SetWidth(math.min(width, row.renderedTextWidth))
 end
 
@@ -6153,6 +6244,12 @@ local function EnsureGuideTouristRow(index)
     end
   end
   row.inlineMarker:Hide()
+
+  row.gossipIcon = row.frame:CreateTexture(nil, "ARTWORK")
+  row.gossipIcon:SetWidth(16)
+  row.gossipIcon:SetHeight(16)
+  row.gossipIcon:SetTexture("Interface\\GossipFrame\\GossipGossipIcon")
+  row.gossipIcon:Hide()
 
   row.inlineSuffix = row.frame:CreateFontString(nil, "OVERLAY")
   row.inlineSuffix:SetHeight(20)
@@ -6780,6 +6877,7 @@ frame:RegisterEvent("QUEST_LOG_UPDATE")
 frame:RegisterEvent("QUEST_WATCH_UPDATE")
 frame:RegisterEvent("QUEST_FINISHED")
 frame:RegisterEvent("CHAT_MSG_ADDON")
+frame:RegisterEvent("GOSSIP_SHOW")
 frame:SetScript("OnEvent", function()
   if event == "ADDON_LOADED" then
     if arg1 ~= ADDON_NAME then
@@ -6815,6 +6913,12 @@ frame:SetScript("OnEvent", function()
     end
   elseif event == "QUEST_LOG_UPDATE" or event == "QUEST_WATCH_UPDATE" or event == "QUEST_FINISHED" then
     ScheduleQuestScan(0.05)
+  elseif event == "GOSSIP_SHOW" then
+    local npcName = type(UnitName) == "function" and (UnitName("npc") or UnitName("target"))
+    if (not npcName or npcName == "") and GossipFrameNpcNameText then
+      npcName = GossipFrameNpcNameText:GetText()
+    end
+    Addon.HandleGossipAction(npcName)
   elseif event == "CHAT_MSG_ADDON" then
     ReceiveWire(arg1, arg2, arg3, arg4)
   end
