@@ -6964,7 +6964,13 @@ frame:SetScript("OnEvent", function()
         end
       end
     end
-    if not isFlightmaster then
+    -- Quest pickup/turn-in already has its own Phase 4b instruction path.
+    -- A quest-bearing gossip menu is not evidence of a separate talk task.
+    local hasGossipQuests = (type(GetNumGossipAvailableQuests) == "function"
+        and (tonumber(GetNumGossipAvailableQuests()) or 0) > 0)
+      or (type(GetNumGossipActiveQuests) == "function"
+        and (tonumber(GetNumGossipActiveQuests()) or 0) > 0)
+    if not isFlightmaster and not hasGossipQuests then
       Addon.HandleGossipAction(npcName)
     end
   elseif event == "CHAT_MSG_ADDON" then
