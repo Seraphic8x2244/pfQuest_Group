@@ -3688,6 +3688,13 @@ local function DecodeInstructionRecord(record)
     mobID = nil
     questTitle = ""
     npcName = ""
+  elseif actionType == "GOSSIP" then
+    if Trim(npcName) == "" then
+      return nil
+    end
+    questID = nil
+    questTitle = ""
+    flightName = ""
   elseif not questID and questTitle == "" then
     return nil
   end
