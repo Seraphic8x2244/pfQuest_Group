@@ -5891,15 +5891,57 @@ local function RenderSingleObjectiveRows(alerts, startIndex, guideMode)
 end
 
 guideTouristUI.UpdateScrollContent = function(rowCount, reserveFooter)
-  if not guideTouristUI.scrollChild then
+  local contentHeight
+  local frameHeight
+  local viewportHeight
+  local contentBottomInset
+  local scrollBottomInset
+  local rightInset
+  local needsScroll
+
+  if not guideTouristUI.scrollChild or not guideTouristUI.scrollFrame then
     return
   end
 
+  contentHeight = math.max(0, (tonumber(rowCount) or 0) * 20)
+  contentBottomInset = reserveFooter and 31 or 8
+  scrollBottomInset = reserveFooter and 31 or 24
+  frameHeight = tonumber(guideTouristUI.frame and guideTouristUI.frame:GetHeight())
+    or guideTouristUI.defaultHeight
+  viewportHeight = math.max(1, frameHeight - 28 - contentBottomInset)
+  needsScroll = contentHeight > viewportHeight
+  rightInset = needsScroll and 26 or 8
+
+  guideTouristUI.scrollFrame:ClearAllPoints()
+  guideTouristUI.scrollFrame:SetPoint("TOPLEFT", guideTouristUI.frame, "TOPLEFT", 0, -28)
+  guideTouristUI.scrollFrame:SetPoint(
+    "BOTTOMRIGHT",
+    guideTouristUI.frame,
+    "BOTTOMRIGHT",
+    -rightInset,
+    contentBottomInset
+  )
+
+  if guideTouristUI.scrollBar then
+    guideTouristUI.scrollBar:ClearAllPoints()
+    guideTouristUI.scrollBar:SetPoint("TOPRIGHT", guideTouristUI.frame, "TOPRIGHT", -7, -31)
+    guideTouristUI.scrollBar:SetPoint(
+      "BOTTOMRIGHT",
+      guideTouristUI.frame,
+      "BOTTOMRIGHT",
+      -7,
+      scrollBottomInset
+    )
+    if needsScroll then
+      guideTouristUI.scrollBar:Show()
+    else
+      guideTouristUI.scrollBar:SetValue(0)
+      guideTouristUI.scrollBar:Hide()
+    end
+  end
+
+  guideTouristUI.scrollChild:SetHeight(math.max(1, contentHeight))
   guideTouristUI.GetRowWidth()
-  guideTouristUI.scrollChild:SetHeight(math.max(
-    1,
-    ((tonumber(rowCount) or 0) * 20) + (reserveFooter and 24 or 0)
-  ))
 end
 
 local function HideTouristRows()
@@ -5933,6 +5975,10 @@ local function RefreshTouristWindow(session)
     guideTouristUI.rows[index].frame:Hide()
   end
 
+  guideTouristUI.UpdateScrollContent(
+    table.getn(display) + table.getn(alerts),
+    false
+  )
   rowWidth = guideTouristUI.GetRowWidth()
   for index = 1, table.getn(display) do
     entry = display[index]
@@ -5984,7 +6030,6 @@ local function RefreshTouristWindow(session)
   end
 
   alertCount = RenderSingleObjectiveRows(alerts, table.getn(display), false)
-  guideTouristUI.UpdateScrollContent(table.getn(display) + alertCount, false)
   guideTouristUI.frame:Show()
 end
 
@@ -6264,6 +6309,10 @@ local function RefreshGuideTouristWindow()
     guideTouristUI.showHidden = false
   end
 
+  guideTouristUI.UpdateScrollContent(
+    table.getn(display) + table.getn(alerts),
+    session.mode == "GUIDE" and hiddenCount > 0
+  )
   rowWidth = guideTouristUI.GetRowWidth()
   for index = 1, table.getn(display) do
     entry = display[index]
@@ -6281,6 +6330,9 @@ local function RefreshGuideTouristWindow()
     row.strike:Hide()
     row.target:Hide()
     row.targetNpcName = nil
+    row.action:ClearAllPoints()
+    row.action:SetPoint("RIGHT", row.frame, "RIGHT", 0, 0)
+    row.action:SetWidth(52)
     row.action:Hide()
     row.disparityKey = nil
     row.disparityHidden = false
@@ -6311,7 +6363,7 @@ local function RefreshGuideTouristWindow()
       row.marker:SetText("")
       row.marker:SetWidth(0)
       instructionText, prefixText, markerText, suffixText = GuideTouristInstructionText(entry.instruction)
-      textWidth = math.max(1, rowWidth - 26 - (entry.completing and 0 or 58))
+      textWidth = math.max(1, rowWidth - 26 - (entry.completing and 0 or 28))
       RenderGuideTouristInstructionText(
         row,
         instructionText,
@@ -6328,7 +6380,16 @@ local function RefreshGuideTouristWindow()
 
       if not entry.completing then
         row.guideInstructionSeq = row.seq
-        row.action:SetText(L.INSTRUCTION_REMOVE or "Remove")
+        row.action:ClearAllPoints()
+        row.action:SetPoint(
+          "LEFT",
+          row.frame,
+          "LEFT",
+          8 + (tonumber(row.renderedTextWidth) or 0),
+          0
+        )
+        row.action:SetWidth(20)
+        row.action:SetText("-")
         row.action:Show()
       end
 
@@ -6361,10 +6422,6 @@ local function RefreshGuideTouristWindow()
     end
   end
 
-  guideTouristUI.UpdateScrollContent(
-    table.getn(display) + alertCount,
-    session.mode == "GUIDE" and hiddenCount > 0
-  )
   guideTouristUI.frame:Show()
 end
 
