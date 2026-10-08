@@ -714,5 +714,12 @@ GH9. **UNTESTED / SKIP-eligible — Ambiguous complex objective mapping.** If a 
 - No validation debt has been accepted for release.
 - External/runtime prerequisite: pfQuest.
 
+### Latest user runtime observations — 0.1.52-dev
+- PASS (user report): brown pfQuest bag icon; single-item/object alert row removal; a later separate 1/1 objective does not resurrect the earlier completed row; reload/resync produced no observed issues.
+- NOT YET EXERCISED: overflow scrollbar geometry.
+- New observation/question: exploration objective `Explore the Hidden Chamber` from `The Hidden Chamber` did not appear in the single-objective alert. Current eligibility deliberately filters to required=1 and type `item` or `object`; exploration is excluded. No change approved yet.
+- New observed tooltip duplication: pfQuest's original map-node objective/progress line overlaps semantically with PFQG's Group Progress section. Await user's preferred presentation before changing it.
+- Phase-5 chained layout controls, targeting, resizing and completion strike remain unverified specifically on 0.1.52.
+
 ## Exact Next Step
 Load 0.1.52-dev on both clients and runtime-check the newly implemented Phase-5 chained instruction layout. Guide rows should read `[-] [!/?] NPC - Quest` with the remove control pinned left, Tourist rows should have leftmost Done control, and FLIGHT should have a left marker followed directly by flight text without NPC/separator. Resize narrow/wide: preserve control/marker, abbreviate or hide NPC first, ellipsize primary text last; click an abbreviated NPC and verify exact raw-name targeting. Confirm Guide disparity Hide/Unhide is unaffected, scroll geometry remains correct, completion strike/fade works and no Lua errors occur. Continue the outstanding 0.1.51 single-objective brown bag/dinger/lifecycle tests on this build, distinguishing inherited behavior from the new renderer. No canonical Lua 5.0.3 compiler pass was run (vendored checker was not available in the executable environment). 0.1.52 is implemented/static-inspected only, not user-tested.
