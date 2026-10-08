@@ -5931,11 +5931,16 @@ local function RenderChainedInstructionRow(row, instruction, width, controlWidth
     + (anchor == row.separator and separatorWidth + gap or 0) + primaryWidth
   row.target:Hide()
   row.targetNpcName = Trim(SafeString(instruction and instruction.npcName))
-  if row.text:IsShown() and row.targetNpcName ~= ""
-    and type(TargetByName) == "function" then
+  if row.targetNpcName ~= "" and type(TargetByName) == "function"
+    and (row.text:IsShown() or gossip) then
     row.target:ClearAllPoints()
-    row.target:SetPoint("LEFT", row.text, "LEFT", 0, 0)
-    row.target:SetWidth(npcWidth)
+    if gossip then
+      row.target:SetPoint("LEFT", row.inlineSuffix, "LEFT", 0, 0)
+      row.target:SetWidth(primaryWidth)
+    else
+      row.target:SetPoint("LEFT", row.text, "LEFT", 0, 0)
+      row.target:SetWidth(npcWidth)
+    end
     row.target:Show()
   end
   row.strike:ClearAllPoints()
