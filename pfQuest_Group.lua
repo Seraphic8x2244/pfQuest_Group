@@ -5505,7 +5505,8 @@ local function BuildTouristDisplayRows()
       prefixText = prefixText,
       markerText = markerText,
       suffixText = suffixText,
-      actionText = L.INSTRUCTION_DONE or "Done",
+      instruction = instruction,
+        actionText = L.INSTRUCTION_DONE or "Done",
       targetNpcName = Trim(SafeString(instruction and instruction.npcName)),
       completing = false
     })
@@ -5521,6 +5522,7 @@ local function BuildTouristDisplayRows()
         prefixText = prefixText,
         markerText = markerText,
         suffixText = suffixText,
+        instruction = completion.instruction,
         actionText = nil,
         targetNpcName = Trim(SafeString(completion.instruction and completion.instruction.npcName)),
         completing = true,
@@ -5579,6 +5581,13 @@ local function EnsureTouristRow(index)
   CopyGroupTrackerFont(row.text, row.inlineSuffix, 12)
   row.inlineSuffix:SetTextColor(1, 1, 1, 1)
   row.inlineSuffix:Hide()
+
+  row.separator = row.frame:CreateFontString(nil, "OVERLAY")
+  row.separator:SetHeight(20)
+  row.separator:SetJustifyH("LEFT")
+  CopyGroupTrackerFont(row.text, row.separator, 12)
+  row.separator:SetTextColor(1, 1, 1, 1)
+  row.separator:Hide()
 
   row.target = CreateFrame("Button", nil, row.frame)
   row.target:SetPoint("LEFT", row.frame, "LEFT", 4, 0)
@@ -5758,6 +5767,89 @@ local function RenderGuideTouristInstructionText(row, text, prefixText, markerTe
   end
 
   row.renderedTextWidth = math.min(availableWidth, prefixWidth + markerWidth + suffixWidth)
+end
+
+local function RenderChainedInstructionRow(row, instruction, width, controlWidth)
+  local full, prefix, marker = GuideTouristInstructionText(instruction)
+  local flight = instruction and instruction.actionType == "FLIGHT"
+  local npc = flight and "" or Trim(SafeString(prefix))
+  local primary = SafeString(instruction and instruction.questTitle)
+  local gap = 4
+  local markerWidth
+  local remaining
+  local npcWidth = 0
+  local separatorWidth = 0
+  local primaryWidth
+  local ignored
+  local anchor
+  local npcBudget
+
+  if primary == "" then
+    primary = string.format(L.QUEST_ID_FALLBACK or "Quest %d",
+      tonumber(instruction and instruction.questID) or 0)
+  end
+  if flight then
+    marker = ">"
+    primary = full
+  end
+  row.inlineMarker:ClearAllPoints()
+  if controlWidth > 0 then
+    row.inlineMarker:SetPoint("LEFT", row.action, "RIGHT", gap, 0)
+  else
+    row.inlineMarker:SetPoint("LEFT", row.frame, "LEFT", 0, 0)
+  end
+  row.inlineMarker:SetWidth(10000)
+  row.inlineMarker:SetText(marker or "?")
+  markerWidth = math.max(12, row.inlineMarker:GetStringWidth())
+  row.inlineMarker:SetWidth(markerWidth)
+  row.inlineMarker:Show()
+  remaining = math.max(0, width - controlWidth
+    - (controlWidth > 0 and gap or 0) - markerWidth - gap - 2)
+  anchor = row.inlineMarker
+  row.text:Hide()
+  row.separator:Hide()
+  if npc ~= "" and remaining >= 126 then
+    row.separator:SetWidth(10000)
+    row.separator:SetText(" - ")
+    separatorWidth = row.separator:GetStringWidth()
+    npcBudget = remaining - 90 - separatorWidth - gap
+    if npcBudget >= 32 then
+      row.text:ClearAllPoints()
+      row.text:SetPoint("LEFT", row.inlineMarker, "RIGHT", gap, 0)
+      ignored, npcWidth = guideTouristUI.EllipsizeFontString(row.text, npc, npcBudget)
+      if npcWidth >= 24 then
+        row.text:SetWidth(npcWidth)
+        row.text:Show()
+        row.separator:ClearAllPoints()
+        row.separator:SetPoint("LEFT", row.text, "RIGHT", 0, 0)
+        row.separator:SetWidth(separatorWidth)
+        row.separator:Show()
+        anchor = row.separator
+        remaining = remaining - npcWidth - separatorWidth - gap
+      else
+        npcWidth = 0
+      end
+    end
+  end
+  row.inlineSuffix:ClearAllPoints()
+  row.inlineSuffix:SetPoint("LEFT", anchor, "RIGHT", gap, 0)
+  ignored, primaryWidth = guideTouristUI.EllipsizeFontString(
+    row.inlineSuffix, primary, remaining)
+  row.inlineSuffix:Show()
+  row.renderedTextWidth = markerWidth + gap + npcWidth
+    + (anchor == row.separator and separatorWidth + gap or 0) + primaryWidth
+  row.target:Hide()
+  row.targetNpcName = Trim(SafeString(instruction and instruction.npcName))
+  if row.text:IsShown() and row.targetNpcName ~= ""
+    and type(TargetByName) == "function" then
+    row.target:ClearAllPoints()
+    row.target:SetPoint("LEFT", row.text, "LEFT", 0, 0)
+    row.target:SetWidth(npcWidth)
+    row.target:Show()
+  end
+  row.strike:ClearAllPoints()
+  row.strike:SetPoint("LEFT", row.inlineMarker, "LEFT", 0, 0)
+  row.strike:SetWidth(math.min(width, row.renderedTextWidth))
 end
 
 local function EnsureSingleObjectiveRow(index)
@@ -5990,33 +6082,18 @@ local function RefreshTouristWindow(session)
     row.frame:SetAlpha(1)
     row.seq = entry.seq
     row.targetNpcName = entry.targetNpcName
-    textWidth = math.max(1, rowWidth - 26 - (entry.actionText and 58 or 0))
-    RenderGuideTouristInstructionText(
-      row,
-      entry.text,
-      entry.prefixText,
-      entry.markerText,
-      entry.suffixText,
-      textWidth
-    )
-    row.strike:Hide()
-    row.target:SetWidth(textWidth)
-    row.target:Hide()
     row.actionLabel:SetText(entry.actionText or "")
+    row.action:ClearAllPoints()
+    row.action:SetPoint("LEFT", row.frame, "LEFT", 0, 0)
+    row.action:SetWidth(52)
     row.action:Hide()
-
-    if row.targetNpcName
-      and row.targetNpcName ~= ""
-      and type(TargetByName) == "function" then
-      row.target:Show()
-    end
-
     if entry.actionText then
       row.action:Show()
     end
-
+    RenderChainedInstructionRow(row, entry.instruction, rowWidth,
+      entry.actionText and 52 or 0)
+    row.strike:Hide()
     if entry.completing then
-      row.strike:SetWidth(math.min(row.renderedTextWidth or row.text:GetStringWidth(), textWidth))
       row.strike:Show()
       if entry.completion then
         entry.completion.row = row
@@ -6083,6 +6160,13 @@ local function EnsureGuideTouristRow(index)
   CopyGroupTrackerFont(row.text, row.inlineSuffix, 12)
   row.inlineSuffix:SetTextColor(1, 1, 1, 1)
   row.inlineSuffix:Hide()
+
+  row.separator = row.frame:CreateFontString(nil, "OVERLAY")
+  row.separator:SetHeight(20)
+  row.separator:SetJustifyH("LEFT")
+  CopyGroupTrackerFont(row.text, row.separator, 12)
+  row.separator:SetTextColor(1, 1, 1, 1)
+  row.separator:Hide()
 
   row.target = CreateFrame("Button", nil, row.frame)
   row.target:SetPoint("LEFT", row.frame, "LEFT", 4, 0)
@@ -6328,6 +6412,7 @@ local function RefreshGuideTouristWindow()
     row.text:SetWidth(math.max(1, rowWidth - 26))
     row.inlineMarker:Hide()
     row.inlineSuffix:Hide()
+    row.separator:Hide()
     row.strike:Hide()
     row.target:Hide()
     row.targetNpcName = nil
@@ -6363,39 +6448,17 @@ local function RefreshGuideTouristWindow()
       row.seq = tonumber(entry.instruction and entry.instruction.seq) or 0
       row.marker:SetText("")
       row.marker:SetWidth(0)
-      instructionText, prefixText, markerText, suffixText = GuideTouristInstructionText(entry.instruction)
-      textWidth = math.max(1, rowWidth - 26 - (entry.completing and 0 or 28))
-      RenderGuideTouristInstructionText(
-        row,
-        instructionText,
-        prefixText,
-        markerText,
-        suffixText,
-        textWidth
-      )
-      row.target:SetWidth(textWidth)
-      row.targetNpcName = Trim(SafeString(entry.instruction and entry.instruction.npcName))
-      if row.targetNpcName ~= "" and type(TargetByName) == "function" then
-        row.target:Show()
-      end
-
+      row.action:ClearAllPoints()
+      row.action:SetPoint("LEFT", row.frame, "LEFT", 0, 0)
+      row.action:SetWidth(20)
+      row.action:SetText("-")
       if not entry.completing then
         row.guideInstructionSeq = row.seq
-        row.action:ClearAllPoints()
-        row.action:SetPoint(
-          "LEFT",
-          row.frame,
-          "LEFT",
-          8 + (tonumber(row.renderedTextWidth) or 0),
-          0
-        )
-        row.action:SetWidth(20)
-        row.action:SetText("-")
         row.action:Show()
       end
-
+      RenderChainedInstructionRow(row, entry.instruction, rowWidth,
+        entry.completing and 0 or 20)
       if entry.completing then
-        row.strike:SetWidth(math.min(row.renderedTextWidth or row.text:GetStringWidth(), textWidth))
         row.strike:Show()
         entry.completion.row = row
       end
