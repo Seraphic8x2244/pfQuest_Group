@@ -6586,6 +6586,7 @@ local function RefreshGuideTouristWindow()
       row.disparityKey = disparity.key
       row.disparityHidden = disparity.hidden and true or false
       row.marker:ClearAllPoints()
+      row.action:ClearAllPoints()
       row.action:SetPoint("LEFT", row.frame, "LEFT", 0, 0)
       row.marker:SetPoint("LEFT", row.action, "RIGHT", 4, 0)
       row.marker:SetWidth(18)
