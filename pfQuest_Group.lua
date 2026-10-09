@@ -6878,20 +6878,28 @@ local function InitializeMinimapButton()
   local button = CreateFrame("Button", "pfQuest_GroupMinimapButton", Minimap)
   local menu = CreateFrame("Frame", "pfQuest_GroupMinimapMenu", UIParent, "UIDropDownMenuTemplate")
   local location = Addon.db.ui.minimapButton
-  local dragging = false
   local dragFinished = false
-  button:SetWidth(28)
-  button:SetHeight(28)
+  button:SetWidth(31)
+  button:SetHeight(31)
+  button:SetMovable(true)
   button:SetFrameStrata("MEDIUM")
   button:SetFrameLevel(8)
   button:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
-  button:SetNormalTexture("Interface\\Minimap\\UI-Minimap-TrackingBorder")
   button:SetPoint("CENTER", Minimap, "CENTER", location.x, location.y)
-  local image = button:CreateTexture(nil, "ARTWORK")
-  image:SetWidth(18)
-  image:SetHeight(18)
-  image:SetPoint("CENTER", button, "CENTER", 0, 0)
-  image:SetTexture("Interface\\Icons\\INV_Misc_Map_01")
+  local icon = button:CreateTexture(nil, "BACKGROUND")
+  icon:SetWidth(20)
+  icon:SetHeight(20)
+  icon:SetPoint("CENTER", button, "CENTER", 0, 0)
+  icon:SetTexture("Interface\\Icons\\INV_Misc_Map_01")
+  icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+  button.icon = icon
+
+  local border = button:CreateTexture(nil, "OVERLAY")
+  border:SetWidth(53)
+  border:SetHeight(53)
+  border:SetPoint("TOPLEFT", button, "TOPLEFT", 0, 0)
+  border:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
+  button.border = border
 
   UIDropDownMenu_Initialize(menu, function()
     local level = UIDROPDOWNMENU_MENU_LEVEL or 1
@@ -6950,28 +6958,16 @@ local function InitializeMinimapButton()
     dragFinished = false
   end)
   button:SetScript("OnDragStart", function()
-    dragging = true
     dragFinished = true
+    button:StartMoving()
   end)
   button:SetScript("OnDragStop", function()
-    dragging = false
-  end)
-  button:SetScript("OnUpdate", function()
-    if not dragging then
-      return
-    end
-    local x, y = GetCursorPosition()
-    local scale = Minimap:GetEffectiveScale()
-    x = x / scale - (Minimap:GetLeft() + Minimap:GetWidth() / 2)
-    y = y / scale - (Minimap:GetBottom() + Minimap:GetHeight() / 2)
-    local distance = math.sqrt(x * x + y * y)
-    if distance > 0 then
-      x = x * 80 / distance
-      y = y * 80 / distance
-      button:ClearAllPoints()
-      button:SetPoint("CENTER", Minimap, "CENTER", x, y)
-      location.x = x
-      location.y = y
+    button:StopMovingOrSizing()
+    local x, y = button:GetCenter()
+    local mx, my = Minimap:GetCenter()
+    if x and y and mx and my then
+      location.x = math.floor(x - mx + 0.5)
+      location.y = math.floor(y - my + 0.5)
     end
   end)
   button:SetScript("OnClick", function()
