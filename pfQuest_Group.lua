@@ -6574,20 +6574,20 @@ local function RefreshGuideTouristWindow()
       row.disparityKey = disparity.key
       row.disparityHidden = disparity.hidden and true or false
       row.marker:ClearAllPoints()
-      row.marker:SetPoint("LEFT", row.frame, "LEFT", 0, 0)
+      row.action:SetPoint("LEFT", row.frame, "LEFT", 0, 0)
+      row.marker:SetPoint("LEFT", row.action, "RIGHT", 4, 0)
       row.marker:SetWidth(18)
       row.marker:SetText("!")
       row.marker:SetTextColor(1, 0.35, 0.15)
       row.text:ClearAllPoints()
       row.text:SetPoint("LEFT", row.marker, "RIGHT", 4, 0)
-      textWidth = math.max(1, rowWidth - 18 - 4 - 52 - 8)
+      textWidth = math.max(1, rowWidth - 52 - 4 - 18 - 4 - 4)
       ignored, renderedWidth = guideTouristUI.EllipsizeFontString(row.text, string.format(
         L.DISPARITY_MISSING_QUEST or "%s missing: %s",
         SafeString(disparity.playerName),
         SafeString(disparity.quest and disparity.quest.title)
       ), textWidth)
       row.renderedTextWidth = renderedWidth
-      row.action:SetPoint("LEFT", row.text, "RIGHT", 4, 0)
       row.action:SetText(row.disparityHidden and (L.DISPARITY_UNHIDE or "Unhide") or (L.DISPARITY_HIDE or "Hide"))
       row.action:Show()
       if row.disparityHidden then
