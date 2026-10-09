@@ -6916,14 +6916,14 @@ local function InitializeMinimapButton()
     local mode = Addon.db.session.mode
     if level == 1 then
       add(L.MINIMAP_GUIDE or "Guide", "GUIDE", mode == "GUIDE", nil, function()
-        Addon.SetMode("GUIDE")
+        if Addon.db.session.mode == "GUIDE" then
+          Addon.SetMode("OFF")
+        else
+          Addon.SetMode("GUIDE")
+        end
         PrintSessionText(SessionStatusText())
       end)
       add(L.MINIMAP_TOURIST or "Tourist", "TOURIST", mode == "TOURIST", true, nil)
-      add(L.MINIMAP_OFF or "Off", "OFF", mode == "OFF", nil, function()
-        Addon.SetMode("OFF")
-        PrintSessionText(SessionStatusText())
-      end)
       add(L.MINIMAP_STATUS or "Status", "STATUS", false, nil, function()
         PrintSessionText(SessionStatusText())
       end)
