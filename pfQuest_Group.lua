@@ -40,6 +40,8 @@ local pendingAccept = nil
 local pendingTurnin = nil
 local pendingAbandon = nil
 local touristPendingInstructions = {}
+-- Transient display grace for newly accepted Guide quests; not protocol state.
+local guideQuestDisparityGrace = {}
 local guideTouristUI = {
   frame = nil,
   title = nil,
@@ -4953,6 +4955,12 @@ local function HandleInstructionQuestAction(actionType, quest, context)
   end
 
   if session.mode == "GUIDE" and session.guideSessionId then
+    if actionType == "ACCEPT" then
+      local questKey = quest and (quest.key or QuestKey(quest.questID, quest.title))
+      if questKey then
+        guideQuestDisparityGrace[session.guideSessionId .. "|" .. SafeString(questKey)] = GetTime() + 10
+      end
+    end
     Addon.CreateGuideInstruction({
       actionType = actionType,
       questID = tonumber(context and context.questID) or tonumber(quest and quest.questID),
@@ -5297,6 +5305,7 @@ local function BuildGuideDisparities(session)
   local questKey
   local quest
   local disparityKey
+  local now = GetTime()
 
   if not session or session.mode ~= "GUIDE" or not session.guideSessionId or not questState.ready then
     return output
@@ -5325,7 +5334,9 @@ local function BuildGuideDisparities(session)
         and peer.questState
         and peer.questState.ready then
         for questKey, quest in pairs(questState.quests or {}) do
-          if not FindRemoteTrackerQuest(peer.questState, quest) then
+          if not FindRemoteTrackerQuest(peer.questState, quest)
+            and not (guideQuestDisparityGrace[session.guideSessionId .. "|" .. SafeString(quest.key or QuestKey(quest.questID, quest.title))]
+              and now < guideQuestDisparityGrace[session.guideSessionId .. "|" .. SafeString(quest.key or QuestKey(quest.questID, quest.title))]) then
             disparityKey = GuideDisparityKey(peer.name or member.name or name, quest)
             table.insert(output, {
               key = disparityKey,
@@ -6543,6 +6554,8 @@ local function RefreshGuideTouristWindow()
     row.inlineMarker:Hide()
     row.inlineSuffix:Hide()
     row.separator:Hide()
+    row.gossipIcon:Hide()
+    row.flightIcon:Hide()
     row.strike:Hide()
     row.target:Hide()
     row.targetNpcName = nil
@@ -6560,15 +6573,21 @@ local function RefreshGuideTouristWindow()
       row.seq = nil
       row.disparityKey = disparity.key
       row.disparityHidden = disparity.hidden and true or false
+      row.marker:ClearAllPoints()
+      row.marker:SetPoint("LEFT", row.frame, "LEFT", 0, 0)
+      row.marker:SetWidth(18)
       row.marker:SetText("!")
       row.marker:SetTextColor(1, 0.35, 0.15)
-      textWidth = math.max(1, rowWidth - 26 - 58)
+      row.text:ClearAllPoints()
+      row.text:SetPoint("LEFT", row.marker, "RIGHT", 4, 0)
+      textWidth = math.max(1, rowWidth - 18 - 4 - 52 - 8)
       ignored, renderedWidth = guideTouristUI.EllipsizeFontString(row.text, string.format(
         L.DISPARITY_MISSING_QUEST or "%s missing: %s",
         SafeString(disparity.playerName),
         SafeString(disparity.quest and disparity.quest.title)
       ), textWidth)
       row.renderedTextWidth = renderedWidth
+      row.action:SetPoint("LEFT", row.text, "RIGHT", 4, 0)
       row.action:SetText(row.disparityHidden and (L.DISPARITY_UNHIDE or "Unhide") or (L.DISPARITY_HIDE or "Hide"))
       row.action:Show()
       if row.disparityHidden then
@@ -6796,6 +6815,19 @@ local function InitializeGuideTouristWindow()
   end)
   guideTouristUI.frame:SetScript("OnUpdate", function()
     UpdateGuideTouristCompletion()
+    local now = GetTime()
+    local expired = false
+    local key
+    local expires
+    for key, expires in pairs(guideQuestDisparityGrace) do
+      if now >= expires then
+        guideQuestDisparityGrace[key] = nil
+        expired = true
+      end
+    end
+    if expired then
+      RefreshGuideTouristWindow()
+    end
   end)
 
   RefreshGuideTouristWindow()
