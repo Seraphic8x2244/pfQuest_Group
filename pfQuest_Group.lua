@@ -6946,6 +6946,9 @@ local function InitializeMinimapButton()
 
   button:RegisterForClicks("LeftButtonUp", "RightButtonUp")
   button:RegisterForDrag("LeftButton")
+  button:SetScript("OnMouseDown", function()
+    dragFinished = false
+  end)
   button:SetScript("OnDragStart", function()
     dragging = true
     dragFinished = true
