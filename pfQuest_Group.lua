@@ -62,7 +62,8 @@ local guideTouristUI = {
   defaultHeight = 154,
   minWidth = 300,
   minHeight = 74,
-  refresh = nil
+  refresh = nil,
+  panelVisible = true
 }
 
 local function SafeString(value)
@@ -602,6 +603,12 @@ local function NormalizeUIState(state)
     window.height = math.max(guideTouristUI.minHeight, window.height)
   end
 
+  if type(state.minimapButton) ~= "table" then
+    state.minimapButton = {}
+  end
+  state.minimapButton.x = tonumber(state.minimapButton.x) or -74
+  state.minimapButton.y = tonumber(state.minimapButton.y) or -70
+  state.guideWindow.visible = state.guideWindow.visible ~= false
   return state
 end
 
@@ -6409,6 +6416,11 @@ local function RefreshGuideTouristWindow()
     return
   end
 
+  if not guideTouristUI.panelVisible then
+    guideTouristUI.frame:Hide()
+    return
+  end
+
   if not session
     or session.mode == "OFF"
     or (session.mode == "GUIDE" and not Addon.GuideHasActiveTourist(session)) then
@@ -6720,6 +6732,7 @@ local function InitializeGuideTouristWindow()
 
   Addon.db.ui = NormalizeUIState(Addon.db.ui)
   state = Addon.db.ui.guideWindow
+  guideTouristUI.panelVisible = state.visible
 
   guideTouristUI.frame = CreateFrame("Frame", "pfQuest_GroupGuideTouristFrame", UIParent)
   guideTouristUI.frame:SetWidth(state.width)
@@ -6857,6 +6870,125 @@ local function PrintSessionText(text)
   end
 end
 
+local function InitializeMinimapButton()
+  if not Addon.db or not Minimap then
+    return
+  end
+
+  local button = CreateFrame("Button", "pfQuest_GroupMinimapButton", Minimap)
+  local menu = CreateFrame("Frame", "pfQuest_GroupMinimapMenu", UIParent, "UIDropDownMenuTemplate")
+  local location = Addon.db.ui.minimapButton
+  local dragging = false
+  button:SetWidth(28)
+  button:SetHeight(28)
+  button:SetFrameStrata("MEDIUM")
+  button:SetFrameLevel(8)
+  button:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
+  button:SetNormalTexture("Interface\\Minimap\\UI-Minimap-TrackingBorder")
+  button:SetPoint("CENTER", Minimap, "CENTER", location.x, location.y)
+  local image = button:CreateTexture(nil, "ARTWORK")
+  image:SetWidth(18)
+  image:SetHeight(18)
+  image:SetPoint("CENTER", button, "CENTER", 0, 0)
+  image:SetTexture("Interface\\Icons\\INV_Misc_Map_01")
+
+  UIDropDownMenu_Initialize(menu, function()
+    local level = UIDROPDOWNMENU_MENU_LEVEL or 1
+    local info
+    local function add(text, value, checked, hasArrow, action)
+      info = {}
+      info.text = text
+      info.value = value
+      info.checked = checked
+      info.hasArrow = hasArrow
+      info.func = action
+      UIDropDownMenu_AddButton(info, level)
+    end
+    local mode = Addon.db.session.mode
+    if level == 1 then
+      add(L.MINIMAP_GUIDE or "Guide", "GUIDE", mode == "GUIDE", nil, function()
+        Addon.SetMode("GUIDE")
+        PrintSessionText(SessionStatusText())
+      end)
+      add(L.MINIMAP_TOURIST or "Tourist", "TOURIST", mode == "TOURIST", true, nil)
+      add(L.MINIMAP_OFF or "Off", "OFF", mode == "OFF", nil, function()
+        Addon.SetMode("OFF")
+        PrintSessionText(SessionStatusText())
+      end)
+      add(L.MINIMAP_STATUS or "Status", "STATUS", false, nil, function()
+        PrintSessionText(SessionStatusText())
+      end)
+    elseif level == 2 and UIDROPDOWNMENU_MENU_VALUE == "TOURIST" then
+      local count = 0
+      local slot
+      for slot = 1, 4 do
+        local unit = "party" .. slot
+        if UnitExists(unit) then
+          local name = UnitName(unit)
+          if name and name ~= "" and NormalizeName(name) ~= NormalizeName(playerName) then
+            count = count + 1
+            local chosen = name
+            add(chosen, chosen, mode == "TOURIST"
+              and NormalizeName(Addon.db.session.guideName) == NormalizeName(chosen),
+              nil, function()
+                Addon.SetMode("TOURIST", chosen)
+                PrintSessionText(SessionStatusText())
+              end)
+          end
+        end
+      end
+      if count == 0 then
+        add(L.MINIMAP_NO_PARTY or "No party members", "NONE", false, nil, nil)
+      end
+    end
+  end, "MENU")
+
+  button:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+  button:RegisterForDrag("LeftButton")
+  button:SetScript("OnDragStart", function()
+    dragging = true
+  end)
+  button:SetScript("OnDragStop", function()
+    dragging = false
+  end)
+  button:SetScript("OnUpdate", function()
+    if not dragging then
+      return
+    end
+    local x, y = GetCursorPosition()
+    local scale = Minimap:GetEffectiveScale()
+    x = x / scale - (Minimap:GetLeft() + Minimap:GetWidth() / 2)
+    y = y / scale - (Minimap:GetBottom() + Minimap:GetHeight() / 2)
+    local distance = math.sqrt(x * x + y * y)
+    if distance > 0 then
+      x = x * 80 / distance
+      y = y * 80 / distance
+      button:ClearAllPoints()
+      button:SetPoint("CENTER", Minimap, "CENTER", x, y)
+      location.x = x
+      location.y = y
+    end
+  end)
+  button:SetScript("OnClick", function()
+    if arg1 == "RightButton" then
+      ToggleDropDownMenu(1, nil, menu, button, 0, 0)
+    else
+      guideTouristUI.panelVisible = not guideTouristUI.panelVisible
+      Addon.db.ui.guideWindow.visible = guideTouristUI.panelVisible
+      RefreshGuideTouristWindow()
+    end
+  end)
+  button:SetScript("OnEnter", function()
+    GameTooltip:SetOwner(button, "ANCHOR_LEFT")
+    GameTooltip:SetText("pfQuest Group")
+    GameTooltip:AddLine(L.MINIMAP_HINT or "Left-click: panel  |  Right-click: modes  |  Drag: move", 1, 1, 1)
+    GameTooltip:Show()
+  end)
+  button:SetScript("OnLeave", function()
+    GameTooltip:Hide()
+  end)
+end
+
 local function HandleSlashCommand(message)
   local text = Trim(message)
   local command = ""
@@ -6956,6 +7088,7 @@ frame:SetScript("OnEvent", function()
     InstallGroupProgressTracker()
     Addon.InstallGroupHoldMapTooltip()
     InitializeGuideTouristWindow()
+    InitializeMinimapButton()
     initialized = true
     RefreshParty()
     return
