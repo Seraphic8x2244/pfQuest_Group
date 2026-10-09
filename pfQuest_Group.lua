@@ -6879,6 +6879,7 @@ local function InitializeMinimapButton()
   local menu = CreateFrame("Frame", "pfQuest_GroupMinimapMenu", UIParent, "UIDropDownMenuTemplate")
   local location = Addon.db.ui.minimapButton
   local dragging = false
+  local dragFinished = false
   button:SetWidth(28)
   button:SetHeight(28)
   button:SetFrameStrata("MEDIUM")
@@ -6947,6 +6948,7 @@ local function InitializeMinimapButton()
   button:RegisterForDrag("LeftButton")
   button:SetScript("OnDragStart", function()
     dragging = true
+    dragFinished = true
   end)
   button:SetScript("OnDragStop", function()
     dragging = false
@@ -6970,6 +6972,10 @@ local function InitializeMinimapButton()
     end
   end)
   button:SetScript("OnClick", function()
+    if dragFinished then
+      dragFinished = false
+      return
+    end
     if arg1 == "RightButton" then
       ToggleDropDownMenu(1, nil, menu, button, 0, 0)
     else
