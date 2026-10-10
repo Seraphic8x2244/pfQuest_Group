@@ -7,7 +7,7 @@ local L = pfQuest_Group_L or {}
 Addon.groupContextKey = nil
 
 local PROTOCOL_PREFIX = "PFQGROUP"
-local PROTOCOL_VERSION = 4
+local PROTOCOL_VERSION = 5
 local DB_SCHEMA_VERSION = 3
 local CHUNK_SIZE = 180
 local MAX_CHUNKS = 64
@@ -322,6 +322,7 @@ local function NormalizeInstructionRecord(record, fallbackSeq)
   local questTitle
   local npcName
   local flightName
+  local npcReaction
 
   if type(record) ~= "table" then
     return nil
@@ -343,6 +344,14 @@ local function NormalizeInstructionRecord(record, fallbackSeq)
   questTitle = SafeString(record.questTitle)
   npcName = SafeString(record.npcName)
   flightName = Trim(SafeString(record.flightName))
+  npcReaction = tonumber(record.npcReaction)
+  if npcReaction == 4 then
+    npcReaction = 4
+  elseif npcReaction and npcReaction >= 5 and npcReaction <= 8 then
+    npcReaction = 5
+  else
+    npcReaction = nil
+  end
 
   if actionType == "FLIGHT" then
     if flightName == "" then
@@ -377,7 +386,8 @@ local function NormalizeInstructionRecord(record, fallbackSeq)
     questTitle = questTitle,
     mobID = mobID,
     npcName = npcName,
-    flightName = flightName
+    flightName = flightName,
+    npcReaction = npcReaction
   }
 end
 
@@ -1488,6 +1498,27 @@ local function CurrentQuestNpcName()
   return name
 end
 
+-- Record the interacting NPC's reaction to the Guide (not quest difficulty).
+-- An unmatched target is never used as a colour source.
+local function CurrentQuestNpcReaction(npcName)
+  if not npcName or npcName == "" or type(UnitReaction) ~= "function" then
+    return nil
+  end
+
+  local unit
+  for _, unit in ipairs({ "npc", "target" }) do
+    if type(UnitName) == "function" and UnitName(unit) == npcName then
+      local reaction = tonumber(UnitReaction(unit, "player"))
+      if reaction == 4 then
+        return 4
+      elseif reaction and reaction >= 5 and reaction <= 8 then
+        return 5
+      end
+    end
+  end
+  return nil
+end
+
 local function CurrentDialogQuestTitle()
   if type(GetTitleText) == "function" then
     local title = GetTitleText()
@@ -1518,9 +1549,11 @@ local function InstallQuestActionHooks()
   if type(AcceptQuest) == "function" then
     local previousAcceptQuest = AcceptQuest
     AcceptQuest = function()
+      local npcName = CurrentQuestNpcName()
       pendingAccept = {
         title = CurrentDialogQuestTitle(),
-        npcName = CurrentQuestNpcName(),
+        npcName = npcName,
+        npcReaction = CurrentQuestNpcReaction(npcName),
         time = GetTime()
       }
       previousAcceptQuest()
@@ -1531,9 +1564,11 @@ local function InstallQuestActionHooks()
   if type(GetQuestReward) == "function" then
     local previousGetQuestReward = GetQuestReward
     GetQuestReward = function(choice)
+      local npcName = CurrentQuestNpcName()
       pendingTurnin = {
         title = CurrentDialogQuestTitle(),
-        npcName = CurrentQuestNpcName(),
+        npcName = npcName,
+        npcReaction = CurrentQuestNpcReaction(npcName),
         time = GetTime()
       }
       previousGetQuestReward(choice)
@@ -1618,6 +1653,9 @@ local function BuildActionContext(quest, phase, pending)
 
   if pending and phase then
     context.mobID, context.npcName = ResolveQuestNpc(quest.questID, phase, pending.npcName)
+    if context.npcName == pending.npcName then
+      context.npcReaction = pending.npcReaction
+    end
   end
 
   return context
@@ -3606,7 +3644,8 @@ local function CopyInstruction(source)
     questTitle = source.questTitle,
     mobID = source.mobID,
     npcName = source.npcName,
-    flightName = source.flightName
+    flightName = source.flightName,
+    npcReaction = source.npcReaction
   }
 end
 
@@ -3644,7 +3683,8 @@ local function EncodeInstructionRecord(instruction)
     SafeString(instruction.mobID or 0),
     HexEncode(instruction.questTitle),
     HexEncode(instruction.npcName),
-    HexEncode(instruction.flightName)
+    HexEncode(instruction.flightName),
+    SafeString(instruction.npcReaction or 0)
   }, ".")
 end
 
@@ -3657,6 +3697,7 @@ local function DecodeInstructionRecord(record)
   local questTitle
   local npcName
   local flightName
+  local npcReaction
 
   if fields[1] ~= "I" or table.getn(fields) < 7 then
     return nil
@@ -3693,6 +3734,14 @@ local function DecodeInstructionRecord(record)
   questTitle = HexDecode(fields[6])
   npcName = HexDecode(fields[7])
   flightName = HexDecode(fields[8] or "")
+  npcReaction = tonumber(fields[9])
+  if npcReaction == 4 then
+    npcReaction = 4
+  elseif npcReaction and npcReaction >= 5 and npcReaction <= 8 then
+    npcReaction = 5
+  else
+    npcReaction = nil
+  end
 
   if actionType == "FLIGHT" then
     if flightName == "" then
@@ -3720,7 +3769,8 @@ local function DecodeInstructionRecord(record)
     questTitle = questTitle,
     mobID = mobID,
     npcName = npcName,
-    flightName = flightName
+    flightName = flightName,
+    npcReaction = npcReaction
   }
 end
 
@@ -5016,7 +5066,8 @@ local function HandleInstructionQuestAction(actionType, quest, context)
       questID = tonumber(context and context.questID) or tonumber(quest and quest.questID),
       questTitle = SafeString((context and context.questTitle) or (quest and quest.title)),
       mobID = tonumber(context and context.mobID),
-      npcName = SafeString(context and context.npcName)
+      npcName = SafeString(context and context.npcName),
+      npcReaction = context and context.npcReaction
     })
     return
   end
@@ -5111,7 +5162,8 @@ function Addon.HandleGossipAction(npcName)
     end
     return Addon.CreateGuideInstruction({
       actionType = "GOSSIP",
-      npcName = npcName
+      npcName = npcName,
+      npcReaction = CurrentQuestNpcReaction(npcName)
     })
   end
 
@@ -5134,52 +5186,41 @@ function Addon.HandleGossipAction(npcName)
 end
 
 local function GuideTouristNpcDisplayName(instruction, npcName)
-  local mobID = tonumber(instruction and instruction.mobID)
-  local unitData
-  local npcLevel
-  local color
-  local red
-  local green
-  local colorCode
+  local reaction = tonumber(instruction and instruction.npcReaction)
+  if npcName == "" then return npcName end
+  if reaction == 4 then
+    return "|cffffff00" .. npcName .. "|r" -- neutral to Guide
+  elseif reaction and reaction >= 5 then
+    return "|cff40bf40" .. npcName .. "|r" -- friendly to Guide
+  end
+  return npcName -- never infer reaction from the quest or mob level
+end
 
-  if npcName == "" or not mobID then
-    return npcName
-  end
-
-  if pfDB and pfDB.units and pfDB.units.data then
-    unitData = pfDB.units.data[mobID]
-  end
-  npcLevel = tonumber(unitData and unitData.lvl)
-  if not npcLevel then
-    return npcName
-  end
-
-  if pfQuestCompat and type(pfQuestCompat.GetDifficultyColor) == "function" then
-    color = pfQuestCompat.GetDifficultyColor(npcLevel)
-  elseif type(GetQuestDifficultyColor) == "function" then
-    color = GetQuestDifficultyColor(npcLevel)
-  end
-  if not color then
-    return npcName
-  end
-
-  red = tonumber(color.r) or 0
-  green = tonumber(color.g) or 0
-  if red >= 0.9 then
-    if green < 0.3 then
-      colorCode = "|cffff3333"
-    elseif green < 0.9 then
-      colorCode = "|cffff8040"
-    else
-      colorCode = "|cffffff00"
+-- Only shorten a multiword NPC name when the row's measured width needs it.
+local function AbbreviateGuideNpcName(npcName)
+  local initials = ""
+  local lastWord
+  local startAt = 1
+  local spaceAt
+  local word
+  if not string.find(npcName, " ", 1, true) then return npcName end
+  while startAt <= string.len(npcName) do
+    spaceAt = string.find(npcName, " ", startAt, true)
+    if not spaceAt then
+      lastWord = string.sub(npcName, startAt)
+      break
     end
-  else
-    -- The requested panel palette has no gray/trivial state, so lower
-    -- difficulty NPCs intentionally fold into green.
-    colorCode = "|cff40bf40"
+    word = string.sub(npcName, startAt, spaceAt - 1)
+    if word ~= "" then initials = initials .. string.sub(word, 1, 1) .. "." end
+    startAt = spaceAt + 1
+    while string.sub(npcName, startAt, startAt) == " " do
+      startAt = startAt + 1
+    end
   end
-
-  return colorCode .. npcName .. "|r"
+  if initials ~= "" and lastWord and lastWord ~= "" then
+    return initials .. " " .. lastWord
+  end
+  return npcName
 end
 
 local function GuideTouristInstructionText(instruction)
@@ -5191,44 +5232,14 @@ local function GuideTouristInstructionText(instruction)
   local npcName = Trim(SafeString(instruction and instruction.npcName))
 
   if instruction and instruction.actionType == "GOSSIP" then
-    return npcName, npcName, "", ""
+    text = GuideTouristNpcDisplayName(instruction, npcName)
+    return text, text, "", ""
   end
   if instruction and instruction.actionType == "FLIGHT" then
     return string.format(
       L.INSTRUCTION_FLIGHT or "|cffffd100Fly|r to %s",
       SafeString(instruction.flightName)
     )
-  end
-  local shortNPC = npcName
-  local initials = ""
-  local startAt
-  local spaceAt
-  local word
-  local lastWord
-
-  if string.len(npcName) > 18 then
-    startAt = 1
-    while startAt <= string.len(npcName) do
-      spaceAt = string.find(npcName, " ", startAt)
-      if not spaceAt then
-        lastWord = string.sub(npcName, startAt)
-        break
-      end
-
-      word = string.sub(npcName, startAt, spaceAt - 1)
-      if word ~= "" then
-        initials = initials .. string.sub(word, 1, 1) .. "."
-      end
-
-      startAt = spaceAt + 1
-      while startAt <= string.len(npcName) and string.sub(npcName, startAt, startAt) == " " do
-        startAt = startAt + 1
-      end
-    end
-
-    if initials ~= "" and lastWord and lastWord ~= "" then
-      shortNPC = initials .. " " .. lastWord
-    end
   end
 
   if instruction and instruction.questTitle and instruction.questTitle ~= "" then
@@ -5237,9 +5248,9 @@ local function GuideTouristInstructionText(instruction)
     text = string.format(L.QUEST_ID_FALLBACK or "Quest %d", tonumber(instruction and instruction.questID) or 0)
   end
 
-  if shortNPC ~= "" then
-    shortNPC = GuideTouristNpcDisplayName(instruction, shortNPC)
-    fullText = string.format(L.INSTRUCTION_WITH_NPC or "%s |cffffd100%s|r %s", shortNPC, marker, text)
+  if npcName ~= "" then
+    fullText = string.format(L.INSTRUCTION_WITH_NPC or "%s |cffffd100%s|r %s",
+      GuideTouristNpcDisplayName(instruction, npcName), marker, text)
   else
     fullText = string.format(L.INSTRUCTION_WITHOUT_NPC or "|cffffd100%s|r %s", marker, text)
   end
@@ -5252,7 +5263,6 @@ local function GuideTouristInstructionText(instruction)
       marker,
       string.sub(fullText, markerAt + string.len(markerText))
   end
-
   return fullText
 end
 
@@ -5705,7 +5715,7 @@ local function EnsureTouristRow(index)
 
   row.inlineMarker = row.frame:CreateFontString(nil, "OVERLAY")
   row.inlineMarker:SetHeight(20)
-  row.inlineMarker:SetJustifyH("LEFT")
+  row.inlineMarker:SetJustifyH("CENTER")
   row.inlineMarker:SetTextColor(1, 0.82, 0, 1)
   fontPath, fontSize, fontFlags = row.text:GetFont()
   if fontPath then
@@ -5717,18 +5727,25 @@ local function EnsureTouristRow(index)
   end
   row.inlineMarker:Hide()
 
-  row.gossipIcon = row.frame:CreateTexture(nil, "ARTWORK")
-  row.gossipIcon:SetWidth(16)
-  row.gossipIcon:SetHeight(16)
+  row.semanticIconSlot = CreateFrame("Frame", nil, row.frame)
+  row.semanticIconSlot:SetWidth(16)
+  row.semanticIconSlot:SetHeight(16)
+
+  row.gossipIcon = row.semanticIconSlot:CreateTexture(nil, "ARTWORK")
+  row.gossipIcon:SetPoint("CENTER", row.semanticIconSlot, "CENTER", 0, 0)
+  row.gossipIcon:SetWidth(14)
+  row.gossipIcon:SetHeight(14)
   row.gossipIcon:SetTexture("Interface\\GossipFrame\\GossipGossipIcon")
   row.gossipIcon:SetTexCoord(0, 1, 1, 0)
   row.gossipIcon:Hide()
 
-  row.flightIcon = row.frame:CreateTexture(nil, "ARTWORK")
-  row.flightIcon:SetWidth(16)
-  row.flightIcon:SetHeight(16)
+  row.flightIcon = row.semanticIconSlot:CreateTexture(nil, "ARTWORK")
+  row.flightIcon:SetPoint("CENTER", row.semanticIconSlot, "CENTER", 0, 0)
+  row.flightIcon:SetWidth(14)
+  row.flightIcon:SetHeight(14)
   row.flightIcon:SetTexture("Interface\\TaxiFrame\\UI-Taxi-Icon-Green")
-  row.flightIcon:SetTexCoord(0.25, 0.75, 0.25, 0.75)
+  -- Looser crop than 0.25..0.75 keeps the full winged boot in view.
+  row.flightIcon:SetTexCoord(0.10, 0.90, 0.10, 0.90)
   row.flightIcon:Hide()
 
   row.inlineSuffix = row.frame:CreateFontString(nil, "OVERLAY")
@@ -5937,7 +5954,7 @@ local function RenderChainedInstructionRow(row, instruction, width, controlWidth
   local full, prefix, marker = GuideTouristInstructionText(instruction)
   local flight = instruction and instruction.actionType == "FLIGHT"
   local gossip = instruction and instruction.actionType == "GOSSIP"
-  local npc = (flight or gossip) and "" or Trim(SafeString(prefix))
+  local npcName = (flight or gossip) and "" or Trim(SafeString(instruction and instruction.npcName))
   local primary = gossip and Trim(SafeString(instruction.npcName))
     or SafeString(instruction and instruction.questTitle)
   local gap = 4
@@ -5946,9 +5963,13 @@ local function RenderChainedInstructionRow(row, instruction, width, controlWidth
   local npcWidth = 0
   local separatorWidth = 0
   local primaryWidth
+  local fullPrimaryWidth
   local ignored
   local anchor
-  local npcBudget
+  local actionMarker
+  local npcFull
+  local npcShort
+  local chosenNPC
 
   if primary == "" then
     primary = string.format(L.QUEST_ID_FALLBACK or "Quest %d",
@@ -5957,11 +5978,13 @@ local function RenderChainedInstructionRow(row, instruction, width, controlWidth
   if flight then
     marker = ">"
     primary = full
+  elseif gossip then
+    primary = GuideTouristNpcDisplayName(instruction, primary)
   end
+
   row.inlineMarker:ClearAllPoints()
-  row.gossipIcon:ClearAllPoints()
-  local actionMarker = gossip and row.gossipIcon
-    or (flight and row.flightIcon or row.inlineMarker)
+  row.semanticIconSlot:ClearAllPoints()
+  actionMarker = (gossip or flight) and row.semanticIconSlot or row.inlineMarker
   if controlWidth > 0 then
     actionMarker:SetPoint("LEFT", row.action, "RIGHT", gap, 0)
   else
@@ -5975,41 +5998,63 @@ local function RenderChainedInstructionRow(row, instruction, width, controlWidth
     row.inlineMarker:Hide()
     row.gossipIcon:Hide()
     row.flightIcon:Hide()
-    actionMarker:Show()
+    if gossip then row.gossipIcon:Show() else row.flightIcon:Show() end
     markerWidth = 16
   else
     row.inlineMarker:Show()
     row.gossipIcon:Hide()
     row.flightIcon:Hide()
   end
+
   remaining = math.max(0, width - controlWidth
     - (controlWidth > 0 and gap or 0) - markerWidth - gap - 2)
   anchor = actionMarker
   row.text:Hide()
   row.separator:Hide()
-  if npc ~= "" and remaining >= 126 then
+
+  -- Preserve the complete quest title whenever possible:
+  -- full NPC -> abbreviated NPC -> no NPC/separator -> quest ellipsis.
+  row.inlineSuffix:SetWidth(10000)
+  row.inlineSuffix:SetText(primary)
+  fullPrimaryWidth = row.inlineSuffix:GetStringWidth()
+  if npcName ~= "" then
     row.separator:SetWidth(10000)
     row.separator:SetText(" - ")
     separatorWidth = row.separator:GetStringWidth()
-    npcBudget = remaining - 90 - separatorWidth - gap
-    if npcBudget >= 32 then
-      row.text:ClearAllPoints()
-      row.text:SetPoint("LEFT", row.inlineMarker, "RIGHT", gap, 0)
-      ignored, npcWidth = guideTouristUI.EllipsizeFontString(row.text, npc, npcBudget)
-      if npcWidth >= 24 then
-        row.text:SetWidth(npcWidth)
-        row.text:Show()
-        row.separator:ClearAllPoints()
-        row.separator:SetPoint("LEFT", row.text, "RIGHT", 0, 0)
-        row.separator:SetWidth(separatorWidth)
-        row.separator:Show()
-        anchor = row.separator
-        remaining = remaining - npcWidth - separatorWidth - gap
-      else
-        npcWidth = 0
+    npcFull = GuideTouristNpcDisplayName(instruction, npcName)
+    npcShort = GuideTouristNpcDisplayName(instruction, AbbreviateGuideNpcName(npcName))
+    row.text:SetWidth(10000)
+    row.text:SetText(npcFull)
+    npcWidth = row.text:GetStringWidth()
+    if npcWidth + separatorWidth + gap + fullPrimaryWidth <= remaining then
+      chosenNPC = npcFull
+    else
+      row.text:SetText(npcShort)
+      npcWidth = row.text:GetStringWidth()
+      if npcShort ~= npcFull
+        and npcWidth + separatorWidth + gap + fullPrimaryWidth <= remaining then
+        chosenNPC = npcShort
       end
     end
+
+    if chosenNPC then
+      row.text:ClearAllPoints()
+      row.text:SetPoint("LEFT", actionMarker, "RIGHT", gap, 0)
+      row.text:SetWidth(npcWidth)
+      row.text:SetText(chosenNPC)
+      row.text:Show()
+      row.separator:ClearAllPoints()
+      row.separator:SetPoint("LEFT", row.text, "RIGHT", 0, 0)
+      row.separator:SetWidth(separatorWidth)
+      row.separator:Show()
+      anchor = row.separator
+      remaining = remaining - npcWidth - separatorWidth - gap
+    else
+      npcWidth = 0
+      row.text:Hide()
+    end
   end
+
   row.inlineSuffix:ClearAllPoints()
   row.inlineSuffix:SetPoint("LEFT", anchor, "RIGHT", gap, 0)
   ignored, primaryWidth = guideTouristUI.EllipsizeFontString(
@@ -6052,16 +6097,16 @@ local function EnsureSingleObjectiveRow(index)
   row.frame:SetHeight(20)
 
   row.icon = row.frame:CreateTexture(nil, "ARTWORK")
-  row.icon:SetPoint("LEFT", row.frame, "LEFT", 1, 0)
-  row.icon:SetWidth(16)
-  row.icon:SetHeight(16)
+  row.icon:SetPoint("LEFT", row.frame, "LEFT", 2, 0)
+  row.icon:SetWidth(14)
+  row.icon:SetHeight(14)
   row.icon:SetTexture(SINGLE_OBJECTIVE_ICON)
 
   row.statusX = {}
   row.statusCheck = {}
   for slotIndex = 1, 4 do
     xText = row.frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    xText:SetPoint("LEFT", row.frame, "LEFT", 21 + ((slotIndex - 1) * 12), 0)
+    xText:SetPoint("LEFT", row.frame, "LEFT", 22 + ((slotIndex - 1) * 12), 0)
     xText:SetWidth(10)
     xText:SetHeight(18)
     xText:SetJustifyH("CENTER")
@@ -6071,7 +6116,7 @@ local function EnsureSingleObjectiveRow(index)
     row.statusX[slotIndex] = xText
 
     check = row.frame:CreateTexture(nil, "OVERLAY")
-    check:SetPoint("LEFT", row.frame, "LEFT", 21 + ((slotIndex - 1) * 12), 0)
+    check:SetPoint("LEFT", row.frame, "LEFT", 21.5 + ((slotIndex - 1) * 12), 0)
     check:SetWidth(11)
     check:SetHeight(11)
     check:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
@@ -6326,7 +6371,7 @@ local function EnsureGuideTouristRow(index)
 
   row.inlineMarker = row.frame:CreateFontString(nil, "OVERLAY")
   row.inlineMarker:SetHeight(20)
-  row.inlineMarker:SetJustifyH("LEFT")
+  row.inlineMarker:SetJustifyH("CENTER")
   row.inlineMarker:SetTextColor(1, 0.82, 0, 1)
   fontPath, fontSize, fontFlags = row.text:GetFont()
   if fontPath then
@@ -6338,18 +6383,25 @@ local function EnsureGuideTouristRow(index)
   end
   row.inlineMarker:Hide()
 
-  row.gossipIcon = row.frame:CreateTexture(nil, "ARTWORK")
-  row.gossipIcon:SetWidth(16)
-  row.gossipIcon:SetHeight(16)
+  row.semanticIconSlot = CreateFrame("Frame", nil, row.frame)
+  row.semanticIconSlot:SetWidth(16)
+  row.semanticIconSlot:SetHeight(16)
+
+  row.gossipIcon = row.semanticIconSlot:CreateTexture(nil, "ARTWORK")
+  row.gossipIcon:SetPoint("CENTER", row.semanticIconSlot, "CENTER", 0, 0)
+  row.gossipIcon:SetWidth(14)
+  row.gossipIcon:SetHeight(14)
   row.gossipIcon:SetTexture("Interface\\GossipFrame\\GossipGossipIcon")
   row.gossipIcon:SetTexCoord(0, 1, 1, 0)
   row.gossipIcon:Hide()
 
-  row.flightIcon = row.frame:CreateTexture(nil, "ARTWORK")
-  row.flightIcon:SetWidth(16)
-  row.flightIcon:SetHeight(16)
+  row.flightIcon = row.semanticIconSlot:CreateTexture(nil, "ARTWORK")
+  row.flightIcon:SetPoint("CENTER", row.semanticIconSlot, "CENTER", 0, 0)
+  row.flightIcon:SetWidth(14)
+  row.flightIcon:SetHeight(14)
   row.flightIcon:SetTexture("Interface\\TaxiFrame\\UI-Taxi-Icon-Green")
-  row.flightIcon:SetTexCoord(0.25, 0.75, 0.25, 0.75)
+  -- Looser crop than 0.25..0.75 keeps the full winged boot in view.
+  row.flightIcon:SetTexCoord(0.10, 0.90, 0.10, 0.90)
   row.flightIcon:Hide()
 
   row.inlineSuffix = row.frame:CreateFontString(nil, "OVERLAY")
@@ -7186,19 +7238,34 @@ local function InitializeMinimapButton()
       return
     end
     if arg1 == "RightButton" then
-      local leftEdge = button:GetLeft()
-      local rightEdge = button:GetRight()
-      local screenWidth = UIParent:GetWidth()
-
-      -- Anchor immediately beside the actual button, including when pfUI
-      -- has moved it into ABP. Vanilla handles off-screen submenu flipping.
-      if leftEdge and rightEdge and screenWidth
-        and leftEdge > (screenWidth - rightEdge) then
-        UIDropDownMenu_SetAnchor(0, 0, menu, "TOPRIGHT", button, "BOTTOMLEFT")
-      else
-        UIDropDownMenu_SetAnchor(0, 0, menu, "TOPLEFT", button, "BOTTOMRIGHT")
+      -- Vanilla reanchors the level-1 list internally after SetAnchor.
+      -- Open normally first, then place the visible list next to the
+      -- *actual* button (including pfUI ABP's reparented position).
+      ToggleDropDownMenu(1, nil, menu, button, 0, 0)
+      local list = getglobal("DropDownList1")
+      if list and list:IsShown() then
+        local buttonX = button:GetCenter()
+        local screenX = UIParent:GetCenter()
+        local toLeft = buttonX and screenX and buttonX > screenX
+        local bottom = button:GetBottom()
+        local openUp = bottom and bottom < list:GetHeight()
+        local function PlaceRoot(left)
+          local point = openUp and (left and "BOTTOMRIGHT" or "BOTTOMLEFT")
+            or (left and "TOPRIGHT" or "TOPLEFT")
+          local relativePoint = openUp and (left and "TOPLEFT" or "TOPRIGHT")
+            or (left and "BOTTOMLEFT" or "BOTTOMRIGHT")
+          list:ClearAllPoints()
+          list:SetPoint(point, button, relativePoint, 0, 0)
+        end
+        PlaceRoot(toLeft)
+        -- Only switch sides when the actual post-layout frame clips.
+        local leftEdge, rightEdge = list:GetLeft(), list:GetRight()
+        if leftEdge and rightEdge and
+          ((toLeft and leftEdge < 0) or
+            (not toLeft and rightEdge > GetScreenWidth())) then
+          PlaceRoot(not toLeft)
+        end
       end
-      ToggleDropDownMenu(1, nil, menu)
     else
       guideTouristUI.panelVisible = not guideTouristUI.panelVisible
       Addon.db.ui.guideWindow.visible = guideTouristUI.panelVisible
