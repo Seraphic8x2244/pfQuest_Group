@@ -1589,6 +1589,35 @@ local function InstallQuestActionHooks()
     end
   end
 
+  -- GOSSIP_SHOW only opens a window. Actual dialogue choice owns GOSSIP.
+  -- Capture before selecting since the NPC/dialogue can change immediately.
+  if type(SelectGossipOption) == "function" then
+    local previousSelectGossipOption = SelectGossipOption
+    SelectGossipOption = function(index)
+      local optionIndex = tonumber(index)
+      local optionType
+      local npcName
+
+      if optionIndex and optionIndex >= 1
+        and type(GetGossipOptions) == "function" then
+        local options = { GetGossipOptions() }
+        optionType = options[math.floor(optionIndex) * 2]
+      end
+
+      if optionType == "gossip" then
+        npcName = CurrentQuestNpcName()
+        if (not npcName or npcName == "") and GossipFrameNpcNameText then
+          npcName = GossipFrameNpcNameText:GetText()
+        end
+        if npcName and npcName ~= "" then
+          Addon.HandleGossipAction(npcName)
+        end
+      end
+
+      return previousSelectGossipOption(index)
+    end
+  end
+
   if type(TakeTaxiNode) == "function" then
     local previousTakeTaxiNode = TakeTaxiNode
     TakeTaxiNode = function(slot)
@@ -7367,7 +7396,6 @@ frame:RegisterEvent("QUEST_LOG_UPDATE")
 frame:RegisterEvent("QUEST_WATCH_UPDATE")
 frame:RegisterEvent("QUEST_FINISHED")
 frame:RegisterEvent("CHAT_MSG_ADDON")
-frame:RegisterEvent("GOSSIP_SHOW")
 frame:SetScript("OnEvent", function()
   if event == "ADDON_LOADED" then
     if arg1 ~= ADDON_NAME then
@@ -7404,34 +7432,6 @@ frame:SetScript("OnEvent", function()
     end
   elseif event == "QUEST_LOG_UPDATE" or event == "QUEST_WATCH_UPDATE" or event == "QUEST_FINISHED" then
     ScheduleQuestScan(0.05)
-  elseif event == "GOSSIP_SHOW" then
-    local npcName = type(UnitName) == "function" and (UnitName("npc") or UnitName("target"))
-    if (not npcName or npcName == "") and GossipFrameNpcNameText then
-      npcName = GossipFrameNpcNameText:GetText()
-    end
-    -- Flightmasters expose a taxi gossip option; do not create a redundant
-    -- talk reminder when the existing FLIGHT instruction owns the action.
-    local isFlightmaster = false
-    if type(GetNumGossipOptions) == "function"
-      and type(GetGossipOptions) == "function" then
-      local options = { GetGossipOptions() }
-      local optionIndex
-      for optionIndex = 2, table.getn(options), 2 do
-        if options[optionIndex] == "taxi" then
-          isFlightmaster = true
-          break
-        end
-      end
-    end
-    -- Quest pickup/turn-in already has its own Phase 4b instruction path.
-    -- A quest-bearing gossip menu is not evidence of a separate talk task.
-    local hasGossipQuests = (type(GetNumGossipAvailableQuests) == "function"
-        and (tonumber(GetNumGossipAvailableQuests()) or 0) > 0)
-      or (type(GetNumGossipActiveQuests) == "function"
-        and (tonumber(GetNumGossipActiveQuests()) or 0) > 0)
-    if not isFlightmaster and not hasGossipQuests then
-      Addon.HandleGossipAction(npcName)
-    end
   elseif event == "CHAT_MSG_ADDON" then
     ReceiveWire(arg1, arg2, arg3, arg4)
   end
