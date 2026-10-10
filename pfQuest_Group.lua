@@ -5733,10 +5733,18 @@ local function EnsureTouristRow(index)
   end)
   row.action:Hide()
 
-  row.actionLabel = row.action:CreateFontString(nil, "OVERLAY")
-  row.actionLabel:SetPoint("CENTER", row.action, "CENTER", 0, 0)
-  CopyGroupTrackerFont(guideTouristUI.title, row.actionLabel, 12)
-  row.actionLabel:SetTextColor(1, 0.82, 0, 1)
+  row.actionIcon = row.action:CreateTexture(nil, "ARTWORK")
+  row.actionIcon:SetPoint("CENTER", row.action, "CENTER", 0, 0)
+  row.actionIcon:SetWidth(16)
+  row.actionIcon:SetHeight(16)
+  row.actionIcon:SetTexture("Interface\\AddOns\\pfQuest_Group\\assets\\clipboard-check")
+  row.action:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square")
+  row.action:SetScript("OnEnter", function()
+    GameTooltip:SetOwner(row.action, "ANCHOR_RIGHT")
+    GameTooltip:SetText(row.actionTooltip or "")
+    GameTooltip:Show()
+  end)
+  row.action:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
   guideTouristUI.touristRows[index] = row
   return row
@@ -6215,16 +6223,16 @@ local function RefreshTouristWindow(session)
     row.frame:SetAlpha(1)
     row.seq = entry.seq
     row.targetNpcName = entry.targetNpcName
-    row.actionLabel:SetText(entry.actionText or "")
+    row.actionTooltip = entry.actionText or "Done"
     row.action:ClearAllPoints()
     row.action:SetPoint("LEFT", row.frame, "LEFT", 0, 0)
-    row.action:SetWidth(52)
+    row.action:SetWidth(20)
     row.action:Hide()
     if entry.actionText then
       row.action:Show()
     end
     RenderChainedInstructionRow(row, entry.instruction, rowWidth,
-      entry.actionText and 52 or 0)
+      entry.actionText and 20 or 0)
     row.strike:Hide()
     if entry.completing then
       row.strike:Show()
@@ -6347,6 +6355,18 @@ local function EnsureGuideTouristRow(index)
       CompleteTouristInstruction(row.touristInstructionSeq)
     end
   end)
+  row.actionIcon = row.action:CreateTexture(nil, "ARTWORK")
+  row.actionIcon:SetPoint("CENTER", row.action, "CENTER", 0, 0)
+  row.actionIcon:SetWidth(16)
+  row.actionIcon:SetHeight(16)
+  row.actionIcon:SetTexture("Interface\\AddOns\\pfQuest_Group\\assets\\trash-2")
+  row.action:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square")
+  row.action:SetScript("OnEnter", function()
+    GameTooltip:SetOwner(row.action, "ANCHOR_RIGHT")
+    GameTooltip:SetText(row.actionTooltip or "")
+    GameTooltip:Show()
+  end)
+  row.action:SetScript("OnLeave", function() GameTooltip:Hide() end)
   row.action:Hide()
 
   guideTouristUI.rows[index] = row
@@ -6594,14 +6614,17 @@ local function RefreshGuideTouristWindow()
       row.marker:SetTextColor(1, 0.35, 0.15)
       row.text:ClearAllPoints()
       row.text:SetPoint("LEFT", row.marker, "RIGHT", 4, 0)
-      textWidth = math.max(1, rowWidth - 52 - 4 - 18 - 4 - 4)
+      textWidth = math.max(1, rowWidth - 20 - 4 - 18 - 4 - 4)
       ignored, renderedWidth = guideTouristUI.EllipsizeFontString(row.text, string.format(
         L.DISPARITY_MISSING_QUEST or "%s missing: %s",
         SafeString(disparity.playerName),
         SafeString(disparity.quest and disparity.quest.title)
       ), textWidth)
       row.renderedTextWidth = renderedWidth
-      row.action:SetText(row.disparityHidden and (L.DISPARITY_UNHIDE or "Unhide") or (L.DISPARITY_HIDE or "Hide"))
+      row.action:SetWidth(20)
+      row.action:SetText("")
+      row.actionIcon:SetTexture(row.disparityHidden and "Interface\\AddOns\\pfQuest_Group\\assets\\eye" or "Interface\\AddOns\\pfQuest_Group\\assets\\eye-off")
+      row.actionTooltip = row.disparityHidden and (L.DISPARITY_UNHIDE or "Unhide") or (L.DISPARITY_HIDE or "Hide")
       row.action:Show()
       if row.disparityHidden then
         row.frame:SetAlpha(0.55)
@@ -6613,7 +6636,9 @@ local function RefreshGuideTouristWindow()
       row.action:ClearAllPoints()
       row.action:SetPoint("LEFT", row.frame, "LEFT", 0, 0)
       row.action:SetWidth(20)
-      row.action:SetText("-")
+      row.action:SetText("")
+      row.actionIcon:SetTexture("Interface\\AddOns\\pfQuest_Group\\assets\\trash-2")
+      row.actionTooltip = "Remove"
       if not entry.completing then
         row.guideInstructionSeq = row.seq
         row.action:Show()
