@@ -7186,14 +7186,19 @@ local function InitializeMinimapButton()
       return
     end
     if arg1 == "RightButton" then
-      local buttonX = button:GetCenter()
+      local leftEdge = button:GetLeft()
+      local rightEdge = button:GetRight()
       local screenWidth = UIParent:GetWidth()
-      local menuX = 0
-      -- Reserve right-side space for the Tourist submenu.
-      if buttonX and screenWidth and buttonX > screenWidth / 2 then
-        menuX = -390
+
+      -- Anchor immediately beside the actual button, including when pfUI
+      -- has moved it into ABP. Vanilla handles off-screen submenu flipping.
+      if leftEdge and rightEdge and screenWidth
+        and leftEdge > (screenWidth - rightEdge) then
+        UIDropDownMenu_SetAnchor(0, 0, menu, "TOPRIGHT", button, "BOTTOMLEFT")
+      else
+        UIDropDownMenu_SetAnchor(0, 0, menu, "TOPLEFT", button, "BOTTOMRIGHT")
       end
-      ToggleDropDownMenu(1, nil, menu, button, menuX, 0)
+      ToggleDropDownMenu(1, nil, menu)
     else
       guideTouristUI.panelVisible = not guideTouristUI.panelVisible
       Addon.db.ui.guideWindow.visible = guideTouristUI.panelVisible
