@@ -5735,8 +5735,8 @@ local function EnsureTouristRow(index)
 
   row.actionIcon = row.action:CreateTexture(nil, "ARTWORK")
   row.actionIcon:SetPoint("CENTER", row.action, "CENTER", 0, 0)
-  row.actionIcon:SetWidth(16)
-  row.actionIcon:SetHeight(16)
+  row.actionIcon:SetWidth(13)
+  row.actionIcon:SetHeight(13)
   row.actionIcon:SetTexture("Interface\\AddOns\\pfQuest_Group\\assets\\clipboard-check")
   row.action:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square")
   row.action:SetScript("OnEnter", function()
@@ -6357,8 +6357,8 @@ local function EnsureGuideTouristRow(index)
   end)
   row.actionIcon = row.action:CreateTexture(nil, "ARTWORK")
   row.actionIcon:SetPoint("CENTER", row.action, "CENTER", 0, 0)
-  row.actionIcon:SetWidth(16)
-  row.actionIcon:SetHeight(16)
+  row.actionIcon:SetWidth(13)
+  row.actionIcon:SetHeight(13)
   row.actionIcon:SetTexture("Interface\\AddOns\\pfQuest_Group\\assets\\trash-2")
   row.action:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square")
   row.action:SetScript("OnEnter", function()
@@ -7002,7 +7002,14 @@ local function InitializeMinimapButton()
       return
     end
     if arg1 == "RightButton" then
-      ToggleDropDownMenu(1, nil, menu, button, 0, 0)
+      local buttonX = button:GetCenter()
+      local screenWidth = UIParent:GetWidth()
+      local menuX = 0
+      -- Reserve right-side space for the Tourist submenu.
+      if buttonX and screenWidth and buttonX > screenWidth / 2 then
+        menuX = -390
+      end
+      ToggleDropDownMenu(1, nil, menu, button, menuX, 0)
     else
       guideTouristUI.panelVisible = not guideTouristUI.panelVisible
       Addon.db.ui.guideWindow.visible = guideTouristUI.panelVisible
