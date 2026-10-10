@@ -42,6 +42,8 @@ local pendingAbandon = nil
 local touristPendingInstructions = {}
 -- Transient display grace for newly accepted Guide quests; not protocol state.
 local guideQuestDisparityGrace = {}
+local offlineGuideUI = { frame = nil, rows = {} }
+
 local guideTouristUI = {
   frame = nil,
   title = nil,
@@ -621,6 +623,9 @@ local function InitializeDatabase()
   pfQuest_GroupDB.session = NormalizeSession(pfQuest_GroupDB.session)
   pfQuest_GroupDB.instructions = NormalizeInstructionStore(pfQuest_GroupDB.instructions, pfQuest_GroupDB.session)
   pfQuest_GroupDB.ui = NormalizeUIState(pfQuest_GroupDB.ui)
+  if type(pfQuest_GroupDB.offlineGuideLists) ~= "table" then
+    pfQuest_GroupDB.offlineGuideLists = {}
+  end
   pfQuest_GroupDB.groupHold = Addon.NormalizeGroupHoldState(pfQuest_GroupDB.groupHold, pfQuest_GroupDB.session)
   touristPendingInstructions = {}
   Addon.db = pfQuest_GroupDB
@@ -3901,6 +3906,42 @@ local function InstructionMatchesAction(instruction, actionType, quest, context)
   return instruction.questTitle ~= "" and actionTitle ~= "" and instruction.questTitle == actionTitle
 end
 
+-- Phase 4b owns the last confirmed Tourist instruction snapshot. It is
+-- display-only offline data, never an alternative completion authority.
+function Addon.CacheTouristPendingInstructions(fromGuide)
+  local db = Addon.db
+  local session = db and db.session
+  local guideKey
+  local prior
+  local syncedAt
+
+  if not session or session.mode ~= "TOURIST"
+    or not session.guideSessionId or session.joinBaseline == nil then
+    return
+  end
+
+  guideKey = NormalizeName(session.guideName)
+  if not guideKey then
+    return
+  end
+
+  db.offlineGuideLists = db.offlineGuideLists or {}
+  prior = db.offlineGuideLists[guideKey]
+  syncedAt = prior and prior.sessionId == session.guideSessionId
+    and tonumber(prior.syncedAt) or nil
+  if fromGuide then
+    syncedAt = time()
+  end
+
+  db.offlineGuideLists[guideKey] = {
+    guideName = session.guideName,
+    sessionId = session.guideSessionId,
+    syncedAt = syncedAt,
+    instructions = CopyInstructionList(touristPendingInstructions)
+  }
+  db.offlineGuideLastGuide = guideKey
+end
+
 local function ReconcileTouristInstructions(sender)
   local session = Addon.db and Addon.db.session
   local store = Addon.db and Addon.db.instructions
@@ -3937,6 +3978,7 @@ local function ReconcileTouristInstructions(sender)
   end
 
   touristPendingInstructions = nextPending
+  Addon.CacheTouristPendingInstructions(true)
   Emit("TOURIST_INSTRUCTIONS_CHANGED", CopyInstructionList(touristPendingInstructions))
   return true
 end
@@ -4865,6 +4907,7 @@ local function CompleteTouristInstruction(seq)
   store = Addon.db.instructions
   store.consumed[seq] = true
   touristPendingInstructions[seq] = nil
+  Addon.CacheTouristPendingInstructions(false)
   Addon.SendDelta("instructions", EncodeInstructionCompletionWire("A", session.guideSessionId, {
     [seq] = true
   }), session.guideName)
@@ -6896,6 +6939,144 @@ local function PrintSessionText(text)
   end
 end
 
+-- Phase 5 offers a separate, read-only view of the Tourist snapshot.
+-- It never switches mode, completes instructions, or sends addon messages.
+function Addon.ToggleOfflineGuideList()
+  local db = Addon.db
+  local session = db and db.session
+  local key
+  local snapshot
+  local instructions
+  local guideName
+  local frame
+  local row
+  local index
+  local entry
+  local textValue
+  local stamp
+
+  if not db then
+    return
+  end
+
+  if offlineGuideUI.frame and offlineGuideUI.frame:IsShown() then
+    offlineGuideUI.frame:Hide()
+    return
+  end
+
+  if session and session.mode == "TOURIST" and session.guideName then
+    key = NormalizeName(session.guideName)
+  else
+    key = db.offlineGuideLastGuide
+  end
+  snapshot = key and db.offlineGuideLists and db.offlineGuideLists[key]
+  instructions = snapshot and type(snapshot.instructions) == "table" and snapshot.instructions or {}
+  guideName = snapshot and SafeString(snapshot.guideName) or
+    (session and session.mode == "TOURIST" and SafeString(session.guideName)) or ""
+
+  if not offlineGuideUI.frame then
+    frame = CreateFrame("Frame", "pfQuest_GroupOfflineListFrame", UIParent)
+    frame:SetWidth(365)
+    frame:SetHeight(255)
+    frame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+    frame:SetFrameStrata("DIALOG")
+    frame:SetMovable(true)
+    frame:EnableMouse(true)
+    frame:RegisterForDrag("LeftButton")
+    frame:SetScript("OnDragStart", function() frame:StartMoving() end)
+    frame:SetScript("OnDragStop", function() frame:StopMovingOrSizing() end)
+    frame:SetBackdrop({
+      bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+      edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+      tile = true,
+      tileSize = 16,
+      edgeSize = 12,
+      insets = { left = 3, right = 3, top = 3, bottom = 3 }
+    })
+    frame:SetBackdropColor(0, 0, 0, 0.9)
+    frame:SetBackdropBorderColor(0.45, 0.45, 0.45, 1)
+    offlineGuideUI.frame = frame
+
+    offlineGuideUI.title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    offlineGuideUI.title:SetPoint("TOPLEFT", frame, "TOPLEFT", 11, -11)
+    offlineGuideUI.title:SetWidth(320)
+    offlineGuideUI.title:SetHeight(17)
+    offlineGuideUI.title:SetJustifyH("LEFT")
+
+    offlineGuideUI.subtitle = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    offlineGuideUI.subtitle:SetPoint("TOPLEFT", frame, "TOPLEFT", 11, -32)
+    offlineGuideUI.subtitle:SetWidth(330)
+    offlineGuideUI.subtitle:SetHeight(20)
+    offlineGuideUI.subtitle:SetJustifyH("LEFT")
+
+    local close = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
+    close:SetPoint("TOPRIGHT", frame, "TOPRIGHT", 2, 2)
+
+    offlineGuideUI.scroll = CreateFrame("ScrollFrame", nil, frame, "UIPanelScrollFrameTemplate")
+    offlineGuideUI.scroll:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, -63)
+    offlineGuideUI.scroll:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -31, 10)
+    offlineGuideUI.child = CreateFrame("Frame", nil, offlineGuideUI.scroll)
+    offlineGuideUI.child:SetWidth(318)
+    offlineGuideUI.child:SetHeight(1)
+    offlineGuideUI.scroll:SetScrollChild(offlineGuideUI.child)
+  end
+
+  frame = offlineGuideUI.frame
+  if guideName ~= "" then
+    offlineGuideUI.title:SetText(string.format(L.OFFLINE_TITLE_GUIDE or "Offline List: %s", guideName))
+  else
+    offlineGuideUI.title:SetText(L.OFFLINE_TITLE or "Offline List")
+  end
+
+  stamp = snapshot and tonumber(snapshot.syncedAt)
+  if stamp and stamp > 0 and type(date) == "function" then
+    offlineGuideUI.subtitle:SetText(string.format(
+      L.OFFLINE_LAST_SYNC or "Last synced: %s (read-only)",
+      date("%d %b %Y %H:%M", stamp)
+    ))
+  else
+    offlineGuideUI.subtitle:SetText(L.OFFLINE_NOT_SYNCED or "No saved Guide snapshot (read-only)")
+  end
+
+  if snapshot and session and session.mode == "TOURIST"
+    and NormalizeName(session.guideName) == key
+    and snapshot.sessionId ~= session.guideSessionId then
+    offlineGuideUI.subtitle:SetText(L.OFFLINE_OLD_SESSION or "Previous Guide session (read-only)")
+  end
+
+  if table.getn(instructions) == 0 then
+    instructions = { false }
+  end
+  for index = 1, table.getn(instructions) do
+    row = offlineGuideUI.rows[index]
+    if not row then
+      row = offlineGuideUI.child:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+      row:SetPoint("TOPLEFT", offlineGuideUI.child, "TOPLEFT", 0, -((index - 1) * 21))
+      row:SetWidth(302)
+      row:SetHeight(20)
+      row:SetJustifyH("LEFT")
+      offlineGuideUI.rows[index] = row
+    end
+    entry = instructions[index]
+    if entry == false then
+      textValue = snapshot and (L.OFFLINE_EMPTY or "No outstanding instructions in saved snapshot.")
+        or (L.OFFLINE_NO_LIST or "No Guide instructions have been saved yet.")
+    elseif entry.actionType == "GOSSIP" then
+      textValue = string.format(L.OFFLINE_TALK or "Talk to %s", SafeString(entry.npcName))
+    else
+      textValue = GuideTouristInstructionText(entry)
+    end
+    guideTouristUI.EllipsizeFontString(row, textValue or "", 302)
+    row:Show()
+  end
+  for index = table.getn(instructions) + 1, table.getn(offlineGuideUI.rows) do
+    offlineGuideUI.rows[index]:Hide()
+  end
+  offlineGuideUI.child:SetHeight(math.max(1, table.getn(instructions) * 21))
+  offlineGuideUI.scroll:SetVerticalScroll(0)
+  frame:Show()
+end
+
 local function InitializeMinimapButton()
   if not Addon.db or not Minimap then
     return
@@ -6952,6 +7133,9 @@ local function InitializeMinimapButton()
       add(L.MINIMAP_TOURIST or "Tourist", "TOURIST", mode == "TOURIST", true, nil)
       add(L.MINIMAP_STATUS or "Status", "STATUS", false, nil, function()
         PrintSessionText(SessionStatusText())
+      end)
+      add(L.MINIMAP_OFFLINE_LIST or "Offline List", "OFFLINE_LIST", false, nil, function()
+        Addon.ToggleOfflineGuideList()
       end)
     elseif level == 2 and UIDROPDOWNMENU_MENU_VALUE == "TOURIST" then
       local count = 0
