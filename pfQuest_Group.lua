@@ -5770,11 +5770,11 @@ local function EnsureTouristRow(index)
 
   row.flightIcon = row.semanticIconSlot:CreateTexture(nil, "ARTWORK")
   row.flightIcon:SetPoint("CENTER", row.semanticIconSlot, "CENTER", 0, 0)
-  row.flightIcon:SetWidth(14)
-  row.flightIcon:SetHeight(14)
+  row.flightIcon:SetWidth(16)
+  row.flightIcon:SetHeight(16)
   row.flightIcon:SetTexture("Interface\\TaxiFrame\\UI-Taxi-Icon-Green")
-  -- Looser crop than 0.25..0.75 keeps the full winged boot in view.
-  row.flightIcon:SetTexCoord(0.10, 0.90, 0.10, 0.90)
+  -- ~30% larger artwork, still centred within the same 16px icon slot.
+  row.flightIcon:SetTexCoord(0.15, 0.85, 0.15, 0.85)
   row.flightIcon:Hide()
 
   row.inlineSuffix = row.frame:CreateFontString(nil, "OVERLAY")
@@ -6346,6 +6346,7 @@ local function RefreshTouristWindow(session)
     row.action:SetWidth(20)
     row.action:Hide()
     if entry.actionText then
+      row.actionIcon:Show()
       row.action:Show()
     end
     RenderChainedInstructionRow(row, entry.instruction, rowWidth,
@@ -6426,11 +6427,11 @@ local function EnsureGuideTouristRow(index)
 
   row.flightIcon = row.semanticIconSlot:CreateTexture(nil, "ARTWORK")
   row.flightIcon:SetPoint("CENTER", row.semanticIconSlot, "CENTER", 0, 0)
-  row.flightIcon:SetWidth(14)
-  row.flightIcon:SetHeight(14)
+  row.flightIcon:SetWidth(16)
+  row.flightIcon:SetHeight(16)
   row.flightIcon:SetTexture("Interface\\TaxiFrame\\UI-Taxi-Icon-Green")
-  -- Looser crop than 0.25..0.75 keeps the full winged boot in view.
-  row.flightIcon:SetTexCoord(0.10, 0.90, 0.10, 0.90)
+  -- ~30% larger artwork, still centred within the same 16px icon slot.
+  row.flightIcon:SetTexCoord(0.15, 0.85, 0.15, 0.85)
   row.flightIcon:Hide()
 
   row.inlineSuffix = row.frame:CreateFontString(nil, "OVERLAY")
