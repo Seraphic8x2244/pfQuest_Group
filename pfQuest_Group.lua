@@ -1715,11 +1715,46 @@ local function SingleObjectiveDone(objective)
   return required > 0 and current >= required
 end
 
-local function IsSharedSingleObjective(objective)
+local function SharedSingleObjectiveKind(quest, objective)
   local objectiveType = string.lower(SafeString(objective and objective.objectiveType))
   local required = tonumber(objective and objective.required) or 0
+  local description
+  local questID
+  local questData
+  local sources
 
-  return required == 1 and (objectiveType == "item" or objectiveType == "object")
+  if required ~= 1 then
+    return nil
+  end
+
+  if objectiveType == "item" or objectiveType == "object" then
+    return "ITEM"
+  end
+
+  if objectiveType ~= "event" then
+    return nil
+  end
+
+  -- Detect only discoverable places, not unrelated scripted quest events.
+  description = string.lower(Trim(SafeString(objective and objective.text)))
+  if string.find(description, "^explore%s+")
+    or string.find(description, "^discover%s+")
+    or string.find(description, "^search%s+")
+    or string.find(description, "^investigate%s+") then
+    return "DISCOVERY"
+  end
+
+  questID = tonumber(quest and quest.questID)
+  questData = questID and pfDB and pfDB.quests and pfDB.quests.data
+    and pfDB.quests.data[questID]
+  sources = questData and questData.obj
+  if sources and
+    ((type(sources.A) == "table" and next(sources.A))
+      or (type(sources.Z) == "table" and next(sources.Z))) then
+    return "DISCOVERY"
+  end
+
+  return nil
 end
 
 local function FindQuestStateMatch(state, sourceQuest)
@@ -1776,6 +1811,7 @@ local function RemoteGuideSingleObjectiveCompleted(sender, previousQuest, nextQu
   local nextObjective
   local previousObjective
   local localObjective
+  local kind
 
   if not session
     or session.mode ~= "TOURIST"
@@ -1809,12 +1845,13 @@ local function RemoteGuideSingleObjectiveCompleted(sender, previousQuest, nextQu
 
   for index = 1, table.getn(nextQuest.objectives or {}) do
     nextObjective = nextQuest.objectives[index]
-    if IsSharedSingleObjective(nextObjective) and SingleObjectiveDone(nextObjective) then
+    kind = SharedSingleObjectiveKind(nextQuest, nextObjective)
+    if kind and SingleObjectiveDone(nextObjective) then
       previousObjective = FindQuestObjective(previousQuest, nextObjective.index or index)
       localObjective = FindQuestObjective(localQuest, nextObjective.index or index)
       if previousObjective
         and localObjective
-        and IsSharedSingleObjective(localObjective)
+        and SharedSingleObjectiveKind(localQuest, localObjective) == kind
         and not SingleObjectiveDone(previousObjective) then
         return true
       end
@@ -5510,6 +5547,7 @@ local function BuildGuideSingleObjectiveAlerts(session)
   local remoteSession
   local remoteQuest
   local remoteObjective
+  local kind
 
   if not session
     or session.mode ~= "GUIDE"
@@ -5523,7 +5561,8 @@ local function BuildGuideSingleObjectiveAlerts(session)
   for questKey, quest in pairs(questState.quests or {}) do
     for objectiveIndex = 1, table.getn(quest.objectives or {}) do
       objective = quest.objectives[objectiveIndex]
-      if IsSharedSingleObjective(objective) and SingleObjectiveDone(objective) then
+      kind = SharedSingleObjectiveKind(quest, objective)
+      if kind and SingleObjectiveDone(objective) then
         participants = {}
         allComplete = true
 
@@ -5548,7 +5587,7 @@ local function BuildGuideSingleObjectiveAlerts(session)
               and peer.questState.ready then
               remoteQuest = FindRemoteTrackerQuest(peer.questState, quest)
               remoteObjective = remoteQuest and FindQuestObjective(remoteQuest, objective.index or objectiveIndex)
-              if remoteObjective and IsSharedSingleObjective(remoteObjective) then
+              if remoteObjective and SharedSingleObjectiveKind(remoteQuest, remoteObjective) == kind then
                 table.insert(participants, {
                   partyIndex = partyIndex,
                   name = peer.name or member.name or name,
@@ -5568,6 +5607,7 @@ local function BuildGuideSingleObjectiveAlerts(session)
             quest = quest,
             objective = objective,
             text = SingleObjectiveAlertText(quest, objective),
+            kind = kind,
             participants = participants,
             complete = allComplete
           })
@@ -5601,6 +5641,7 @@ local function BuildTouristSingleObjectiveAlerts(session)
   local objectiveIndex
   local guideObjective
   local localObjective
+  local kind
 
   if not session
     or session.mode ~= "TOURIST"
@@ -5630,10 +5671,11 @@ local function BuildTouristSingleObjectiveAlerts(session)
       for objectiveIndex = 1, table.getn(guideQuest.objectives or {}) do
         guideObjective = guideQuest.objectives[objectiveIndex]
         localObjective = FindQuestObjective(localQuest, guideObjective and (guideObjective.index or objectiveIndex))
+        kind = SharedSingleObjectiveKind(guideQuest, guideObjective)
         if guideObjective
           and localObjective
-          and IsSharedSingleObjective(guideObjective)
-          and IsSharedSingleObjective(localObjective)
+          and kind
+          and SharedSingleObjectiveKind(localQuest, localObjective) == kind
           and SingleObjectiveDone(guideObjective)
           and not SingleObjectiveDone(localObjective) then
           table.insert(output, {
@@ -5641,6 +5683,7 @@ local function BuildTouristSingleObjectiveAlerts(session)
             quest = guideQuest,
             objective = guideObjective,
             text = SingleObjectiveAlertText(guideQuest, guideObjective),
+            kind = kind,
             participants = nil,
             complete = SingleObjectiveDone(localObjective)
           })
@@ -6196,6 +6239,14 @@ local function RenderSingleObjectiveRows(alerts, startIndex, guideMode)
     row.frame:SetPoint("TOPLEFT", guideTouristUI.scrollChild, "TOPLEFT", 8, -((startIndex + index - 1) * 20))
     row.frame:SetWidth(rowWidth)
     row.frame:SetAlpha(1)
+
+    if alert.kind == "DISCOVERY" then
+      row.icon:SetTexture("Interface\\Icons\\INV_Misc_Map_01")
+      row.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    else
+      row.icon:SetTexture(SINGLE_OBJECTIVE_ICON)
+      row.icon:SetTexCoord(0, 1, 0, 1)
+    end
 
     for slotIndex = 1, 4 do
       row.statusX[slotIndex]:Hide()
