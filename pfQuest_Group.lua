@@ -6354,6 +6354,23 @@ local function HideTouristRows()
   end
 end
 
+local function GuideTouristWindowTitle(session)
+  if not session or session.mode ~= "TOURIST" then
+    return L.WINDOW_TITLE_GUIDE or "pfQuest Group - Guide Mode"
+  end
+
+  local guideName = SafeString(session.guideName)
+  local guideKey = NormalizeName(guideName)
+  local member = guideKey and party[guideKey]
+  local color = GroupClassColorHex(member and member.classToken)
+  local coloredName = "|cff" .. color .. guideName .. "|r"
+
+  return string.format(
+    L.WINDOW_TITLE_TOURIST or "pfQuest Group - Tourist of %s",
+    coloredName
+  )
+end
+
 local function RefreshTouristWindow(session)
   local display = BuildTouristDisplayRows()
   local alerts = BuildTouristSingleObjectiveAlerts(session)
@@ -6364,10 +6381,7 @@ local function RefreshTouristWindow(session)
   local rowWidth
   local textWidth
 
-  guideTouristUI.title:SetText(string.format(
-    L.WINDOW_TITLE_TOURIST or "Tourist: %s",
-    SafeString(session and session.guideName)
-  ))
+  guideTouristUI.title:SetText(GuideTouristWindowTitle(session))
   guideTouristUI.showHidden = false
   if guideTouristUI.showHiddenButton then
     guideTouristUI.showHiddenButton:Hide()
@@ -6657,12 +6671,12 @@ local function RefreshGuideTouristWindow()
   HideTouristRows()
 
   if session.mode == "GUIDE" then
-    title = L.WINDOW_TITLE_GUIDE or "Guide"
+    title = GuideTouristWindowTitle(session)
     instructions = Addon.GetGuideInstructions()
     disparities = BuildGuideDisparities(session)
     alerts = BuildGuideSingleObjectiveAlerts(session)
   else
-    title = string.format(L.WINDOW_TITLE_TOURIST or "Tourist: %s", SafeString(session.guideName))
+    title = GuideTouristWindowTitle(session)
     instructions = Addon.GetTouristInstructions()
   end
 
