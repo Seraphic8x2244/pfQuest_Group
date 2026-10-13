@@ -1,5 +1,23 @@
-# pfQuest_Group
+# pfQuest Group
 
-Companion addon project for `pfQuest` on World of Warcraft 1.12.1.
+Party quest progress and Guide/Tourist companion for [pfQuest](https://github.com/shagu/pfQuest) on World of Warcraft Vanilla 1.12.1.
 
-The repository is initialized, but runtime addon implementation has not started yet. Active development will occur on the `dev` branch. Development-only workflow/status documents are kept off `main`.
+## Install
+
+Place the `pfQuest_Group` folder inside `Interface/AddOns` alongside `pfQuest`. Both addons must be enabled.
+
+## Use
+
+Use the minimap button to toggle the Guide/Tourist panel and choose a mode from its right-click menu. The addon also supports `/pfqg guide`, `/pfqg tourist <player>`, `/pfqg off`, and `/pfqg status`.
+
+The Guide/Tourist panel automatically uses the installed pfUI skin where available. Otherwise it retains its native appearance.
+
+## Compatibility
+
+This first stable release is `0.3.27` (protocol 5). Guide/Tourist instructions and shared quest progress currently require participating players to be in the same party, not different raid subgroups. Guide-owned Tourist admission and cross-raid sharing are planned, not implemented.
+
+Per-character configuration and Guide/Tourist progress use `pfQuest_GroupDB` SavedVariables. Before installing or updating, preserve your character-specific SavedVariables file if you need a backup.
+
+Known validation debt: some persistence and reconnection edge cases have not been conclusively exercised. The live pfUI panel skin has been user-tested and accepted.
+
+Development is tracked on the `dev` branch; stable releases appear on `main`.
