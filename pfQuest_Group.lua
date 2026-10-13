@@ -4540,10 +4540,9 @@ local function ReconcileTouristPairing(sender)
     return true
   end
 
-  if session.guideSessionId or session.joinBaseline ~= nil then
-    return Addon.ClearTouristSession()
-  end
-
+  -- A peer advertising OFF during logout, boot or reconnect is not an
+  -- explicit Tourist unpair. Keep the verified session/baseline and Done
+  -- markers until the user changes target or a different Guide session binds.
   return false
 end
 
