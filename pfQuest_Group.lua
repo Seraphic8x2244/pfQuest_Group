@@ -5803,6 +5803,12 @@ local function EnsureTouristRow(index)
   row.semanticIconSlot:SetWidth(16)
   row.semanticIconSlot:SetHeight(16)
 
+  row.questIcon = row.semanticIconSlot:CreateTexture(nil, "ARTWORK")
+  row.questIcon:SetPoint("CENTER", row.semanticIconSlot, "CENTER", 0, 0)
+  row.questIcon:SetWidth(12)
+  row.questIcon:SetHeight(12)
+  row.questIcon:Hide()
+
   row.gossipIcon = row.semanticIconSlot:CreateTexture(nil, "ARTWORK")
   row.gossipIcon:SetPoint("CENTER", row.semanticIconSlot, "CENTER", 0, 0)
   row.gossipIcon:SetWidth(12)
@@ -6054,28 +6060,29 @@ local function RenderChainedInstructionRow(row, instruction, width, controlWidth
     primary = GuideTouristNpcDisplayName(instruction, primary)
   end
 
-  row.inlineMarker:ClearAllPoints()
+  row.inlineMarker:Hide()
   row.semanticIconSlot:ClearAllPoints()
-  actionMarker = (gossip or flight) and row.semanticIconSlot or row.inlineMarker
+  actionMarker = row.semanticIconSlot
   if controlWidth > 0 then
     actionMarker:SetPoint("LEFT", row.action, "RIGHT", gap, 0)
   else
     actionMarker:SetPoint("LEFT", row.frame, "LEFT", 0, 0)
   end
-  row.inlineMarker:SetWidth(10000)
-  row.inlineMarker:SetText(marker or "?")
-  markerWidth = math.max(12, row.inlineMarker:GetStringWidth())
-  row.inlineMarker:SetWidth(markerWidth)
-  if gossip or flight then
-    row.inlineMarker:Hide()
-    row.gossipIcon:Hide()
-    row.flightIcon:Hide()
-    if gossip then row.gossipIcon:Show() else row.flightIcon:Show() end
-    markerWidth = 16
+  -- Quest, gossip and flight markers share one 16px column, with 12px art.
+  markerWidth = 16
+  row.questIcon:Hide()
+  row.gossipIcon:Hide()
+  row.flightIcon:Hide()
+  if gossip then
+    row.gossipIcon:Show()
+  elseif flight then
+    row.flightIcon:Show()
   else
-    row.inlineMarker:Show()
-    row.gossipIcon:Hide()
-    row.flightIcon:Hide()
+    row.questIcon:SetTexture(instruction and instruction.actionType == "ACCEPT"
+      and "Interface\\GossipFrame\\AvailableQuestIcon"
+      or "Interface\\GossipFrame\\ActiveQuestIcon")
+    row.questIcon:SetTexCoord(0, 1, 0, 1)
+    row.questIcon:Show()
   end
 
   remaining = math.max(0, width - controlWidth
@@ -6482,6 +6489,12 @@ local function EnsureGuideTouristRow(index)
   row.semanticIconSlot:SetWidth(16)
   row.semanticIconSlot:SetHeight(16)
 
+  row.questIcon = row.semanticIconSlot:CreateTexture(nil, "ARTWORK")
+  row.questIcon:SetPoint("CENTER", row.semanticIconSlot, "CENTER", 0, 0)
+  row.questIcon:SetWidth(12)
+  row.questIcon:SetHeight(12)
+  row.questIcon:Hide()
+
   row.gossipIcon = row.semanticIconSlot:CreateTexture(nil, "ARTWORK")
   row.gossipIcon:SetPoint("CENTER", row.semanticIconSlot, "CENTER", 0, 0)
   row.gossipIcon:SetWidth(12)
@@ -6776,6 +6789,7 @@ local function RefreshGuideTouristWindow()
     row.inlineMarker:Hide()
     row.inlineSuffix:Hide()
     row.separator:Hide()
+    row.questIcon:Hide()
     row.gossipIcon:Hide()
     row.flightIcon:Hide()
     row.strike:Hide()

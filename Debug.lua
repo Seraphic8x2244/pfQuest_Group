@@ -2,15 +2,21 @@
 -- Loaded by pfQuest_Group.toc on the dev branch only.
 if not pfQuest_Group then return end
 
-local lab = { window = nil, rows = {}, fields = {}, mode = "GUIDE", skin = "NATIVE", questArt = false }
+local lab = { window = nil, rows = {}, fields = {}, mode = "GUIDE", skin = "NATIVE", questArt = true, discoveryArt = 1 }
 local base = "Interface\\AddOns\\pfQuest_Group\\assets\\"
 local sizes = {
   button = 18, remove = 11, hide = 11, unhide = 11, done = 11,
-  quest = 15, gossip = 12, flight = 12, item = 14, discovery = 14
+  quest = 12, gossip = 12, flight = 12, item = 14, discovery = 14
 }
 local defaults = {
   button = 18, remove = 11, hide = 11, unhide = 11, done = 11,
-  quest = 15, gossip = 12, flight = 12, item = 14, discovery = 14
+  quest = 12, gossip = 12, flight = 12, item = 14, discovery = 14
+}
+local discoveryChoices = {
+  { "Inventory map", "Interface\\Icons\\INV_Misc_Map_01" },
+  { "pfQuest misc", "Interface\\AddOns\\pfQuest\\img\\cluster_misc" },
+  { "pfQuest mono", "Interface\\AddOns\\pfQuest\\img\\cluster_misc_mono" },
+  { "pfQuest object", "Interface\\AddOns\\pfQuest\\img\\icon_object" }
 }
 local options = {
   { "Action button", "button", 16, 26 },
@@ -123,6 +129,7 @@ local function Render()
   lab.modeButton:SetText(lab.mode == "GUIDE" and "View: Guide" or "View: Tourist")
   lab.skinButton:SetText(lab.skin == "PFUI" and "Skin: pfUI-like" or "Skin: Native")
   lab.questButton:SetText(lab.questArt and "Quest: BLP" or "Quest: ! / ?")
+  lab.discoveryButton:SetText("Discovery: " .. discoveryChoices[lab.discoveryArt][1])
   SetBackdrop(lab.window, lab.skin)
   SetBackdrop(lab.preview, lab.skin)
 
@@ -161,6 +168,7 @@ local function Render()
     end
 
     row.icon:Hide()
+    row.icon:SetVertexColor(1, 1, 1)
     row.glyph:Hide()
     if markerType == "accept" or markerType == "turnin" then
       if lab.questArt then
@@ -201,14 +209,23 @@ local function Render()
       row.icon:SetHeight(sizes.item)
       row.icon:Show()
     elseif markerType == "discovery" then
-      row.icon:SetTexture("Interface\\Icons\\INV_Misc_Map_01")
-      row.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+      row.icon:SetTexture(discoveryChoices[lab.discoveryArt][2])
+      if lab.discoveryArt == 1 then
+        row.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+      else
+        row.icon:SetTexCoord(0, 1, 0, 1)
+      end
       row.icon:SetWidth(sizes.discovery)
       row.icon:SetHeight(sizes.discovery)
       row.icon:Show()
     elseif markerType == "done" then
-      row.glyph:SetText("X")
-      row.glyph:Show()
+      -- The old X was a placeholder; completed rows should show a check.
+      row.icon:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
+      row.icon:SetTexCoord(0, 1, 0, 1)
+      row.icon:SetVertexColor(0.25, 1, 0.25)
+      row.icon:SetWidth(11)
+      row.icon:SetHeight(11)
+      row.icon:Show()
     end
     if sample[5] then row.label:SetText("|cff40df40" .. sample[3] .. "|r") end
   end
@@ -226,7 +243,8 @@ end
 local function Reset()
   for key, value in pairs(defaults) do sizes[key] = value end
   lab.skin = "NATIVE"
-  lab.questArt = false
+  lab.questArt = true
+  lab.discoveryArt = 1
   Render()
 end
 
@@ -263,6 +281,10 @@ local function Build()
     Render()
   end)
   MakeButton(window, 68, "Reset", 399, -36, Reset)
+  lab.discoveryButton = MakeButton(window, 192, "Discovery: Inventory map", 475, -36, function()
+    lab.discoveryArt = math.mod(lab.discoveryArt, table.getn(discoveryChoices)) + 1
+    Render()
+  end)
 
   local preview = CreateFrame("Frame", nil, window)
   preview:SetPoint("TOPLEFT", window, "TOPLEFT", 14, -68)
