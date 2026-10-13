@@ -8,7 +8,7 @@ Addon.groupContextKey = nil
 
 local PROTOCOL_PREFIX = "PFQGROUP"
 local PROTOCOL_VERSION = 5
-local DB_SCHEMA_VERSION = 3
+local DB_SCHEMA_VERSION = 4
 local CHUNK_SIZE = 180
 local MAX_CHUNKS = 64
 local INCOMING_TIMEOUT = 30
@@ -392,6 +392,168 @@ local function NormalizeInstructionRecord(record, fallbackSeq)
   }
 end
 
+-- Durable schema-v4 archive. Never project archived instructions into the live wire/UI store.
+-- Preserve the unmodified schema-3 inputs before either legacy normalizer can discard data.
+function Addon.PreserveInstructionHistory(db, sourceSession)
+  if type(db) ~= "table" then return end
+  local function Copy(value, seen)
+    if type(value) ~= "table" then return value end
+    seen = seen or {}
+    if seen[value] then return seen[value] end
+    local result = {}
+    seen[value] = result
+    for key, entry in pairs(value) do result[Copy(key, seen)] = Copy(entry, seen) end
+    return result
+  end
+  local function ValidId(value)
+    return type(value) == "string" and value ~= ""
+  end
+  local function ValidSeq(value)
+    local number = tonumber(value)
+    if number and number >= 1 and number == math.floor(number) then
+      return number
+    end
+    return nil
+  end
+  local history = db.history
+  if type(history) ~= "table" or history.schema ~= 1 then
+    -- Unexpected history is retained in full instead of silently replaced.
+    local former = history
+    history = { schema = 1, guideSessions = {}, touristSessions = {},
+      quarantine = {}, migration = { fromSchema = db.schema, completed = false } }
+    if former ~= nil then history.quarantine.previousHistory = Copy(former) end
+    db.history = history
+  end
+  if type(history.guideSessions) ~= "table" then history.guideSessions = {} end
+  if type(history.touristSessions) ~= "table" then history.touristSessions = {} end
+  if type(history.quarantine) ~= "table" then history.quarantine = {} end
+  if type(history.migration) ~= "table" then
+    history.migration = { fromSchema = db.schema, completed = false }
+  end
+  local migration = history.migration
+  if not migration.completed and not history.quarantine.original then
+    history.quarantine.original = {
+      schema = Copy(db.schema), session = Copy(db.session),
+      instructions = Copy(db.instructions), offlineGuideLists = Copy(db.offlineGuideLists)
+    }
+  end
+  local session = type(sourceSession) == "table" and sourceSession or {}
+  local store = type(db.instructions) == "table" and db.instructions or {}
+  local sid = store.guideSessionId
+  local guideValid = ValidId(sid)
+  local linkedGuide = guideValid and session.mode == "GUIDE"
+    and session.guideSessionId == sid
+  if guideValid then
+    local entry = history.guideSessions[sid]
+    if type(entry) ~= "table" then
+      entry = { cursorHighWater = 0, records = {}, participants = {},
+        state = "archived" }
+      history.guideSessions[sid] = entry
+    end
+    if type(entry.records) ~= "table" then entry.records = {} end
+    if not entry.rawFirst then entry.rawFirst = Copy(store) end
+    entry.rawLatest = Copy(store)
+    entry.state = linkedGuide and "active" or "archived"
+    if linkedGuide then
+      entry.rawCursor = Copy(session.guideActionSeq)
+    end
+    local cursor = tonumber(session.guideActionSeq)
+    if linkedGuide and cursor and cursor >= 0 and cursor == math.floor(cursor) then
+      entry.cursorHighWater = math.max(entry.cursorHighWater or 0, cursor)
+    end
+    if type(store.guideParticipants) == "table" then
+      for name, baseline in pairs(store.guideParticipants) do
+        entry.participants[name] = Copy(baseline)
+      end
+    end
+    if type(store.guideRecords) == "table" then
+      for key, raw in pairs(store.guideRecords) do
+        local seq = ValidSeq(key)
+        local normalized = seq and NormalizeInstructionRecord(raw, key)
+        if seq and normalized and normalized.seq == seq then
+          local prior = entry.records[seq]
+          if type(prior) ~= "table" then prior = { observations = {} } end
+          -- Keep the original payload as well as its valid normalized projection.
+          prior.raw = Copy(raw)
+          prior.instruction = Copy(normalized)
+          prior.status = prior.status or {}
+          prior.status.removed = (type(store.guideRemoved) == "table"
+            and store.guideRemoved[seq]) and true or prior.status.removed or false
+          prior.status.completed = (type(store.guideCompleted) == "table"
+            and store.guideCompleted[seq]) and true or prior.status.completed or false
+          prior.status.inactive = prior.status.inactive or false
+          prior.eligible = Copy(type(store.guideEligible) == "table"
+            and store.guideEligible[seq] or prior.eligible or {})
+          prior.eligibilityKnown = (type(store.guideEligibilityKnown) == "table"
+            and store.guideEligibilityKnown[seq]) and true or prior.eligibilityKnown or false
+          prior.acknowledged = Copy(type(store.guideAcknowledged) == "table"
+            and store.guideAcknowledged[seq] or prior.acknowledged or {})
+          entry.records[seq] = prior
+          entry.cursorHighWater = math.max(entry.cursorHighWater or 0, seq)
+        else
+          entry.anomalies = entry.anomalies or {}
+          entry.anomalies[tostring(key)] = { key = Copy(key), record = Copy(raw) }
+        end
+      end
+    end
+    -- Only a verified same-session cursor may be recovered from valid archived rows.
+    if linkedGuide then
+      local cursorValue = tonumber(session.guideActionSeq)
+      if not cursorValue or cursorValue < (entry.cursorHighWater or 0) then
+        session.guideActionSeq = entry.cursorHighWater or 0
+      end
+    end
+  elseif next(store) and not history.quarantine.orphanGuideStore then
+    history.quarantine.orphanGuideStore = Copy(store)
+  end
+  -- Mismatched identity is deliberately not attached to the active Guide.
+  if session.mode == "GUIDE" and ValidId(session.guideSessionId)
+    and sid ~= session.guideSessionId and not history.quarantine.guideMismatch then
+    history.quarantine.guideMismatch = {
+      session = Copy(session), store = Copy(store)
+    }
+  end
+  local tid = store.touristSessionId
+  if ValidId(tid) then
+    local guideName = session.guideName and NormalizeName(session.guideName)
+    local paired = session.mode == "TOURIST" and session.guideSessionId == tid
+    if paired and guideName then
+      local byName = history.touristSessions[guideName]
+      if type(byName) ~= "table" then
+        byName = {}
+        history.touristSessions[guideName] = byName
+      end
+      local item = byName[tid]
+      if type(item) ~= "table" then
+        item = { joinBaseline = session.joinBaseline, consumed = {},
+          observations = {}, pairingState = "active" }
+        byName[tid] = item
+      end
+      if item.joinBaseline == nil then item.joinBaseline = session.joinBaseline end
+      item.pairingState = "active"
+      if type(store.consumed) == "table" then
+        for seq, done in pairs(store.consumed) do
+          if done then item.consumed[seq] = Copy(done) end
+        end
+      end
+    else
+      history.quarantine.unpairedTourist = history.quarantine.unpairedTourist or {}
+      if not history.quarantine.unpairedTourist[tid] then
+        history.quarantine.unpairedTourist[tid] = {
+          session = Copy(session), consumed = Copy(store.consumed)
+        }
+      end
+    end
+  elseif type(store.consumed) == "table" and next(store.consumed)
+    and not history.quarantine.orphanConsumed then
+    history.quarantine.orphanConsumed = Copy(store.consumed)
+  end
+  -- Offline snapshots remain legacy display cache, never an upload/completion authority.
+  if not migration.completed then
+    migration.completed = true
+  end
+end
+
 local function NormalizeInstructionStore(store, session)
   local guideRecords = {}
   local guideParticipants = {}
@@ -630,6 +792,7 @@ local function InitializeDatabase()
     pfQuest_GroupDB = {}
   end
 
+  Addon.PreserveInstructionHistory(pfQuest_GroupDB, pfQuest_GroupDB.session)
   pfQuest_GroupDB.schema = DB_SCHEMA_VERSION
   pfQuest_GroupDB.session = NormalizeSession(pfQuest_GroupDB.session)
   pfQuest_GroupDB.instructions = NormalizeInstructionStore(pfQuest_GroupDB.instructions, pfQuest_GroupDB.session)
@@ -4880,6 +5043,7 @@ function Addon.SetMode(mode, guideName)
   end
 
   session = Addon.db.session
+  Addon.PreserveInstructionHistory(Addon.db, session)
 
   if mode == "OFF" then
     if session.mode ~= "OFF" or session.guideName or session.guideSessionId or session.joinBaseline ~= nil or session.guideActionSeq ~= nil then
@@ -4923,6 +5087,7 @@ function Addon.SetMode(mode, guideName)
   end
 
   if changed then
+    Addon.PreserveInstructionHistory(Addon.db, session)
     Addon.db.instructions = NormalizeInstructionStore(Addon.db.instructions, session)
     touristPendingInstructions = {}
     session.revision = session.revision + 1
@@ -4961,9 +5126,11 @@ function Addon.SetTouristSession(guideName, guideSessionId, joinBaseline)
     return true
   end
 
+  Addon.PreserveInstructionHistory(Addon.db, session)
   session.guideSessionId = guideSessionId
   session.joinBaseline = baseline
-  Addon.db.instructions = NormalizeInstructionStore(Addon.db.instructions, session)
+  Addon.PreserveInstructionHistory(Addon.db, session)
+    Addon.db.instructions = NormalizeInstructionStore(Addon.db.instructions, session)
   touristPendingInstructions = {}
   session.revision = session.revision + 1
   BroadcastSessionDelta()
@@ -4988,9 +5155,11 @@ function Addon.ClearTouristSession()
     return true
   end
 
+  Addon.PreserveInstructionHistory(Addon.db, session)
   session.guideSessionId = nil
   session.joinBaseline = nil
-  Addon.db.instructions = NormalizeInstructionStore(Addon.db.instructions, session)
+  Addon.PreserveInstructionHistory(Addon.db, session)
+    Addon.db.instructions = NormalizeInstructionStore(Addon.db.instructions, session)
   touristPendingInstructions = {}
   session.revision = session.revision + 1
   BroadcastSessionDelta()
@@ -5020,7 +5189,8 @@ local function CompleteTouristInstruction(seq)
     return false
   end
 
-  Addon.db.instructions = NormalizeInstructionStore(Addon.db.instructions, session)
+  Addon.PreserveInstructionHistory(Addon.db, session)
+    Addon.db.instructions = NormalizeInstructionStore(Addon.db.instructions, session)
   store = Addon.db.instructions
   store.consumed[seq] = true
   touristPendingInstructions[seq] = nil
@@ -5055,7 +5225,8 @@ function Addon.CreateGuideInstruction(record)
   end
 
   session.guideActionSeq = seq
-  Addon.db.instructions = NormalizeInstructionStore(Addon.db.instructions, session)
+  Addon.PreserveInstructionHistory(Addon.db, session)
+    Addon.db.instructions = NormalizeInstructionStore(Addon.db.instructions, session)
   store = Addon.db.instructions
   store.guideSessionId = session.guideSessionId
   store.guideRecords[seq] = instruction
