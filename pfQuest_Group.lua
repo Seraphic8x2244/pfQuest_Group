@@ -14,6 +14,7 @@ local MAX_CHUNKS = 64
 local INCOMING_TIMEOUT = 30
 local SINGLE_OBJECTIVE_SOUND = "Sound\\Interface\\levelup2.wav"
 local SINGLE_OBJECTIVE_ICON = "Interface\\AddOns\\pfQuest\\img\\cluster_item"
+local SINGLE_DISCOVERY_ICON = "Interface\\AddOns\\pfQuest\\img\\cluster_misc"
 
 local frame = CreateFrame("Frame")
 local questScanFrame = CreateFrame("Frame")
@@ -6248,8 +6249,8 @@ local function RenderSingleObjectiveRows(alerts, startIndex, guideMode)
     row.frame:SetAlpha(1)
 
     if alert.kind == "DISCOVERY" then
-      row.icon:SetTexture("Interface\\Icons\\INV_Misc_Map_01")
-      row.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+      row.icon:SetTexture(SINGLE_DISCOVERY_ICON)
+      row.icon:SetTexCoord(0, 1, 0, 1)
     else
       row.icon:SetTexture(SINGLE_OBJECTIVE_ICON)
       row.icon:SetTexCoord(0, 1, 0, 1)

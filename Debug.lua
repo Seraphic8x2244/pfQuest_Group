@@ -2,21 +2,23 @@
 -- Loaded by pfQuest_Group.toc on the dev branch only.
 if not pfQuest_Group then return end
 
-local lab = { window = nil, rows = {}, fields = {}, mode = "GUIDE", skin = "NATIVE", questArt = true, discoveryArt = 1 }
+local lab = {
+  window = nil, rows = {}, fields = {}, views = {}, builds = 0,
+  mode = "GUIDE", skin = "NATIVE", questArt = true, discoveryArt = 1
+}
 local base = "Interface\\AddOns\\pfQuest_Group\\assets\\"
 local sizes = {
   button = 18, remove = 11, hide = 11, unhide = 11, done = 11,
-  quest = 12, gossip = 12, flight = 12, item = 14, discovery = 14
+  quest = 12, gossip = 12, flight = 12, item = 14, kill = 14, discovery = 14
 }
 local defaults = {
   button = 18, remove = 11, hide = 11, unhide = 11, done = 11,
-  quest = 12, gossip = 12, flight = 12, item = 14, discovery = 14
+  quest = 12, gossip = 12, flight = 12, item = 14, kill = 14, discovery = 14
 }
 local discoveryChoices = {
-  { "Inventory map", "Interface\\Icons\\INV_Misc_Map_01" },
   { "pfQuest misc", "Interface\\AddOns\\pfQuest\\img\\cluster_misc" },
-  { "pfQuest mono", "Interface\\AddOns\\pfQuest\\img\\cluster_misc_mono" },
-  { "pfQuest object", "Interface\\AddOns\\pfQuest\\img\\icon_object" }
+  { "pfQuest object", "Interface\\AddOns\\pfQuest\\img\\icon_object" },
+  { "Inventory map", "Interface\\Icons\\INV_Misc_Map_01" }
 }
 local options = {
   { "Action button", "button", 16, 26 },
@@ -28,7 +30,8 @@ local options = {
   { "Gossip bubble", "gossip", 8, 20 },
   { "Flight (no crop)", "flight", 8, 20 },
   { "Item bag", "item", 8, 20 },
-  { "Discovery map", "discovery", 8, 20 }
+  { "Kill marker", "kill", 8, 20 },
+  { "Discovery misc", "discovery", 8, 20 }
 }
 
 local guideSamples = {
@@ -39,10 +42,15 @@ local guideSamples = {
   { "accept", "hide", "MISSING  Tourist needs a quest (visible)" },
   { "accept", "unhide", "HIDDEN  Tourist needs a quest (hidden)", true },
   { "item", nil, "ITEM  Retrieve an item - Tourist: X" },
+  { "kill", nil, "KILL  Defeat enemy (reference only)" },
   { "discovery", nil, "DISCOVERY  Search the Altar of Zul - X" },
   { "accept", "remove", "ACCEPT  Quest without NPC (short name)" },
   { "turnin", "remove", "TURNIN  Long quest title for clipping comparison" },
-  { "done", nil, "COMPLETE  Tourist acknowledged (check)", false, true }
+  { "done", nil, "COMPLETE  Tourist acknowledged (check)", false, true },
+  { "accept", "remove", "ACCEPT  Another quest to check scrolling" },
+  { "gossip", "remove", "GOSSIP  Another conversation" },
+  { "item", nil, "ITEM  Second loot objective" },
+  { "flight", "remove", "FLIGHT  Second flight destination" }
 }
 local touristSamples = {
   { "accept", "done", "ACCEPT  Guide NPC - Sample quest" },
@@ -50,25 +58,46 @@ local touristSamples = {
   { "gossip", "done", "GOSSIP  Speak with the quest NPC" },
   { "flight", "done", "FLIGHT  Fly to Aerie Peak" },
   { "item", nil, "ITEM  Retrieve an item - X" },
+  { "kill", nil, "KILL  Defeat enemy (reference only)" },
   { "discovery", nil, "DISCOVERY  Search the Altar of Zul - X" },
   { "accept", "done", "ACCEPT  Quest without NPC" },
   { "turnin", "done", "TURNIN  Long quest title for clipping comparison" },
-  { "done", nil, "COMPLETED  Instruction checked off", false, true }
-}
+  { "done", nil, "COMPLETED  Instruction checked off", false, true },
+  { "accept", "done", "ACCEPT  Another quest to check scrolling" },
+  { "gossip", "done", "GOSSIP  Another conversation" },
+  { "item", nil, "ITEM  Second loot objective" },
+  { "flight", "done", "FLIGHT  Second flight destination" }
 
-local function SetBackdrop(frame, skin)
+
+local function CanUsePfUI()
+  return pfUI and pfUI.api and pfUI_config
+    and pfUI_config.appearance and pfUI_config.appearance.border
+    and type(pfUI.api.CreateBackdrop) == "function"
+    and type(pfUI.api.SkinButton) == "function"
+    and type(pfUI.api.SkinScrollbar) == "function"
+    and pfUI.font_default
+end
+
+local function ApplyBackdrop(frame)
+  if lab.skin == "PFUI" and CanUsePfUI() then
+    -- Use the installed pfUI border thickness, colors and pixel scaling.
+    pfUI.api.CreateBackdrop(frame, nil, true)
+    return
+  end
+
   frame:SetBackdrop({
     bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
     edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-    tile = true, tileSize = 16, edgeSize = skin == "PFUI" and 8 or 12,
+    tile = true, tileSize = 16, edgeSize = 12,
     insets = { left = 3, right = 3, top = 3, bottom = 3 }
   })
-  if skin == "PFUI" then
-    frame:SetBackdropColor(0.04, 0.04, 0.04, 0.97)
-    frame:SetBackdropBorderColor(0.2, 0.2, 0.2, 1)
-  else
-    frame:SetBackdropColor(0, 0, 0, 0.9)
-    frame:SetBackdropBorderColor(0.45, 0.45, 0.45, 1)
+  frame:SetBackdropColor(0, 0, 0, 0.9)
+  frame:SetBackdropBorderColor(0.45, 0.45, 0.45, 1)
+end
+
+local function SkinButton(button)
+  if lab.skin == "PFUI" and CanUsePfUI() then
+    pfUI.api.SkinButton(button)
   end
 end
 
@@ -79,6 +108,7 @@ local function MakeButton(parent, width, label, x, y, handler)
   button:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
   button:SetText(label)
   button:SetScript("OnClick", handler)
+  SkinButton(button)
   return button
 end
 
@@ -93,6 +123,7 @@ local function CreateRow(index)
   action:SetWidth(18)
   action:SetHeight(18)
   action:SetText("")
+  SkinButton(action)
   action:EnableMouse(false)
   local actionIcon = action:CreateTexture(nil, "ARTWORK")
   actionIcon:SetPoint("CENTER", action, "CENTER", 0, 0)
@@ -127,11 +158,11 @@ local function Render()
     and "pfQuest Group - Guide Mode"
     or "pfQuest Group - Tourist of |cff69ccf0GuideName|r")
   lab.modeButton:SetText(lab.mode == "GUIDE" and "View: Guide" or "View: Tourist")
-  lab.skinButton:SetText(lab.skin == "PFUI" and "Skin: pfUI-like" or "Skin: Native")
+  lab.skinButton:SetText(lab.skin == "PFUI" and "Skin: pfUI actual" or "Skin: Native")
   lab.questButton:SetText(lab.questArt and "Quest: BLP" or "Quest: ! / ?")
   lab.discoveryButton:SetText("Discovery: " .. discoveryChoices[lab.discoveryArt][1])
-  SetBackdrop(lab.window, lab.skin)
-  SetBackdrop(lab.preview, lab.skin)
+  ApplyBackdrop(lab.window)
+  ApplyBackdrop(lab.preview)
 
   local fontPath, _, fontFlags = GameFontNormal:GetFont()
   for index = 1, table.getn(samples) do
@@ -208,9 +239,16 @@ local function Render()
       row.icon:SetWidth(sizes.item)
       row.icon:SetHeight(sizes.item)
       row.icon:Show()
+    elseif markerType == "kill" then
+      -- Icon reference only; PFQG does not currently generate kill alerts.
+      row.icon:SetTexture("Interface\\AddOns\\pfQuest\\img\\cluster_mob")
+      row.icon:SetTexCoord(0, 1, 0, 1)
+      row.icon:SetWidth(sizes.kill)
+      row.icon:SetHeight(sizes.kill)
+      row.icon:Show()
     elseif markerType == "discovery" then
       row.icon:SetTexture(discoveryChoices[lab.discoveryArt][2])
-      if lab.discoveryArt == 1 then
+      if lab.discoveryArt == 3 then
         row.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
       else
         row.icon:SetTexCoord(0, 1, 0, 1)
@@ -242,15 +280,36 @@ end
 
 local function Reset()
   for key, value in pairs(defaults) do sizes[key] = value end
-  lab.skin = "NATIVE"
+  -- Reset measurements and examples without changing the selected skin.
   lab.questArt = true
   lab.discoveryArt = 1
   Render()
 end
 
-local function Build()
+local Build
+
+-- Keep one skinned window per theme. pfUI permanently hooks buttons and the
+-- scrollbar; theme changes swap complete temporary previews, never undo hooks.
+local function ShowSkin(skin)
+  if lab.window then lab.window:Hide() end
+  lab.skin = skin
+  local view = lab.views[skin]
+  if view then
+    for key, value in pairs(view) do lab[key] = value end
+  else
+    lab.window = nil
+    lab.rows = {}
+    lab.fields = {}
+    Build()
+  end
+  Render()
+  lab.window:Show()
+end
+
+Build = function()
   if lab.window then return end
-  local window = CreateFrame("Frame", "pfQuest_GroupDevUILabFrame", UIParent)
+  lab.builds = lab.builds + 1
+  local window = CreateFrame("Frame", "pfQuest_GroupDevUILabFrame" .. lab.builds, UIParent)
   window:SetWidth(765)
   window:SetHeight(545)
   window:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
@@ -261,7 +320,7 @@ local function Build()
   window:SetScript("OnDragStart", function() window:StartMoving() end)
   window:SetScript("OnDragStop", function() window:StopMovingOrSizing() end)
   lab.window = window
-  SetBackdrop(window, lab.skin)
+  ApplyBackdrop(window)
 
   local heading = window:CreateFontString(nil, "OVERLAY", "GameFontNormal")
   heading:SetPoint("TOPLEFT", window, "TOPLEFT", 16, -11)
@@ -273,15 +332,20 @@ local function Build()
     Render()
   end)
   lab.skinButton = MakeButton(window, 130, "Skin: Native", 140, -36, function()
-    lab.skin = lab.skin == "NATIVE" and "PFUI" or "NATIVE"
-    Render()
+    if lab.skin == "PFUI" then
+      ShowSkin("NATIVE")
+    elseif CanUsePfUI() then
+      ShowSkin("PFUI")
+    elseif DEFAULT_CHAT_FRAME then
+      DEFAULT_CHAT_FRAME:AddMessage("pfQuest Group UI Lab: pfUI skinning API not available.")
+    end
   end)
   lab.questButton = MakeButton(window, 116, "Quest: ! / ?", 276, -36, function()
     lab.questArt = not lab.questArt
     Render()
   end)
   MakeButton(window, 68, "Reset", 399, -36, Reset)
-  lab.discoveryButton = MakeButton(window, 192, "Discovery: Inventory map", 475, -36, function()
+  lab.discoveryButton = MakeButton(window, 192, "Discovery: pfQuest misc", 475, -36, function()
     lab.discoveryArt = math.mod(lab.discoveryArt, table.getn(discoveryChoices)) + 1
     Render()
   end)
@@ -291,7 +355,7 @@ local function Build()
   preview:SetWidth(353)
   preview:SetHeight(436)
   lab.preview = preview
-  SetBackdrop(preview, lab.skin)
+  ApplyBackdrop(preview)
 
   lab.title = preview:CreateFontString(nil, "OVERLAY", "GameFontNormal")
   lab.title:SetPoint("TOPLEFT", preview, "TOPLEFT", 10, -10)
@@ -299,13 +363,18 @@ local function Build()
   lab.title:SetHeight(20)
   lab.title:SetJustifyH("LEFT")
 
-  lab.scroll = CreateFrame("ScrollFrame", "pfQuest_GroupDevUILabScroll", preview, "UIPanelScrollFrameTemplate")
+  local scrollName = "pfQuest_GroupDevUILabScroll" .. lab.builds
+  lab.scroll = CreateFrame("ScrollFrame", scrollName, preview, "UIPanelScrollFrameTemplate")
   lab.scroll:SetPoint("TOPLEFT", preview, "TOPLEFT", 7, -37)
   lab.scroll:SetPoint("BOTTOMRIGHT", preview, "BOTTOMRIGHT", -25, 9)
   lab.child = CreateFrame("Frame", nil, lab.scroll)
   lab.child:SetWidth(315)
   lab.child:SetHeight(1)
   lab.scroll:SetScrollChild(lab.child)
+  if lab.skin == "PFUI" and CanUsePfUI() then
+    local scrollbar = getglobal(scrollName .. "ScrollBar")
+    if scrollbar then pfUI.api.SkinScrollbar(scrollbar) end
+  end
 
   local description = window:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   description:SetPoint("TOPLEFT", window, "TOPLEFT", 392, -73)
@@ -347,14 +416,22 @@ local function Build()
   caption:SetWidth(735)
   caption:SetHeight(22)
   caption:SetJustifyH("LEFT")
-  caption:SetText("Synthetic list only |  Native and pfUI-like preview |  No effect on live Guide/Tourist panels")
+  caption:SetText("Synthetic list only | Native or installed pfUI skin | Live panels unchanged")
 
+  lab.views[lab.skin] = {
+    window = lab.window, rows = lab.rows, fields = lab.fields,
+    modeButton = lab.modeButton, skinButton = lab.skinButton,
+    questButton = lab.questButton, discoveryButton = lab.discoveryButton,
+    preview = lab.preview, title = lab.title, scroll = lab.scroll,
+    child = lab.child
+  }
   Render()
 end
 
 SLASH_PFQUESTGROUPUILAB1 = "/pfqgdebug"
 SlashCmdList["PFQUESTGROUPUILAB"] = function()
   local wasOpen = lab.window and lab.window:IsShown()
+  if not lab.window and CanUsePfUI() then lab.skin = "PFUI" end
   Build()
   if wasOpen then
     lab.window:Hide()
