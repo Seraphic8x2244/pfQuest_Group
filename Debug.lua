@@ -67,7 +67,7 @@ local touristSamples = {
   { "gossip", "done", "GOSSIP  Another conversation" },
   { "item", nil, "ITEM  Second loot objective" },
   { "flight", "done", "FLIGHT  Second flight destination" }
-
+}
 
 local function CanUsePfUI()
   return pfUI and pfUI.api and pfUI_config
