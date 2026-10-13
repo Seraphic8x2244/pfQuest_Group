@@ -5805,19 +5805,19 @@ local function EnsureTouristRow(index)
 
   row.gossipIcon = row.semanticIconSlot:CreateTexture(nil, "ARTWORK")
   row.gossipIcon:SetPoint("CENTER", row.semanticIconSlot, "CENTER", 0, 0)
-  row.gossipIcon:SetWidth(14)
-  row.gossipIcon:SetHeight(14)
+  row.gossipIcon:SetWidth(12)
+  row.gossipIcon:SetHeight(12)
   row.gossipIcon:SetTexture("Interface\\GossipFrame\\GossipGossipIcon")
   row.gossipIcon:SetTexCoord(0, 1, 1, 0)
   row.gossipIcon:Hide()
 
   row.flightIcon = row.semanticIconSlot:CreateTexture(nil, "ARTWORK")
   row.flightIcon:SetPoint("CENTER", row.semanticIconSlot, "CENTER", 0, 0)
-  row.flightIcon:SetWidth(16)
-  row.flightIcon:SetHeight(16)
+  row.flightIcon:SetWidth(12)
+  row.flightIcon:SetHeight(12)
   row.flightIcon:SetTexture("Interface\\TaxiFrame\\UI-Taxi-Icon-Green")
-  -- ~30% larger artwork, still centred within the same 16px icon slot.
-  row.flightIcon:SetTexCoord(0.15, 0.85, 0.15, 0.85)
+  -- Uncropped native flight icon, centered within the unchanged 16px slot.
+  row.flightIcon:SetTexCoord(0, 1, 0, 1)
   row.flightIcon:Hide()
 
   row.inlineSuffix = row.frame:CreateFontString(nil, "OVERLAY")
@@ -5855,7 +5855,7 @@ local function EnsureTouristRow(index)
 
   row.action = CreateFrame("Button", nil, row.frame, "UIPanelButtonTemplate")
   row.action:SetPoint("RIGHT", row.frame, "RIGHT", 0, 0)
-  row.action:SetWidth(52)
+  row.action:SetWidth(18)
   row.action:SetHeight(18)
   row.action:SetText("")
   row.action:SetScript("OnClick", function()
@@ -5867,8 +5867,8 @@ local function EnsureTouristRow(index)
 
   row.actionIcon = row.action:CreateTexture(nil, "ARTWORK")
   row.actionIcon:SetPoint("CENTER", row.action, "CENTER", 0, 0)
-  row.actionIcon:SetWidth(13)
-  row.actionIcon:SetHeight(13)
+  row.actionIcon:SetWidth(11)
+  row.actionIcon:SetHeight(11)
   row.actionIcon:SetTexture("Interface\\AddOns\\pfQuest_Group\\assets\\clipboard-check")
   row.action:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square")
   row.action:SetScript("OnEnter", function()
@@ -6408,14 +6408,14 @@ local function RefreshTouristWindow(session)
     row.actionTooltip = entry.actionText or "Done"
     row.action:ClearAllPoints()
     row.action:SetPoint("LEFT", row.frame, "LEFT", 0, 0)
-    row.action:SetWidth(20)
+    row.action:SetWidth(18)
     row.action:Hide()
     if entry.actionText then
       row.actionIcon:Show()
       row.action:Show()
     end
     RenderChainedInstructionRow(row, entry.instruction, rowWidth,
-      entry.actionText and 20 or 0)
+      entry.actionText and 18 or 0)
     row.strike:Hide()
     if entry.completing then
       row.strike:Show()
@@ -6484,19 +6484,19 @@ local function EnsureGuideTouristRow(index)
 
   row.gossipIcon = row.semanticIconSlot:CreateTexture(nil, "ARTWORK")
   row.gossipIcon:SetPoint("CENTER", row.semanticIconSlot, "CENTER", 0, 0)
-  row.gossipIcon:SetWidth(14)
-  row.gossipIcon:SetHeight(14)
+  row.gossipIcon:SetWidth(12)
+  row.gossipIcon:SetHeight(12)
   row.gossipIcon:SetTexture("Interface\\GossipFrame\\GossipGossipIcon")
   row.gossipIcon:SetTexCoord(0, 1, 1, 0)
   row.gossipIcon:Hide()
 
   row.flightIcon = row.semanticIconSlot:CreateTexture(nil, "ARTWORK")
   row.flightIcon:SetPoint("CENTER", row.semanticIconSlot, "CENTER", 0, 0)
-  row.flightIcon:SetWidth(16)
-  row.flightIcon:SetHeight(16)
+  row.flightIcon:SetWidth(12)
+  row.flightIcon:SetHeight(12)
   row.flightIcon:SetTexture("Interface\\TaxiFrame\\UI-Taxi-Icon-Green")
-  -- ~30% larger artwork, still centred within the same 16px icon slot.
-  row.flightIcon:SetTexCoord(0.15, 0.85, 0.15, 0.85)
+  -- Uncropped native flight icon, centered within the unchanged 16px slot.
+  row.flightIcon:SetTexCoord(0, 1, 0, 1)
   row.flightIcon:Hide()
 
   row.inlineSuffix = row.frame:CreateFontString(nil, "OVERLAY")
@@ -6534,7 +6534,7 @@ local function EnsureGuideTouristRow(index)
 
   row.action = CreateFrame("Button", nil, row.frame, "UIPanelButtonTemplate")
   row.action:SetPoint("RIGHT", row.frame, "RIGHT", 0, 0)
-  row.action:SetWidth(52)
+  row.action:SetWidth(18)
   row.action:SetHeight(18)
   row.action:SetScript("OnClick", function()
     if row.disparityKey then
@@ -6547,8 +6547,8 @@ local function EnsureGuideTouristRow(index)
   end)
   row.actionIcon = row.action:CreateTexture(nil, "ARTWORK")
   row.actionIcon:SetPoint("CENTER", row.action, "CENTER", 0, 0)
-  row.actionIcon:SetWidth(13)
-  row.actionIcon:SetHeight(13)
+  row.actionIcon:SetWidth(11)
+  row.actionIcon:SetHeight(11)
   row.actionIcon:SetTexture("Interface\\AddOns\\pfQuest_Group\\assets\\trash-2")
   row.action:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square")
   row.action:SetScript("OnEnter", function()
@@ -6783,7 +6783,7 @@ local function RefreshGuideTouristWindow()
     row.targetNpcName = nil
     row.action:ClearAllPoints()
     row.action:SetPoint("RIGHT", row.frame, "RIGHT", 0, 0)
-    row.action:SetWidth(52)
+    row.action:SetWidth(18)
     row.action:Hide()
     row.disparityKey = nil
     row.disparityHidden = false
@@ -6804,14 +6804,14 @@ local function RefreshGuideTouristWindow()
       row.marker:SetTextColor(1, 0.35, 0.15)
       row.text:ClearAllPoints()
       row.text:SetPoint("LEFT", row.marker, "RIGHT", 4, 0)
-      textWidth = math.max(1, rowWidth - 20 - 4 - 18 - 4 - 4)
+      textWidth = math.max(1, rowWidth - 18 - 4 - 18 - 4 - 4)
       ignored, renderedWidth = guideTouristUI.EllipsizeFontString(row.text, string.format(
         L.DISPARITY_MISSING_QUEST or "%s missing: %s",
         SafeString(disparity.playerName),
         SafeString(disparity.quest and disparity.quest.title)
       ), textWidth)
       row.renderedTextWidth = renderedWidth
-      row.action:SetWidth(20)
+      row.action:SetWidth(18)
       row.action:SetText("")
       row.actionIcon:SetTexture(row.disparityHidden and "Interface\\AddOns\\pfQuest_Group\\assets\\eye" or "Interface\\AddOns\\pfQuest_Group\\assets\\eye-off")
       row.actionTooltip = row.disparityHidden and (L.DISPARITY_UNHIDE or "Unhide") or (L.DISPARITY_HIDE or "Hide")
@@ -6825,7 +6825,7 @@ local function RefreshGuideTouristWindow()
       row.marker:SetWidth(0)
       row.action:ClearAllPoints()
       row.action:SetPoint("LEFT", row.frame, "LEFT", 0, 0)
-      row.action:SetWidth(20)
+      row.action:SetWidth(18)
       row.action:SetText("")
       row.actionIcon:SetTexture("Interface\\AddOns\\pfQuest_Group\\assets\\trash-2")
       row.actionTooltip = "Remove"
@@ -6834,7 +6834,7 @@ local function RefreshGuideTouristWindow()
         row.action:Show()
       end
       RenderChainedInstructionRow(row, entry.instruction, rowWidth,
-        entry.completing and 0 or 20)
+        entry.completing and 0 or 18)
       if entry.completing then
         row.strike:Show()
         entry.completion.row = row
