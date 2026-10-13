@@ -1,7 +1,7 @@
 pfQuest_Group_L = pfQuest_Group_L or {}
 local L = pfQuest_Group_L
 
-L.COMMAND_HELP = "Usage: /pfqgroup off | guide | tourist <player> | status (UI lab: /pfqgdebug)"
+L.COMMAND_HELP = "Usage: /pfqg off | guide | tourist <player> | status | debug"
 L.TOURIST_REQUIRES_GUIDE = "Tourist mode requires another player name."
 L.STATUS_OFF = "Mode: Off."
 L.STATUS_GUIDE = "Mode: Guide."

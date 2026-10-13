@@ -5763,6 +5763,49 @@ local function BuildTouristDisplayRows()
   return display
 end
 
+-- The live Guide/Tourist panel uses installed pfUI skins when available.
+-- These helpers do not modify pfUI itself or any unrelated addon frames.
+local function GuideTouristPfUIAvailable()
+  return pfUI and pfUI.api and pfUI_config
+    and pfUI_config.appearance and pfUI_config.appearance.border
+    and type(pfUI.api.CreateBackdrop) == "function"
+    and type(pfUI.api.SkinButton) == "function"
+    and type(pfUI.api.SkinScrollbar) == "function"
+    and pfUI.font_default
+end
+
+local function SkinGuideTouristButton(button)
+  if button and not button.pfqgPfUISkinned and GuideTouristPfUIAvailable() then
+    pfUI.api.SkinButton(button)
+    button.pfqgPfUISkinned = true
+  end
+end
+
+local function ApplyGuideTouristPfUISkin()
+  if not guideTouristUI.frame or not GuideTouristPfUIAvailable() then
+    return
+  end
+
+  if not guideTouristUI.pfUISkinned then
+    pfUI.api.CreateBackdrop(guideTouristUI.frame, nil, true)
+    if guideTouristUI.scrollBar then
+      pfUI.api.SkinScrollbar(guideTouristUI.scrollBar)
+    end
+    guideTouristUI.pfUISkinned = true
+  end
+
+  SkinGuideTouristButton(guideTouristUI.showHiddenButton)
+
+  -- Existing rows can predate pfUI initialization, while others arrive later.
+  local index
+  for index = 1, table.getn(guideTouristUI.rows) do
+    SkinGuideTouristButton(guideTouristUI.rows[index].action)
+  end
+  for index = 1, table.getn(guideTouristUI.touristRows) do
+    SkinGuideTouristButton(guideTouristUI.touristRows[index].action)
+  end
+end
+
 local function EnsureTouristRow(index)
   local row = guideTouristUI.touristRows[index]
   local fontPath
@@ -5884,6 +5927,7 @@ local function EnsureTouristRow(index)
     GameTooltip:Show()
   end)
   row.action:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  SkinGuideTouristButton(row.action)
 
   guideTouristUI.touristRows[index] = row
   return row
@@ -6362,9 +6406,21 @@ local function HideTouristRows()
   end
 end
 
+local GROUP_TITLE_MARKUP = "|cff33ffccpf|cffffffffQuest|cff999999 Group|r"
+
+local function BrandedGuideTouristTitle(text)
+  local prefix = "pfQuest Group"
+  if string.sub(text, 1, string.len(prefix)) == prefix then
+    return GROUP_TITLE_MARKUP .. string.sub(text, string.len(prefix) + 1)
+  end
+  return text
+end
+
 local function GuideTouristWindowTitle(session)
   if not session or session.mode ~= "TOURIST" then
-    return L.WINDOW_TITLE_GUIDE or "pfQuest Group - Guide Mode"
+    return BrandedGuideTouristTitle(
+      L.WINDOW_TITLE_GUIDE or "pfQuest Group - Guide Mode"
+    )
   end
 
   local guideName = SafeString(session.guideName)
@@ -6373,10 +6429,10 @@ local function GuideTouristWindowTitle(session)
   local color = GroupClassColorHex(member and member.classToken)
   local coloredName = "|cff" .. color .. guideName .. "|r"
 
-  return string.format(
+  return BrandedGuideTouristTitle(string.format(
     L.WINDOW_TITLE_TOURIST or "pfQuest Group - Tourist of %s",
     coloredName
-  )
+  ))
 end
 
 local function RefreshTouristWindow(session)
@@ -6571,6 +6627,7 @@ local function EnsureGuideTouristRow(index)
     GameTooltip:Show()
   end)
   row.action:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  SkinGuideTouristButton(row.action)
   row.action:Hide()
 
   guideTouristUI.rows[index] = row
@@ -6639,6 +6696,8 @@ local function RefreshGuideTouristWindow()
   if not guideTouristUI.frame then
     return
   end
+
+  ApplyGuideTouristPfUISkin()
 
   if not guideTouristUI.panelVisible then
     guideTouristUI.frame:Hide()
@@ -6996,7 +7055,7 @@ local function InitializeGuideTouristWindow()
   guideTouristUI.title:SetPoint("TOPRIGHT", guideTouristUI.frame, "TOPRIGHT", -10, -9)
   guideTouristUI.title:SetHeight(16)
   guideTouristUI.title:SetJustifyH("LEFT")
-  guideTouristUI.title:SetTextColor(1, 0.82, 0)
+  guideTouristUI.title:SetTextColor(1, 1, 1)
 
   guideTouristUI.scrollFrame = CreateFrame(
     "ScrollFrame",
@@ -7423,8 +7482,14 @@ local function HandleSlashCommand(message)
     end
   elseif command == "status" then
     PrintSessionText(SessionStatusText())
+  elseif command == "debug" then
+    if type(Addon.ToggleDebugUI) == "function" then
+      Addon.ToggleDebugUI()
+    else
+      PrintSessionText("UI lab is not available in this build.")
+    end
   else
-    PrintSessionText(L.COMMAND_HELP or "Usage: /pfqgroup off | guide | tourist <player> | status")
+    PrintSessionText(L.COMMAND_HELP or "Usage: /pfqgroup off | guide | tourist <player> | status | debug")
   end
 end
 
@@ -7506,6 +7571,9 @@ frame:SetScript("OnEvent", function()
     InstallGroupProgressTracker()
     Addon.InstallGroupHoldMapTooltip()
     RefreshParty()
+    -- pfUI can initialize after this addon in the load order; the world
+    -- entry event is the guaranteed post-load opportunity to apply its skin.
+    ApplyGuideTouristPfUISkin()
 
     if event == "PLAYER_ENTERING_WORLD" then
       questBaselineAt = GetTime() + 1

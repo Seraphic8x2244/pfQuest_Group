@@ -2,6 +2,7 @@
 -- Loaded by pfQuest_Group.toc on the dev branch only.
 if not pfQuest_Group then return end
 
+local GROUP_TITLE_MARKUP = "|cff33ffccpf|cffffffffQuest|cff999999 Group|r"
 local lab = {
   window = nil, rows = {}, fields = {}, views = {}, builds = 0,
   mode = "GUIDE", skin = "NATIVE", questArt = true, discoveryArt = 1
@@ -155,8 +156,8 @@ local function Render()
 
   local samples = lab.mode == "GUIDE" and guideSamples or touristSamples
   lab.title:SetText(lab.mode == "GUIDE"
-    and "pfQuest Group - Guide Mode"
-    or "pfQuest Group - Tourist of |cff69ccf0GuideName|r")
+    and GROUP_TITLE_MARKUP .. " - Guide Mode"
+    or GROUP_TITLE_MARKUP .. " - Tourist of |cff69ccf0GuideName|r")
   lab.modeButton:SetText(lab.mode == "GUIDE" and "View: Guide" or "View: Tourist")
   lab.skinButton:SetText(lab.skin == "PFUI" and "Skin: pfUI actual" or "Skin: Native")
   lab.questButton:SetText(lab.questArt and "Quest: BLP" or "Quest: ! / ?")
@@ -324,7 +325,7 @@ Build = function()
 
   local heading = window:CreateFontString(nil, "OVERLAY", "GameFontNormal")
   heading:SetPoint("TOPLEFT", window, "TOPLEFT", 16, -11)
-  heading:SetText("pfQuest Group - UI Lab (dev only)")
+  heading:SetText(GROUP_TITLE_MARKUP .. " - UI Lab (dev only)")
   MakeButton(window, 52, "Close", 690, -8, function() window:Hide() end)
 
   lab.modeButton = MakeButton(window, 120, "View: Guide", 14, -36, function()
@@ -362,6 +363,7 @@ Build = function()
   lab.title:SetWidth(334)
   lab.title:SetHeight(20)
   lab.title:SetJustifyH("LEFT")
+  lab.title:SetTextColor(1, 1, 1)
 
   local scrollName = "pfQuest_GroupDevUILabScroll" .. lab.builds
   lab.scroll = CreateFrame("ScrollFrame", scrollName, preview, "UIPanelScrollFrameTemplate")
@@ -428,8 +430,7 @@ Build = function()
   Render()
 end
 
-SLASH_PFQUESTGROUPUILAB1 = "/pfqgdebug"
-SlashCmdList["PFQUESTGROUPUILAB"] = function()
+function pfQuest_Group.ToggleDebugUI()
   local wasOpen = lab.window and lab.window:IsShown()
   if not lab.window and CanUsePfUI() then lab.skin = "PFUI" end
   Build()
