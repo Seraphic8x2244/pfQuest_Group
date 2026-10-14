@@ -1,0 +1,27 @@
+name: Lua 5.0.3 and production regression
+on:
+  push:
+    branches: [dev]
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: Seraphic8x2244/VanillaTemplate
+          ref: main
+          path: .validation/VanillaTemplate
+      - name: Verify canonical Lua 5.0.3 tool
+        run: bash .validation/VanillaTemplate/tools/lua50/selftest.sh
+      - name: Compile addon and test sources as Lua 5.0.3
+        run: bash .validation/VanillaTemplate/tools/lua50/check_lua50.sh pfQuest_Group.lua Debug.lua locales/enUS.lua tests
+      - name: Install compatible fixture interpreter
+        run: sudo apt-get update && sudo apt-get install -y lua5.1
+      - name: Execute persistence and production regression fixtures (Lua 5.1)
+        run: |
+          lua5.1 tests/schema_v4_fixtures.lua
+          lua5.1 tests/production_regression.lua
