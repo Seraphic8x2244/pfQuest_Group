@@ -10,18 +10,42 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/checkout@v4
-        with:
-          repository: Seraphic8x2244/VanillaTemplate
-          ref: main
-          path: .validation/VanillaTemplate
-      - name: Verify canonical Lua 5.0.3 tool
-        run: bash .validation/VanillaTemplate/tools/lua50/selftest.sh
-      - name: Compile addon and test sources as Lua 5.0.3
-        run: bash .validation/VanillaTemplate/tools/lua50/check_lua50.sh pfQuest_Group.lua Debug.lua locales/enUS.lua tests
-      - name: Install compatible fixture interpreter
-        run: sudo apt-get update && sudo apt-get install -y lua5.1
-      - name: Execute persistence and production regression fixtures (Lua 5.1)
+      - name: Build SHA-256-verified official Lua 5.0.3
+        shell: bash
         run: |
-          lua5.1 tests/schema_v4_fixtures.lua
-          lua5.1 tests/production_regression.lua
+          curl -fLsS --retry 3 https://www.lua.org/ftp/lua-5.0.3.tar.gz -o "$RUNNER_TEMP/lua-5.0.3.tar.gz"
+          echo "1193a61b0e08acaa6eee0eecf29709179ee49c71baebc59b682a25c3b5a45671  $RUNNER_TEMP/lua-5.0.3.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/lua-5.0.3.tar.gz" -C "$RUNNER_TEMP"
+          make -C "$RUNNER_TEMP/lua-5.0.3" CC=cc CFLAGS="-O2 -fcommon" -j2
+          echo "$RUNNER_TEMP/lua-5.0.3/bin" >> "$GITHUB_PATH"
+      - name: Verify Lua 5.0.3 compiler identity and rejection limits
+        shell: bash
+        run: |
+          lua -v
+          luac -v
+          printf 'local t = {1, 2}\nreturn #t\n' > "$RUNNER_TEMP/later-syntax.lua"
+          if luac -p "$RUNNER_TEMP/later-syntax.lua"; then
+            echo 'Compiler wrongly accepted Lua 5.1+ # syntax' >&2
+            exit 1
+          fi
+          printf 'local ' > "$RUNNER_TEMP/too-many-locals.lua"
+          for i in $(seq 1 201); do
+            if [ "$i" -gt 1 ]; then printf ', ' >> "$RUNNER_TEMP/too-many-locals.lua"; fi
+            printf 'v%s' "$i" >> "$RUNNER_TEMP/too-many-locals.lua"
+          done
+          printf '\n' >> "$RUNNER_TEMP/too-many-locals.lua"
+          if luac -p "$RUNNER_TEMP/too-many-locals.lua"; then
+            echo 'Compiler wrongly accepted 201 top-level locals' >&2
+            exit 1
+          fi
+      - name: Compile addon and test sources using Lua 5.0.3
+        run: |
+          luac -p pfQuest_Group.lua
+          luac -p Debug.lua
+          luac -p locales/enUS.lua
+          luac -p tests/schema_v4_fixtures.lua
+          luac -p tests/production_regression.lua
+      - name: Execute schema and production regressions using Lua 5.0.3
+        run: |
+          lua tests/schema_v4_fixtures.lua
+          lua tests/production_regression.lua
