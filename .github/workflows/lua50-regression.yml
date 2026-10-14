@@ -16,7 +16,7 @@ jobs:
           curl -fLsS --retry 3 https://www.lua.org/ftp/lua-5.0.3.tar.gz -o "$RUNNER_TEMP/lua-5.0.3.tar.gz"
           echo "1193a61b0e08acaa6eee0eecf29709179ee49c71baebc59b682a25c3b5a45671  $RUNNER_TEMP/lua-5.0.3.tar.gz" | sha256sum --check
           tar -xzf "$RUNNER_TEMP/lua-5.0.3.tar.gz" -C "$RUNNER_TEMP"
-          make -C "$RUNNER_TEMP/lua-5.0.3" CC=cc CFLAGS="-O2 -fcommon" -j2
+          make -C "$RUNNER_TEMP/lua-5.0.3" CC=cc MYCFLAGS="-O2 -fcommon" -j2
           echo "$RUNNER_TEMP/lua-5.0.3/bin" >> "$GITHUB_PATH"
       - name: Verify Lua 5.0.3 compiler identity and rejection limits
         shell: bash
