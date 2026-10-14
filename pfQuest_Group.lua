@@ -4242,7 +4242,13 @@ local function ReconcileTouristInstructions(sender)
 
   guideKey = NormalizeName(session.guideName)
   peer = guideKey and peers[guideKey]
-  if not peer or not peer.compatible or not peer.instructions or peer.instructions.sessionId ~= session.guideSessionId then
+  -- A cached or delayed S/D packet is not authority to revive an instruction
+  -- projection while the peer is OFF, uninitialized, or in a different session.
+  if not peer or not peer.compatible or not peer.session
+    or peer.session.mode ~= "GUIDE"
+    or peer.session.guideSessionId ~= session.guideSessionId
+    or not peer.instructions
+    or peer.instructions.sessionId ~= session.guideSessionId then
     return false
   end
 
@@ -5087,7 +5093,7 @@ function Addon.SetMode(mode, guideName)
 
   if changed then
     Addon.PreserveInstructionHistory(Addon.db, session)
-    Addon.db.instructions = NormalizeInstructionStore(Addon.db.instructions, session)
+  Addon.db.instructions = NormalizeInstructionStore(Addon.db.instructions, session)
     touristPendingInstructions = {}
     session.revision = session.revision + 1
     BroadcastSessionDelta()
@@ -5125,11 +5131,26 @@ function Addon.SetTouristSession(guideName, guideSessionId, joinBaseline)
     return true
   end
 
+  -- Repair only the missing baseline for a still-identified same-session pair.
+  -- Historical metadata is not instruction authority: never copy archived
+  -- records or consumed flags into the live store, and never apply this when
+  -- selecting a different/new Guide session or after an explicit unpair.
+  if session.guideSessionId == guideSessionId then
+    local history = Addon.db.history
+    local key = NormalizeName(guideName)
+    local byName = history and history.touristSessions and history.touristSessions[key]
+    local archived = byName and byName[guideSessionId]
+    local frozen = archived and tonumber(archived.joinBaseline)
+    if frozen and frozen >= 0 and frozen == math.floor(frozen) then
+      baseline = frozen
+    end
+  end
+
   Addon.PreserveInstructionHistory(Addon.db, session)
   session.guideSessionId = guideSessionId
   session.joinBaseline = baseline
   Addon.PreserveInstructionHistory(Addon.db, session)
-    Addon.db.instructions = NormalizeInstructionStore(Addon.db.instructions, session)
+  Addon.db.instructions = NormalizeInstructionStore(Addon.db.instructions, session)
   touristPendingInstructions = {}
   session.revision = session.revision + 1
   BroadcastSessionDelta()
@@ -5158,7 +5179,7 @@ function Addon.ClearTouristSession()
   session.guideSessionId = nil
   session.joinBaseline = nil
   Addon.PreserveInstructionHistory(Addon.db, session)
-    Addon.db.instructions = NormalizeInstructionStore(Addon.db.instructions, session)
+  Addon.db.instructions = NormalizeInstructionStore(Addon.db.instructions, session)
   touristPendingInstructions = {}
   session.revision = session.revision + 1
   BroadcastSessionDelta()
@@ -5189,7 +5210,7 @@ local function CompleteTouristInstruction(seq)
   end
 
   Addon.PreserveInstructionHistory(Addon.db, session)
-    Addon.db.instructions = NormalizeInstructionStore(Addon.db.instructions, session)
+  Addon.db.instructions = NormalizeInstructionStore(Addon.db.instructions, session)
   store = Addon.db.instructions
   store.consumed[seq] = true
   touristPendingInstructions[seq] = nil
@@ -5225,7 +5246,7 @@ function Addon.CreateGuideInstruction(record)
 
   session.guideActionSeq = seq
   Addon.PreserveInstructionHistory(Addon.db, session)
-    Addon.db.instructions = NormalizeInstructionStore(Addon.db.instructions, session)
+  Addon.db.instructions = NormalizeInstructionStore(Addon.db.instructions, session)
   store = Addon.db.instructions
   store.guideSessionId = session.guideSessionId
   store.guideRecords[seq] = instruction
