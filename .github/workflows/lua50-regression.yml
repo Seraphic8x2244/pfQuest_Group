@@ -45,7 +45,9 @@ jobs:
           luac -p locales/enUS.lua
           luac -p tests/schema_v4_fixtures.lua
           luac -p tests/production_regression.lua
+          luac -p tests/group_tracker_visibility.lua
       - name: Execute schema and production regressions using Lua 5.0.3
         run: |
           lua tests/schema_v4_fixtures.lua
           lua tests/production_regression.lua
+          lua tests/group_tracker_visibility.lua

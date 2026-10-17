@@ -2541,6 +2541,10 @@ local function RestoreGroupTrackerButton(button)
 
   if button.objectives then
     for index, objective in pairs(button.objectives) do
+      if objective.pfqGroupForcedVisible then
+        objective:Hide()
+        objective.pfqGroupForcedVisible = nil
+      end
       RestoreGroupObjectiveBase(objective)
       objective:ClearAllPoints()
       objective:SetPoint("TOPLEFT", 20, -fontSize * index - 6)
@@ -2553,6 +2557,69 @@ local function RestoreGroupTrackerButton(button)
 
   if button.title and not button.empty then
     button:SetHeight(entryHeight + maxVisible * fontSize)
+  end
+end
+
+-- pfQuest hides objective rows when local progress reaches 100%, even if a
+-- compatible party member still needs those objectives. Keep the shared
+-- progress display expanded in that specific case; never change quest state.
+local function PreserveSharedTrackerObjectives(button, localQuest, questPeers, fontSize)
+  local count = table.getn(localQuest and localQuest.objectives or {})
+  local localFinished = count > 0
+  local peerNeedsProgress = false
+  local objectiveIndex
+  local peerIndex
+  local objective
+  local remoteObjective
+
+  for objectiveIndex = 1, count do
+    if not RemoteObjectiveDone(localQuest.objectives[objectiveIndex]) then
+      localFinished = false
+      break
+    end
+  end
+
+  if localFinished then
+    for peerIndex = 1, table.getn(questPeers) do
+      for objectiveIndex = 1, count do
+        remoteObjective = GetRemoteObjective(questPeers[peerIndex], localQuest, objectiveIndex)
+        if remoteObjective and not RemoteObjectiveDone(remoteObjective) then
+          peerNeedsProgress = true
+          break
+        end
+      end
+      if peerNeedsProgress then break end
+    end
+  end
+
+  if not peerNeedsProgress then
+    for _, objective in pairs(button.objectives or {}) do
+      if objective.pfqGroupForcedVisible then
+        objective:Hide()
+        objective.pfqGroupForcedVisible = nil
+      end
+    end
+    return
+  end
+
+  -- A quest first tracked after local completion may have no native
+  -- fontstrings. Use the same objective slots so existing layout/rows work.
+  button.objectives = button.objectives or {}
+  for objectiveIndex = 1, count do
+    objective = button.objectives[objectiveIndex]
+    if not objective then
+      objective = button:CreateFontString(nil, "HIGH", "GameFontNormal")
+      CopyGroupTrackerFont(nil, objective, fontSize)
+      objective:SetJustifyH("LEFT")
+      objective:SetPoint("TOPLEFT", 20, -fontSize * objectiveIndex - 6)
+      objective:SetPoint("TOPRIGHT", -10, -fontSize * objectiveIndex - 6)
+      objective:SetText("|cffffffff- " .. SafeString(localQuest.objectives[objectiveIndex].text) .. "|r")
+      button.objectives[objectiveIndex] = objective
+    end
+    if not objective:IsShown() then
+      objective.pfqGroupForcedVisible = true
+      objective:Show()
+    end
   end
 end
 
@@ -2689,6 +2756,7 @@ local function ApplyGroupProgressToButton(button, captureBase)
 
   peersInOrder = questPeers
   fontSize = GetGroupTrackerFontSize(button)
+  PreserveSharedTrackerObjectives(button, localQuest, peersInOrder, fontSize)
   entryHeight = math.ceil(fontSize * 1.6)
   iconSize = math.max(8, fontSize - 2)
   localName = playerName or UnitName("player") or "Player"
@@ -2859,6 +2927,13 @@ local function GroupTrackerButtonEvent(self)
     originalTrackerButtonEvent(button)
   end
 
+  -- The native update owns explicit user expansion. Do not later hide rows
+  -- that pfQuest itself chose to show.
+  for _, objective in pairs(button and button.objectives or {}) do
+    if objective.pfqGroupForcedVisible and objective:IsShown() then
+      objective.pfqGroupForcedVisible = nil
+    end
+  end
   ApplyGroupProgressToButton(button, true)
   if Addon.RefreshGroupHoldTracker then
     Addon.RefreshGroupHoldTracker()
