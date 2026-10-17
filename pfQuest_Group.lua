@@ -257,6 +257,8 @@ local function NormalizeSession(session)
   if type(session.hiddenDisparities) ~= "table" then
     session.hiddenDisparities = {}
   end
+  if type(session.dismissedObjectiveAlerts) ~= "table" then session.dismissedObjectiveAlerts = {} end
+  if type(session.acknowledgedObjectiveAlerts) ~= "table" then session.acknowledgedObjectiveAlerts = {} end
 
   baseline = tonumber(session.joinBaseline)
   if baseline and baseline >= 0 then
@@ -278,17 +280,22 @@ local function NormalizeSession(session)
     session.joinBaseline = nil
     session.guideActionSeq = nil
     session.hiddenDisparities = {}
+    session.dismissedObjectiveAlerts = {}
+    session.acknowledgedObjectiveAlerts = {}
   elseif session.mode == "GUIDE" then
     session.guideName = nil
     session.joinBaseline = nil
     session.guideActionSeq = actionSeq
+    session.acknowledgedObjectiveAlerts = {}
     if type(session.guideSessionId) ~= "string" or session.guideSessionId == "" then
       session.guideSessionId = NewSessionId()
       session.guideActionSeq = 0
+      session.dismissedObjectiveAlerts = {}
     end
   elseif session.mode == "TOURIST" then
     session.guideActionSeq = nil
     session.hiddenDisparities = {}
+    session.dismissedObjectiveAlerts = {}
 
     if type(session.guideName) == "string" then
       session.guideName = Trim(session.guideName)
@@ -301,6 +308,7 @@ local function NormalizeSession(session)
       session.guideName = nil
       session.guideSessionId = nil
       session.joinBaseline = nil
+      session.acknowledgedObjectiveAlerts = {}
     else
       if type(session.guideSessionId) ~= "string" or session.guideSessionId == "" then
         session.guideSessionId = nil
@@ -308,6 +316,7 @@ local function NormalizeSession(session)
       session.joinBaseline = baseline
       if not session.guideSessionId then
         session.joinBaseline = nil
+        session.acknowledgedObjectiveAlerts = {}
       end
     end
   end
@@ -4884,7 +4893,9 @@ function Addon.GetSession()
     guideSessionId = source.guideSessionId,
     joinBaseline = source.joinBaseline,
     guideActionSeq = source.guideActionSeq,
-    hiddenDisparities = source.hiddenDisparities
+    hiddenDisparities = source.hiddenDisparities,
+    dismissedObjectiveAlerts = source.dismissedObjectiveAlerts,
+    acknowledgedObjectiveAlerts = source.acknowledgedObjectiveAlerts
   }
 end
 
@@ -5135,16 +5146,21 @@ function Addon.SetMode(mode, guideName)
     session.joinBaseline = nil
     session.guideActionSeq = nil
     session.hiddenDisparities = {}
+    session.dismissedObjectiveAlerts = {}
+    session.acknowledgedObjectiveAlerts = {}
   elseif mode == "GUIDE" then
     if session.mode ~= "GUIDE" then
       changed = true
       session.guideSessionId = NewSessionId()
       session.guideActionSeq = 0
       session.hiddenDisparities = {}
+      session.dismissedObjectiveAlerts = {}
+      session.acknowledgedObjectiveAlerts = {}
     elseif not session.guideSessionId then
       changed = true
       session.guideSessionId = NewSessionId()
       session.guideActionSeq = 0
+      session.dismissedObjectiveAlerts = {}
     elseif session.guideActionSeq == nil then
       changed = true
       session.guideActionSeq = 0
@@ -5157,6 +5173,7 @@ function Addon.SetMode(mode, guideName)
       changed = true
       session.guideSessionId = nil
       session.joinBaseline = nil
+      session.acknowledgedObjectiveAlerts = {}
     elseif session.guideName ~= guideName then
       changed = true
     end
@@ -5164,6 +5181,7 @@ function Addon.SetMode(mode, guideName)
     session.guideName = guideName
     session.guideActionSeq = nil
     session.hiddenDisparities = {}
+    session.dismissedObjectiveAlerts = {}
   end
 
   if changed then
@@ -5222,6 +5240,9 @@ function Addon.SetTouristSession(guideName, guideSessionId, joinBaseline)
   end
 
   Addon.PreserveInstructionHistory(Addon.db, session)
+  if session.guideSessionId ~= guideSessionId then
+    session.acknowledgedObjectiveAlerts = {}
+  end
   session.guideSessionId = guideSessionId
   session.joinBaseline = baseline
   Addon.PreserveInstructionHistory(Addon.db, session)
@@ -5829,7 +5850,10 @@ local function BuildGuideSingleObjectiveAlerts(session)
     for objectiveIndex = 1, table.getn(quest.objectives or {}) do
       objective = quest.objectives[objectiveIndex]
       kind = SharedSingleObjectiveKind(quest, objective)
-      if kind and SingleObjectiveDone(objective) then
+      if kind and SingleObjectiveDone(objective)
+        and not (session.dismissedObjectiveAlerts and session.dismissedObjectiveAlerts[
+          SafeString(quest.key or questKey) .. "#" .. SafeString(objective.index or objectiveIndex)
+        ]) then
         participants = {}
         allComplete = true
 
@@ -5944,7 +5968,10 @@ local function BuildTouristSingleObjectiveAlerts(session)
           and kind
           and SharedSingleObjectiveKind(localQuest, localObjective) == kind
           and SingleObjectiveDone(guideObjective)
-          and not SingleObjectiveDone(localObjective) then
+          and not SingleObjectiveDone(localObjective)
+          and not (session.acknowledgedObjectiveAlerts and session.acknowledgedObjectiveAlerts[
+            SafeString(guideQuest.key or questKey) .. "#" .. SafeString(guideObjective.index or objectiveIndex)
+          ]) then
           table.insert(output, {
             key = SafeString(guideQuest.key or questKey) .. "#" .. SafeString(guideObjective.index or objectiveIndex),
             quest = guideQuest,
@@ -6471,68 +6498,84 @@ local function RenderChainedInstructionRow(row, instruction, width, controlWidth
   row.strike:SetWidth(math.min(width, row.renderedTextWidth))
 end
 
+local function AcknowledgeSingleObjectiveReminder(guideMode, alertKey, sessionId)
+  local session = Addon.db and Addon.db.session
+  local field
+  if not session or not alertKey or not sessionId
+    or session.guideSessionId ~= sessionId
+    or session.mode ~= (guideMode and "GUIDE" or "TOURIST") then
+    return false
+  end
+  field = guideMode and "dismissedObjectiveAlerts" or "acknowledgedObjectiveAlerts"
+  if type(session[field]) ~= "table" then session[field] = {} end
+  session[field][alertKey] = true
+  if guideTouristUI.refresh then guideTouristUI.refresh() end
+  return true
+end
+
 local function EnsureSingleObjectiveRow(index)
   local row = guideTouristUI.objectiveRows[index]
-  local slotIndex
-  local xText
-  local check
-
-  if row then
-    return row
-  end
-
+  if row then return row end
   row = {}
   row.frame = CreateFrame("Frame", nil, guideTouristUI.scrollChild)
   row.frame:SetWidth(264)
   row.frame:SetHeight(20)
+  row.action = CreateFrame("Button", nil, row.frame, "UIPanelButtonTemplate")
+  row.action:SetHeight(18)
+  row.action:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square")
+  row.action:SetScript("OnClick", function()
+    AcknowledgeSingleObjectiveReminder(row.guideMode, row.alertKey, row.sessionId)
+  end)
+  row.action:SetScript("OnEnter", function()
+    GameTooltip:SetOwner(row.action, "ANCHOR_RIGHT")
+    GameTooltip:SetText(row.guideMode
+      and (L.OBJECTIVE_DISMISS or "Dismiss reminder (not quest completion)")
+      or (L.OBJECTIVE_ACK or "Done: acknowledge reminder only (not verified quest progress)"))
+    GameTooltip:Show()
+  end)
+  row.action:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  SkinGuideTouristButton(row.action)
 
   row.icon = row.frame:CreateTexture(nil, "ARTWORK")
-  row.icon:SetPoint("LEFT", row.frame, "LEFT", 2, 0)
   row.icon:SetWidth(14)
   row.icon:SetHeight(14)
   row.icon:SetTexture(SINGLE_OBJECTIVE_ICON)
-
-  row.statusX = {}
-  row.statusCheck = {}
-  for slotIndex = 1, 4 do
-    xText = row.frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    xText:SetPoint("LEFT", row.frame, "LEFT", 22 + ((slotIndex - 1) * 12), 0)
-    xText:SetWidth(10)
-    xText:SetHeight(18)
-    xText:SetJustifyH("CENTER")
-    xText:SetText("X")
-    xText:SetTextColor(1, 0.25, 0.2)
-    xText:Hide()
-    row.statusX[slotIndex] = xText
-
-    check = row.frame:CreateTexture(nil, "OVERLAY")
-    check:SetPoint("LEFT", row.frame, "LEFT", 21.5 + ((slotIndex - 1) * 12), 0)
-    check:SetWidth(11)
-    check:SetHeight(11)
-    check:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
-    check:SetVertexColor(0.25, 1, 0.25)
-    check:Hide()
-    row.statusCheck[slotIndex] = check
-  end
+  row.iconHit = CreateFrame("Button", nil, row.frame)
+  row.iconHit:SetWidth(16)
+  row.iconHit:SetHeight(18)
+  row.iconHit:SetScript("OnEnter", function()
+    local i
+    local participant
+    GameTooltip:SetOwner(row.iconHit, "ANCHOR_RIGHT")
+    GameTooltip:SetText(row.objectiveText or "")
+    if row.guideMode then
+      for i = 1, table.getn(row.participants or {}) do
+        participant = row.participants[i]
+        GameTooltip:AddLine(SafeString(participant.name) .. ": "
+          .. (participant.complete
+            and (L.OBJECTIVE_VERIFIED or "Completed (verified)")
+            or (L.OBJECTIVE_NEEDED or "Still needed")), 1, 1, 1)
+      end
+    end
+    GameTooltip:Show()
+  end)
+  row.iconHit:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
   row.text = row.frame:CreateFontString(nil, "OVERLAY")
   row.text:SetHeight(20)
   row.text:SetJustifyH("LEFT")
   CopyGroupTrackerFont(guideTouristUI.title, row.text, 12)
   row.text:SetTextColor(1, 1, 1, 1)
-
   row.strike = row.frame:CreateTexture(nil, "OVERLAY")
   row.strike:SetHeight(1)
   row.strike:SetTexture(1, 0.82, 0)
   row.strike:Hide()
-
   guideTouristUI.objectiveRows[index] = row
   return row
 end
 
 local function HideSingleObjectiveRows()
   local index
-
   for index = 1, table.getn(guideTouristUI.objectiveRows) do
     guideTouristUI.objectiveRows[index].frame:Hide()
   end
@@ -6542,11 +6585,9 @@ local function RenderSingleObjectiveRows(alerts, startIndex, guideMode)
   local index
   local row
   local alert
-  local slotIndex
-  local participant
-  local textLeft
   local rowWidth = guideTouristUI.GetRowWidth()
-  local textWidth
+  local actionWidth
+  local textLeft
   local renderedWidth
   local ignored
 
@@ -6557,56 +6598,44 @@ local function RenderSingleObjectiveRows(alerts, startIndex, guideMode)
     row.frame:SetPoint("TOPLEFT", guideTouristUI.scrollChild, "TOPLEFT", 8, -((startIndex + index - 1) * 20))
     row.frame:SetWidth(rowWidth)
     row.frame:SetAlpha(1)
+    row.guideMode = guideMode
+    row.alertKey = alert.key
+    row.sessionId = Addon.db and Addon.db.session and Addon.db.session.guideSessionId
+    row.participants = guideMode and alert.participants or nil
+    row.objectiveText = alert.text
+    actionWidth = guideMode and 18 or 34
+    row.action:ClearAllPoints()
+    row.action:SetPoint("LEFT", row.frame, "LEFT", 0, 0)
+    row.action:SetWidth(actionWidth)
+    row.action:SetText(guideMode and "X" or (L.INSTRUCTION_DONE or "Done"))
+    row.action:Show()
 
+    row.icon:ClearAllPoints()
+    row.icon:SetPoint("LEFT", row.action, "RIGHT", 3, 0)
+    row.iconHit:ClearAllPoints()
+    row.iconHit:SetPoint("CENTER", row.icon, "CENTER", 0, 0)
     if alert.kind == "DISCOVERY" then
       row.icon:SetTexture(SINGLE_DISCOVERY_ICON)
-      row.icon:SetTexCoord(0, 1, 0, 1)
     else
       row.icon:SetTexture(SINGLE_OBJECTIVE_ICON)
-      row.icon:SetTexCoord(0, 1, 0, 1)
     end
+    row.icon:SetTexCoord(0, 1, 0, 1)
 
-    for slotIndex = 1, 4 do
-      row.statusX[slotIndex]:Hide()
-      row.statusCheck[slotIndex]:Hide()
-    end
-
-    if guideMode then
-      for slotIndex = 1, math.min(4, table.getn(alert.participants or {})) do
-        participant = alert.participants[slotIndex]
-        if participant.complete then
-          row.statusCheck[slotIndex]:Show()
-        else
-          row.statusX[slotIndex]:Show()
-        end
-      end
-      textLeft = 71
-    else
-      textLeft = 21
-    end
-
-    textWidth = math.max(1, rowWidth - textLeft - 6)
+    textLeft = actionWidth + 3 + 14 + 4
+    ignored, renderedWidth = guideTouristUI.EllipsizeFontString(
+      row.text, alert.text or "", math.max(1, rowWidth - textLeft - 6))
     row.text:ClearAllPoints()
-    row.text:SetPoint("LEFT", row.frame, "LEFT", textLeft, 0)
-    ignored, renderedWidth = guideTouristUI.EllipsizeFontString(row.text, alert.text or "", textWidth)
+    row.text:SetPoint("LEFT", row.icon, "RIGHT", 4, 0)
     row.text:Show()
-
     row.strike:ClearAllPoints()
     row.strike:SetPoint("LEFT", row.text, "LEFT", 0, 0)
     row.strike:SetWidth(renderedWidth)
-    if alert.complete then
-      row.strike:Show()
-    else
-      row.strike:Hide()
-    end
-
+    if alert.complete then row.strike:Show() else row.strike:Hide() end
     row.frame:Show()
   end
-
   for index = table.getn(alerts) + 1, table.getn(guideTouristUI.objectiveRows) do
     guideTouristUI.objectiveRows[index].frame:Hide()
   end
-
   return table.getn(alerts)
 end
 

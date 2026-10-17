@@ -37,3 +37,8 @@ L.OFFLINE_NO_LIST = "No Guide instructions have been saved yet."
 L.OFFLINE_TALK = "Talk to %s"
 L.MINIMAP_NO_PARTY = "No party members"
 L.MINIMAP_HINT = "Left-click: panel  |  Right-click: modes  |  Drag: move"
+
+L.OBJECTIVE_DISMISS = "Dismiss reminder (does not complete quest)"
+L.OBJECTIVE_ACK = "Done: acknowledge reminder only (not verified quest progress)"
+L.OBJECTIVE_VERIFIED = "Completed (verified)"
+L.OBJECTIVE_NEEDED = "Still needed"
