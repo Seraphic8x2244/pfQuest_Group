@@ -85,5 +85,5 @@ local q = { objectives = {
   {current = 5, required = 5, text = "Second"}
 } }
 preserve(multi, q, {{objectives = {{current = 1, required = 1}, {current = 2, required = 5}}}}, 12)
-assertThat(multi.objectives[1]:IsShown() and multi.objectives[2]:IsShown(), "multi-objective peer needs failed to expand tracker")
+assertThat(not multi.objectives[1]:IsShown() and multi.objectives[2]:IsShown(), "only unfinished peer objective should auto-expand")
 print("group tracker visibility regressions passed")
