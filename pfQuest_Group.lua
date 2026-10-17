@@ -6190,6 +6190,25 @@ local function EnsureTouristRow(index)
   end)
   row.target:Hide()
 
+  -- Only the quest title is clickable; the left eye button retains Hide/Unhide.
+  row.share = CreateFrame("Button", nil, row.frame)
+  row.share:SetHeight(20)
+  row.shareText = row.share:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+  row.shareText:SetPoint("LEFT", row.share, "LEFT", 0, 0)
+  row.shareText:SetHeight(20)
+  row.shareText:SetJustifyH("LEFT")
+  row.shareText:SetTextColor(0.35, 0.85, 1)
+  row.share:SetScript("OnClick", function()
+    if row.disparityQuest then TryNativeShareGuideQuest(row.disparityQuest) end
+  end)
+  row.share:SetScript("OnEnter", function()
+    GameTooltip:SetOwner(row.share, "ANCHOR_RIGHT")
+    GameTooltip:SetText(L.SHARE_TOOLTIP or "Left-click quest name to share with your party")
+    GameTooltip:Show()
+  end)
+  row.share:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  row.share:Hide()
+
   row.strike = row.frame:CreateTexture(nil, "OVERLAY")
   row.strike:SetPoint("LEFT", row.text, "LEFT", 0, 0)
   row.strike:SetHeight(1)
@@ -6794,6 +6813,75 @@ local function RefreshTouristWindow(session)
   guideTouristUI.frame:Show()
 end
 
+local function TryNativeShareGuideQuest(quest)
+  local session = Addon.db and Addon.db.session
+  local count
+  local previous
+  local index
+  local title
+  local header
+  local resolved
+  local selected
+  local matches = 0
+  local ok
+  local outcome
+  local message
+
+  if not session or session.mode ~= "GUIDE" or not quest then return false end
+  if type(GetNumQuestLogEntries) ~= "function"
+    or type(GetQuestLogSelection) ~= "function"
+    or type(SelectQuestLogEntry) ~= "function"
+    or type(GetQuestLogPushable) ~= "function"
+    or type(QuestLogPushQuest) ~= "function" then
+    message = L.SHARE_UNAVAILABLE or "Native quest sharing is unavailable."
+  elseif GetNumPartyMembers() == 0 then
+    message = L.SHARE_NO_PARTY or "Join a party before sharing quests."
+  else
+    count = GetNumQuestLogEntries() or 0
+    for index = 1, count do
+      title, _, _, header = ReadQuestLogTitle(index)
+      if title == quest.title and not header then
+        resolved = ResolveQuestID(index, title)
+        if not quest.questID or not resolved or tonumber(quest.questID) == resolved then
+          matches = matches + 1
+          selected = index
+          if quest.questID and resolved == tonumber(quest.questID) then
+            matches = 1
+            break
+          end
+        end
+      end
+    end
+    if not selected or matches ~= 1 then
+      message = L.SHARE_NOT_IN_LOG or "Quest is no longer unambiguously in your quest log."
+    else
+      previous = GetQuestLogSelection()
+      ok, outcome = pcall(function()
+        SelectQuestLogEntry(selected)
+        if not GetQuestLogPushable() then return "not_pushable" end
+        QuestLogPushQuest()
+        return "attempted"
+      end)
+      -- Quest sharing uses a temporarily selected native log entry. Restore
+      -- the user's selection even when the push API raises an exception.
+      if previous and previous > 0 and previous <= (GetNumQuestLogEntries() or 0) then
+        pcall(SelectQuestLogEntry, previous)
+      end
+      if not ok then
+        message = L.SHARE_FAILED or "The native quest share attempt failed."
+      elseif outcome == "not_pushable" then
+        message = L.SHARE_NOT_PUSHABLE or "This quest cannot be shared."
+      else
+        message = L.SHARE_ATTEMPTED or "Quest share attempted with eligible party members; acceptance is not guaranteed."
+      end
+    end
+  end
+  if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
+    DEFAULT_CHAT_FRAME:AddMessage("|cffffd100pfQuest_Group:|r " .. SafeString(message))
+  end
+  return ok == true and outcome == "attempted"
+end
+
 local function EnsureGuideTouristRow(index)
   local row = guideTouristUI.rows[index]
   local fontPath
@@ -7149,6 +7237,8 @@ local function RefreshGuideTouristWindow()
     row.flightIcon:Hide()
     row.strike:Hide()
     row.target:Hide()
+    row.share:Hide()
+    row.disparityQuest = nil
     row.targetNpcName = nil
     row.action:ClearAllPoints()
     row.action:SetPoint("RIGHT", row.frame, "RIGHT", 0, 0)
@@ -7175,11 +7265,19 @@ local function RefreshGuideTouristWindow()
       row.text:SetPoint("LEFT", row.marker, "RIGHT", 4, 0)
       textWidth = math.max(1, rowWidth - 18 - 4 - 18 - 4 - 4)
       ignored, renderedWidth = guideTouristUI.EllipsizeFontString(row.text, string.format(
-        L.DISPARITY_MISSING_QUEST or "%s missing: %s",
-        SafeString(disparity.playerName),
-        SafeString(disparity.quest and disparity.quest.title)
-      ), textWidth)
-      row.renderedTextWidth = renderedWidth
+        L.DISPARITY_MISSING_PREFIX or "%s missing: ",
+        SafeString(disparity.playerName)
+      ), math.floor(textWidth * 0.55))
+      row.text:SetWidth(renderedWidth)
+      row.share:ClearAllPoints()
+      row.share:SetPoint("LEFT", row.text, "RIGHT", 0, 0)
+      row.disparityQuest = disparity.quest
+      ignored, row.renderedTextWidth = guideTouristUI.EllipsizeFontString(
+        row.shareText, SafeString(disparity.quest and disparity.quest.title),
+        math.max(1, textWidth - renderedWidth))
+      row.shareText:SetWidth(row.renderedTextWidth)
+      row.share:SetWidth(row.renderedTextWidth)
+      row.share:Show()
       row.action:SetWidth(18)
       row.action:SetText("")
       row.actionIcon:SetTexture(row.disparityHidden and "Interface\\AddOns\\pfQuest_Group\\assets\\eye" or "Interface\\AddOns\\pfQuest_Group\\assets\\eye-off")
