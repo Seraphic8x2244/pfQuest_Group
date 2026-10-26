@@ -82,6 +82,50 @@ env.Addon.db.session.mode="TOURIST"
 assert(not share({title="A real quest",questID=123}))
 assert(pushCount==1)
 assert(string.find(source, "row.share:Show()", 1, true))
+
+-- Exercise both production row constructors: the share button belongs to Guide rows.
+-- Earlier API-only tests missed the nil access during Guide panel rendering.
+local function fakeRegion()
+  local region = {scripts={}}
+  setmetatable(region, {__index=function(_, name)
+    if name=="CreateFontString" or name=="CreateTexture" then
+      return function() return fakeRegion() end
+    elseif name=="GetFont" then
+      return function() return "font", 12, "" end
+    elseif name=="SetScript" then
+      return function(self, event, fn) self.scripts[event]=fn end
+    elseif name=="Hide" then
+      return function(self) self.hidden=true end
+    elseif name=="Show" then
+      return function(self) self.hidden=false end
+    end
+    return function() end
+  end})
+  return region
+end
+env.CreateFrame=function() return fakeRegion() end
+env.CopyGroupTrackerFont=function() end
+env.SkinGuideTouristButton=function() end
+env.guideTouristUI.rows={}
+env.guideTouristUI.touristRows={}
+env.guideTouristUI.scrollChild=fakeRegion()
+local makeTouristRow=extract("local function EnsureTouristRow(",
+  "guideTouristUI.GetRowWidth = function()", "EnsureTouristRow",env)
+local touristRow=makeTouristRow(1)
+assert(touristRow and not touristRow.share, "Tourist row must not own native share")
+local makeGuideRow=extract("local function EnsureGuideTouristRow(",
+  "local function SaveGuideTouristWindowPosition(", "EnsureGuideTouristRow",env)
+local guideRow=makeGuideRow(1)
+assert(guideRow and guideRow.share and guideRow.shareText, "Guide share button absent")
+assert(guideRow.share.hidden==true and guideRow.share.scripts.OnClick)
+guideRow.share:Hide() -- exact operation that failed on 0.3.34-dev line 7285
+assert(makeGuideRow(1)==guideRow, "Guide row reuse lost share button")
+env.Addon.db.session.mode="GUIDE"
+env.TryNativeShareGuideQuest=share
+env.QuestLogPushQuest=function() pushCount=pushCount+1 end
+guideRow.disparityQuest={title="A real quest",questID=123}
+guideRow.share.scripts.OnClick()
+assert(pushCount==2 and selected==4, "Guide name click failed native share/selection restoration")
 assert(string.find(source, "SetGuideDisparityHidden(row.disparityKey", 1, true))
 
 local remoteQuest={questID=123,title="A real quest",objectives={{index=1,current=1,required=1}}}
