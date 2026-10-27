@@ -156,4 +156,94 @@ env.peers={tara=remote}
 assert(not allDone(q,1,{}),"no matched quest peers means native view")
 assert(string.find(source, "objective.pfqGroupHiddenCompleted = true", 1, true))
 assert(string.find(source, "button:SetHeight(entryHeight + lineCount * fontSize)", 1, true))
+
+-- Hovered-source group tooltip uses only matching objective rows, not all
+-- objectives in the quest. Execute the production tooltip function.
+env.Addon = {}
+env.playerName = "Guide"
+env.UnitClass = function() return "Human", "WARRIOR" end
+env.UnitName = function() return "Guide" end
+env.QuestKey = function(id) return "i:" .. tostring(id) end
+env.GroupClassColorHex = function() return "ffffff" end
+env.Addon.GroupHoldProgressText = function(objective)
+  if not objective then return "--" end
+  return tostring(objective.current) .. "/" .. tostring(objective.required)
+end
+env.Trim = function(value)
+  return string.gsub(value or "", "^%s*(.-)%s*$", "%1")
+end
+local objectiveNames = { "Stringy Vulture Meat", "Murloc Eye", "Goretusk Snout", "Okra", "Rusty Harvest Golem slain" }
+local localObjectives = {}
+local remoteObjectives = {}
+for index = 1, table.getn(objectiveNames) do
+  table.insert(localObjectives, {
+    text=objectiveNames[index], objectiveType=index == 5 and "monster" or "item",
+    current=index, required=10
+  })
+  table.insert(remoteObjectives, {
+    text=objectiveNames[index], objectiveType=index == 5 and "monster" or "item",
+    current=index+1, required=10
+  })
+end
+local tooltipQuest = {questID=123, title="Westfall Stew", objectives=localObjectives}
+local tooltipRemoteQuest = {questID=123, title="Westfall Stew", objectives=remoteObjectives}
+env.questState = {ready=true, quests={["i:123"]=tooltipQuest}}
+env.tooltipPeers = { {name="Tourist", classToken="MAGE",
+  questState={ready=true, quests={["i:123"]=tooltipRemoteQuest}}} }
+env.GetCompatibleGroupPeers = function() return env.tooltipPeers end
+env.FindRemoteTrackerQuest = function(state, quest)
+  return state.quests["i:" .. tostring(quest.questID)]
+end
+local appendTooltip = extract("function Addon.FindTooltipLocalQuest(meta)",
+  "function Addon.ShowGroupHoldTooltip(", "Addon.AppendGroupProgressTooltip", env)
+local function tooltipMock()
+  return {lines={}, shown=false,
+    AddLine=function(self, text) table.insert(self.lines, text) end,
+    Show=function(self) self.shown=true end}
+end
+local function tooltipText(t)
+  return table.concat(t.lines, "\n")
+end
+local itemNode={quest="Westfall Stew", questid=123,
+  QTYPE="ITEM_OBJECTIVE_LOOT", spawn="Rusty Harvest Golem", item={"Okra"}}
+local tip=tooltipMock()
+assert(appendTooltip(itemNode,tip) and tip.shown,"matched Okra tooltip missing")
+local output=tooltipText(tip)
+assert(string.find(output,"- Okra",1,true),"Okra not rendered")
+assert(not string.find(output,"Stringy Vulture Meat",1,true)
+  and not string.find(output,"Murloc Eye",1,true)
+  and not string.find(output,"Goretusk Snout",1,true)
+  and not string.find(output,"slain",1,true),
+  "unrelated Westfall Stew objectives leaked into golem tooltip")
+assert(string.find(output,"Guide:",1,true) and string.find(output,"Tourist:",1,true),
+  "matching objective did not show both players")
+tip=tooltipMock()
+local twoItems={quest="Westfall Stew",questid=123,QTYPE="ITEM_OBJECTIVE_USE",
+  spawn="Rusty Harvest Golem",item={"Okra","Murloc Eye"}}
+assert(appendTooltip(twoItems,tip) and table.getn(tip.lines)==6,
+  "shared source should show two objectives with two players each")
+assert(not string.find(tooltipText(tip),"Goretusk Snout",1,true),
+  "unrelated item leaked from multi-item source")
+tip=tooltipMock()
+local killNode={quest="Westfall Stew",questid=123,
+  QTYPE="UNIT_OBJECTIVE",spawn="Rusty Harvest Golem",item={}}
+assert(appendTooltip(killNode,tip)
+  and string.find(tooltipText(tip),"Rusty Harvest Golem slain",1,true),
+  "mob-kill suffix did not match hovered mob")
+assert(not string.find(tooltipText(tip),"- Okra",1,true),
+  "mob node without matching loot item incorrectly showed Okra")
+tip=tooltipMock()
+assert(not appendTooltip({quest="Westfall Stew",questid=123,
+  QTYPE="ITEM_OBJECTIVE_LOOT",spawn="Rusty Harvest Golem",item={"Other Item"}},tip),
+  "unmatched item must not create an empty Group Progress section")
+assert(table.getn(tip.lines)==0 and not tip.shown)
+tip=tooltipMock()
+assert(not appendTooltip({quest="Westfall Stew",questid=123,
+  QTYPE="NPC_END",spawn="Rusty Harvest Golem",item={"Okra"}},tip),
+  "turn-in/questgiver marker incorrectly gained group objective rows")
+tip=tooltipMock()
+env.tooltipPeers={}
+assert(not appendTooltip(itemNode,tip) and table.getn(tip.lines)==0,
+  "unshared quest incorrectly gained group objective rows")
+
 print("three targeted production regressions passed")
