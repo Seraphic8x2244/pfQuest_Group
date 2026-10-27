@@ -3827,6 +3827,37 @@ function Addon.FindTooltipLocalQuest(meta)
   return nil
 end
 
+-- Match only the quest objectives represented by this pfQuest map/tooltip node.
+-- pfQuest keeps item names as a list because a source may drop multiple quest items.
+function Addon.TooltipObjectiveMatchesSource(meta, objective)
+  local qtype = SafeString(meta and meta.QTYPE)
+  local objectiveType = string.lower(SafeString(objective and objective.objectiveType))
+  local label = string.lower(Trim(SafeString(objective and objective.text)))
+  local source
+  local _
+  local itemName
+
+  if not string.find(qtype, "OBJECTIVE", 1, true) or label == "" then
+    return false
+  end
+
+  if objectiveType == "item" and type(meta.item) == "table" then
+    for _, itemName in pairs(meta.item) do
+      if label == string.lower(Trim(SafeString(itemName))) then
+        return true
+      end
+    end
+  elseif objectiveType == "monster" or objectiveType == "object" then
+    source = string.lower(Trim(SafeString(meta.spawn)))
+    if source ~= "" and (label == source
+      or string.sub(label, 1, string.len(source) + 1) == source .. " ") then
+      return true
+    end
+  end
+
+  return false
+end
+
 function Addon.AppendGroupProgressTooltip(meta, tooltip)
   local localQuest = Addon.FindTooltipLocalQuest(meta)
   local peers = GetCompatibleGroupPeers()
@@ -3837,11 +3868,24 @@ function Addon.AppendGroupProgressTooltip(meta, tooltip)
   local peerInfo
   local remoteQuest
   local objectiveIndex
+  local matchedIndex
+  local relevantObjectiveIndices = {}
   local localObjective
   local remoteObjective
   local progressText
 
   if not localQuest then
+    return false
+  end
+
+  for objectiveIndex = 1, table.getn(localQuest.objectives or {}) do
+    localObjective = localQuest.objectives[objectiveIndex]
+    if Addon.TooltipObjectiveMatchesSource(meta, localObjective) then
+      table.insert(relevantObjectiveIndices, objectiveIndex)
+    end
+  end
+
+  if table.getn(relevantObjectiveIndices) == 0 then
     return false
   end
 
@@ -3862,7 +3906,8 @@ function Addon.AppendGroupProgressTooltip(meta, tooltip)
   tooltip:AddLine(" ")
   tooltip:AddLine(L.GROUP_PROGRESS_TOOLTIP or "Group Progress", 1, 0.82, 0)
 
-  for objectiveIndex = 1, table.getn(localQuest.objectives or {}) do
+  for matchedIndex = 1, table.getn(relevantObjectiveIndices) do
+    objectiveIndex = relevantObjectiveIndices[matchedIndex]
     localObjective = localQuest.objectives[objectiveIndex]
     if localObjective then
       tooltip:AddLine("|cffffffff- " .. SafeString(localObjective.text) .. "|r", 1, 1, 1)
