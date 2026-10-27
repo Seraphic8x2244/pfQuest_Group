@@ -172,7 +172,7 @@ end
 env.Trim = function(value)
   return string.gsub(value or "", "^%s*(.-)%s*$", "%1")
 end
-local objectiveNames = { "Stringy Vulture Meat", "Murloc Eye", "Goretusk Snout", "Okra", "Rusty Harvest Golem slain" }
+local objectiveNames = { "Stringy Vulture Meat", "Murloc Eye", "Goretusk Snout", "Okra", "Young Goretusk slain" }
 local localObjectives = {}
 local remoteObjectives = {}
 for index = 1, table.getn(objectiveNames) do
@@ -220,15 +220,15 @@ assert(string.find(output,"Guide:",1,true) and string.find(output,"Tourist:",1,t
 tip=tooltipMock()
 local twoItems={quest="Westfall Stew",questid=123,QTYPE="ITEM_OBJECTIVE_USE",
   spawn="Rusty Harvest Golem",item={"Okra","Murloc Eye"}}
-assert(appendTooltip(twoItems,tip) and table.getn(tip.lines)==6,
+assert(appendTooltip(twoItems,tip) and table.getn(tip.lines)==8,
   "shared source should show two objectives with two players each")
 assert(not string.find(tooltipText(tip),"Goretusk Snout",1,true),
   "unrelated item leaked from multi-item source")
 tip=tooltipMock()
 local killNode={quest="Westfall Stew",questid=123,
-  QTYPE="UNIT_OBJECTIVE",spawn="Rusty Harvest Golem",item={}}
+  QTYPE="UNIT_OBJECTIVE",spawn="Young Goretusk",item={}}
 assert(appendTooltip(killNode,tip)
-  and string.find(tooltipText(tip),"Rusty Harvest Golem slain",1,true),
+  and string.find(tooltipText(tip),"Young Goretusk slain",1,true),
   "mob-kill suffix did not match hovered mob")
 assert(not string.find(tooltipText(tip),"- Okra",1,true),
   "mob node without matching loot item incorrectly showed Okra")
