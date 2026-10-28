@@ -91,4 +91,8 @@ check(string.find(source, "becameComplete = quest.complete and not previous.comp
   "production scanner must mark only actual completion transitions")
 check(string.find(source, "context and context.becameComplete then", 1, true),
   "completion listener must reject unrelated later progress")
+check(string.find(source, "context.turninConfirmed =", 1, true),
+  "production Phase 2 must annotate positive hand-in evidence")
+check(string.find(source, 'pendingTurnin.title == previous.title', 1, true),
+  "hand-in evidence must match quest dialogue title")
 print("chunk4 production journal capture fixtures passed")

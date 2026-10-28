@@ -804,12 +804,15 @@ function Addon.NormalizeQuestJournal(journal)
     journal = { schema = 1, sessions = {}, quarantine = {} }
     if previous ~= nil then journal.quarantine.previous = previous end
   end
+  if type(journal.quarantine) ~= "table" then
+    local former = journal.quarantine
+    journal.quarantine = {}
+    if former ~= nil then journal.quarantine.invalidQuarantine = former end
+  end
   if type(journal.sessions) ~= "table" then
-    journal.quarantine = journal.quarantine or {}
     journal.quarantine.invalidSessions = journal.sessions
     journal.sessions = {}
   end
-  if type(journal.quarantine) ~= "table" then journal.quarantine = {} end
   return journal
 end
 
@@ -2381,13 +2384,17 @@ local function ScanQuestState()
       removals[key] = true
       changed = true
 
-      if pendingTurnin and pendingTurnin.title and pendingTurnin.title ~= ""
-        and pendingTurnin.title == previous.title then
+      if pendingTurnin and (not pendingTurnin.title or pendingTurnin.title == previous.title) then
         table.insert(actions, {
           actionType = "TURNIN",
           quest = CopyQuest(previous),
           context = BuildActionContext(previous, "end", pendingTurnin)
         })
+        -- Preserve legacy Guide TURNIN instruction behaviour when a title
+        -- is unavailable, but never mark that ambiguous case as journal proof.
+        actions[table.getn(actions)].context.turninConfirmed =
+          pendingTurnin.title ~= nil and pendingTurnin.title ~= ""
+          and pendingTurnin.title == previous.title
         pendingTurnin = nil
       else
         table.insert(actions, {
