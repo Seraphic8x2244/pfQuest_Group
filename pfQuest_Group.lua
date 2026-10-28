@@ -8,7 +8,7 @@ Addon.groupContextKey = nil
 
 local PROTOCOL_PREFIX = "PFQGROUP"
 local PROTOCOL_VERSION = 5
-local DB_SCHEMA_VERSION = 4
+local DB_SCHEMA_VERSION = 5
 local CHUNK_SIZE = 180
 local MAX_CHUNKS = 64
 local INCOMING_TIMEOUT = 30
@@ -796,6 +796,149 @@ local function NormalizeUIState(state)
   return state
 end
 
+-- Chunk 4 stage 1: a local durable evidence journal, not a competing quest state
+-- or instruction owner. Journal entries never become live S/D instructions.
+function Addon.NormalizeQuestJournal(journal)
+  if type(journal) ~= "table" or journal.schema ~= 1 then
+    local previous = journal
+    journal = { schema = 1, sessions = {}, quarantine = {} }
+    if previous ~= nil then journal.quarantine.previous = previous end
+  end
+  if type(journal.sessions) ~= "table" then
+    journal.quarantine = journal.quarantine or {}
+    journal.quarantine.invalidSessions = journal.sessions
+    journal.sessions = {}
+  end
+  if type(journal.quarantine) ~= "table" then journal.quarantine = {} end
+  return journal
+end
+
+-- Called ONLY from Phase 2's verified local action stream. Scanning the first
+-- quest-log baseline emits no actions, so loading saved state cannot forge ACCEPT.
+function Addon.RecordQuestJournalAction(actionType, quest, context)
+  local db = Addon.db
+  local session = db and db.session
+  local sid = session and session.guideSessionId
+  local participant = NormalizeName(playerName)
+  local guide = session and (session.mode == "GUIDE"
+    and participant or NormalizeName(session.guideName))
+  local key
+  local entry
+  local journalSession
+  local attempt
+  local oldKey
+  local event
+  local seq
+  local i
+  local objective
+  local eventType = actionType
+
+  if not db or not quest or not sid or sid == ""
+    or not participant or not guide
+    or (session.mode ~= "GUIDE" and session.mode ~= "TOURIST")
+    or (session.mode == "TOURIST" and session.joinBaseline == nil) then
+    return false
+  end
+  if actionType ~= "ACCEPT" and actionType ~= "PROGRESS"
+    and actionType ~= "TURNIN" and actionType ~= "REMOVE"
+    and actionType ~= "COMPLETE" then return false end
+  -- GetQuestReward invocation alone is not proof. A matching dialogue title
+  -- plus subsequent disappearance is required; pfQuest_history is never used.
+  if actionType == "TURNIN" and not (context and context.turninConfirmed) then
+    return false
+  end
+  if actionType == "REMOVE" then
+    eventType = context and context.reason == "ABANDON" and "ABANDON"
+      or "DISAPPEAR"
+  end
+
+  key = QuestKey(tonumber(quest.questID), quest.title)
+  if not key or key == "t:" then return false end
+  db.questJournal = Addon.NormalizeQuestJournal(db.questJournal)
+  journalSession = db.questJournal.sessions[sid]
+  if type(journalSession) ~= "table" then
+    journalSession = { participants = {} }
+    db.questJournal.sessions[sid] = journalSession
+  end
+  if type(journalSession.participants) ~= "table" then
+    -- Do not discard malformed saved records during recovery.
+    db.questJournal.quarantine[sid] = journalSession.participants
+    journalSession.participants = {}
+  end
+  entry = journalSession.participants[participant]
+  if type(entry) ~= "table" then
+    entry = { guide = guide, nextSeq = 0, nextAttempt = 0,
+      events = {}, attempts = {}, active = {} }
+    journalSession.participants[participant] = entry
+  end
+  if type(entry.events) ~= "table" then return false end
+  if type(entry.attempts) ~= "table" then return false end
+  if type(entry.active) ~= "table" then return false end
+  if entry.guide and entry.guide ~= guide then return false end
+  entry.guide = guide
+
+  -- Idempotence for duplicate dispatch within one running scan. A new client
+  -- boot has a new bootId; its baseline never emits a duplicate ACCEPT.
+  local evidenceId = SafeString(bootId) .. ":" .. SafeString(questState.revision)
+    .. ":" .. eventType .. ":" .. key
+  if entry.lastEvidenceId == evidenceId then return false end
+
+  -- A title-only quest can resolve a numeric ID without becoming a new attempt.
+  if quest.questID then
+    oldKey = QuestKey(nil, quest.title)
+    if oldKey ~= key and entry.active[oldKey] and not entry.active[key] then
+      entry.active[key] = entry.active[oldKey]
+      entry.active[oldKey] = nil
+    end
+  end
+  attempt = entry.active[key]
+  if eventType == "ACCEPT" or not attempt then
+    entry.nextAttempt = math.floor(tonumber(entry.nextAttempt) or 0) + 1
+    attempt = entry.nextAttempt
+    entry.active[key] = attempt
+    entry.attempts[attempt] = {
+      questKey = key, questID = tonumber(quest.questID),
+      questTitle = SafeString(quest.title),
+      startEvidence = eventType == "ACCEPT" and "LOG_APPEARANCE"
+        or "PREEXISTING_UNOBSERVED_ACCEPT"
+    }
+  end
+
+  seq = math.floor(tonumber(entry.nextSeq) or 0) + 1
+  event = { seq = seq, evidenceId = evidenceId, actionType = eventType,
+    questKey = key, questID = tonumber(quest.questID),
+    questTitle = SafeString(quest.title), attempt = attempt,
+    questRevision = questState.revision, observedAt = time and time() or 0,
+    complete = quest.complete and true or false, objectives = {},
+    evidence = eventType == "TURNIN" and "REWARD_DIALOG_AND_LOG_REMOVAL"
+      or (eventType == "ABANDON" and "ABANDON_CALL_AND_LOG_REMOVAL"
+      or (eventType == "DISAPPEAR" and "LOG_DISAPPEARANCE"
+      or (eventType == "ACCEPT" and "LOG_APPEARANCE"
+      or (eventType == "COMPLETE" and "LOG_COMPLETION"
+      or "LOG_PROGRESS")))) }
+  for i = 1, table.getn(quest.objectives or {}) do
+    objective = quest.objectives[i]
+    event.objectives[i] = {
+      index = tonumber(objective.index) or i,
+      text = SafeString(objective.text),
+      objectiveType = SafeString(objective.objectiveType),
+      current = tonumber(objective.current) or 0,
+      required = tonumber(objective.required) or 0,
+      done = objective.done and true or false
+    }
+  end
+  entry.events[seq] = event
+  entry.nextSeq = seq
+  entry.lastEvidenceId = evidenceId
+  if eventType == "TURNIN" or eventType == "ABANDON"
+    or eventType == "DISAPPEAR" then
+    entry.active[key] = nil
+    entry.attempts[attempt].endSeq = seq
+    entry.attempts[attempt].endType = eventType
+  end
+  return true
+end
+
 local function InitializeDatabase()
   if type(pfQuest_GroupDB) ~= "table" then
     pfQuest_GroupDB = {}
@@ -805,6 +948,7 @@ local function InitializeDatabase()
   pfQuest_GroupDB.schema = DB_SCHEMA_VERSION
   pfQuest_GroupDB.session = NormalizeSession(pfQuest_GroupDB.session)
   pfQuest_GroupDB.instructions = NormalizeInstructionStore(pfQuest_GroupDB.instructions, pfQuest_GroupDB.session)
+  pfQuest_GroupDB.questJournal = Addon.NormalizeQuestJournal(pfQuest_GroupDB.questJournal)
   pfQuest_GroupDB.ui = NormalizeUIState(pfQuest_GroupDB.ui)
   if type(pfQuest_GroupDB.offlineGuideLists) ~= "table" then
     pfQuest_GroupDB.offlineGuideLists = {}
@@ -2207,7 +2351,8 @@ local function ScanQuestState()
       removals[key] = true
       changed = true
 
-      if pendingTurnin and (not pendingTurnin.title or pendingTurnin.title == previous.title) then
+      if pendingTurnin and pendingTurnin.title and pendingTurnin.title ~= ""
+        and pendingTurnin.title == previous.title then
         table.insert(actions, {
           actionType = "TURNIN",
           quest = CopyQuest(previous),
@@ -2221,11 +2366,13 @@ local function ScanQuestState()
           context = {
             questID = previous.questID,
             questTitle = previous.title,
-            reason = pendingAbandon and (not pendingAbandon.title or pendingAbandon.title == previous.title) and "ABANDON" or "UNKNOWN"
+            reason = pendingAbandon and pendingAbandon.title and pendingAbandon.title ~= ""
+              and pendingAbandon.title == previous.title and "ABANDON" or "UNKNOWN"
           }
         })
 
-        if pendingAbandon and (not pendingAbandon.title or pendingAbandon.title == previous.title) then
+        if pendingAbandon and pendingAbandon.title and pendingAbandon.title ~= ""
+          and pendingAbandon.title == previous.title then
           pendingAbandon = nil
         end
       end
@@ -7994,6 +8141,14 @@ Addon.RegisterListener("LOCAL_QUEST_STATE_CHANGED", Addon.HandleGroupHoldLocalSt
 Addon.RegisterListener("PEER_STATUS", Addon.RefreshGroupHoldPresentation)
 Addon.RegisterListener("PEER_LEFT", Addon.RefreshGroupHoldPresentation)
 Addon.RegisterListener("PARTY_CHANGED", Addon.RefreshGroupHoldPresentation)
+Addon.RegisterListener("LOCAL_QUEST_ACTION", Addon.RecordQuestJournalAction)
+Addon.RegisterListener("LOCAL_QUEST_ACTION", function(actionType, quest, context)
+  -- Completion is distinct from handing in. Phase 2 emits a PROGRESS event
+  -- on completion state changes, which the journal records as positive evidence.
+  if actionType == "PROGRESS" and quest and quest.complete then
+    Addon.RecordQuestJournalAction("COMPLETE", quest, context)
+  end
+end)
 Addon.RegisterListener("LOCAL_QUEST_ACTION", HandleInstructionQuestAction)
 Addon.RegisterListener("LOCAL_QUEST_STATE_CHANGED", RefreshGroupProgress)
 Addon.RegisterListener("REMOTE_QUEST_STATE_CHANGED", RefreshGroupProgress)

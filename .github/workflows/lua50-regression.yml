@@ -47,9 +47,11 @@ jobs:
           luac -p tests/production_regression.lua
           luac -p tests/group_tracker_visibility.lua
           luac -p tests/three_fix_regressions.lua
+          luac -p tests/chunk4_journal.lua
       - name: Execute schema and production regressions using Lua 5.0.3
         run: |
           lua tests/schema_v4_fixtures.lua
           lua tests/production_regression.lua
           lua tests/group_tracker_visibility.lua
           lua tests/three_fix_regressions.lua
+          lua tests/chunk4_journal.lua
