@@ -41,6 +41,9 @@ check(p.events[1].attempt == p.events[2].attempt, "turn-in attempt drift")
 check(not env.Addon.RecordQuestJournalAction("ACCEPT", questB, {}),
   "duplicate scan evidence was recorded")
 check(p.nextSeq == 3, "duplicate event advanced cursor")
+-- Simulate a stale cursor after reload: append must not overwrite old events.
+p.nextSeq = 0
+p.nextAttempt = 0
 local stored = env.Addon.NormalizeQuestJournal(j)
 check(stored == j and stored.sessions["guide:session1"].participants.gaia.events[2],
   "repeated migration discarded evidence")
@@ -48,7 +51,8 @@ env.bootId = "bootB"
 env.questState.revision = 1
 check(env.Addon.RecordQuestJournalAction("REMOVE", questB, { reason = "UNKNOWN" }),
   "unknown disappearance missing")
-check(p.events[4].actionType == "DISAPPEAR", "absence falsely confirmed turn-in")
+check(p.events[4].actionType == "DISAPPEAR"
+  and p.events[3].actionType == "ACCEPT", "absence overwrote older evidence")
 env.questState.revision = 2
 check(env.Addon.RecordQuestJournalAction("ACCEPT", questB, {}),
   "reaccept missing")
@@ -83,4 +87,8 @@ session.guideSessionId = nil
 env.questState.revision = 8
 check(not env.Addon.RecordQuestJournalAction("ACCEPT", accept, {}),
   "unbound Tourist recorded sessionless action")
+check(string.find(source, "becameComplete = quest.complete and not previous.complete", 1, true),
+  "production scanner must mark only actual completion transitions")
+check(string.find(source, "context and context.becameComplete then", 1, true),
+  "completion listener must reject unrelated later progress")
 print("chunk4 production journal capture fixtures passed")

@@ -831,6 +831,9 @@ function Addon.RecordQuestJournalAction(actionType, quest, context)
   local seq
   local i
   local objective
+  local previousEvent
+  local previousSeq
+  local attemptNumber
   local eventType = actionType
 
   if not db or not quest or not sid or sid == ""
@@ -877,11 +880,36 @@ function Addon.RecordQuestJournalAction(actionType, quest, context)
   if entry.guide and entry.guide ~= guide then return false end
   entry.guide = guide
 
-  -- Idempotence for duplicate dispatch within one running scan. A new client
-  -- boot has a new bootId; its baseline never emits a duplicate ACCEPT.
+  -- Restore monotonic high-water from actual saved entries once per client
+  -- boot. Do not overwrite an older event or an existing attempt if saved
+  -- cursors are missing or damaged.
+  if type(entry.seenEvidence) ~= "table" then entry.seenEvidence = {} end
+  if entry.highWaterBoot ~= bootId then
+    entry.nextSeq = math.max(0, math.floor(tonumber(entry.nextSeq) or 0))
+    entry.nextAttempt = math.max(0, math.floor(tonumber(entry.nextAttempt) or 0))
+    for previousSeq, previousEvent in pairs(entry.events) do
+      if type(previousSeq) == "number" and previousSeq >= 1
+        and previousSeq == math.floor(previousSeq) then
+        entry.nextSeq = math.max(entry.nextSeq, previousSeq)
+        if type(previousEvent) == "table" and previousEvent.evidenceId then
+          entry.seenEvidence[previousEvent.evidenceId] = true
+        end
+      end
+    end
+    for attemptNumber in pairs(entry.attempts) do
+      if type(attemptNumber) == "number" and attemptNumber >= 1
+        and attemptNumber == math.floor(attemptNumber) then
+        entry.nextAttempt = math.max(entry.nextAttempt, attemptNumber)
+      end
+    end
+    entry.highWaterBoot = bootId
+  end
+
+  -- Duplicate Phase 2 dispatch is idempotent even after intervening events.
+  -- A new client boot has a distinct bootId and no artificial baseline ACCEPT.
   local evidenceId = SafeString(bootId) .. ":" .. SafeString(questState.revision)
     .. ":" .. eventType .. ":" .. key
-  if entry.lastEvidenceId == evidenceId then return false end
+  if entry.seenEvidence[evidenceId] then return false end
 
   -- A title-only quest can resolve a numeric ID without becoming a new attempt.
   if quest.questID then
@@ -930,6 +958,7 @@ function Addon.RecordQuestJournalAction(actionType, quest, context)
   entry.events[seq] = event
   entry.nextSeq = seq
   entry.lastEvidenceId = evidenceId
+  entry.seenEvidence[evidenceId] = true
   if eventType == "TURNIN" or eventType == "ABANDON"
     or eventType == "DISAPPEAR" then
     entry.active[key] = nil
@@ -2340,7 +2369,8 @@ local function ScanQuestState()
         quest = CopyQuest(quest),
         context = {
           questID = quest.questID,
-          questTitle = quest.title
+          questTitle = quest.title,
+          becameComplete = quest.complete and not previous.complete
         }
       })
     end
@@ -8145,7 +8175,8 @@ Addon.RegisterListener("LOCAL_QUEST_ACTION", Addon.RecordQuestJournalAction)
 Addon.RegisterListener("LOCAL_QUEST_ACTION", function(actionType, quest, context)
   -- Completion is distinct from handing in. Phase 2 emits a PROGRESS event
   -- on completion state changes, which the journal records as positive evidence.
-  if actionType == "PROGRESS" and quest and quest.complete then
+  if actionType == "PROGRESS" and quest and quest.complete
+    and context and context.becameComplete then
     Addon.RecordQuestJournalAction("COMPLETE", quest, context)
   end
 end)
