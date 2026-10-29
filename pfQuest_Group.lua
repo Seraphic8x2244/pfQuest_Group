@@ -7,8 +7,8 @@ local L = pfQuest_Group_L or {}
 Addon.groupContextKey = nil
 
 local PROTOCOL_PREFIX = "PFQGROUP"
-local PROTOCOL_VERSION = 5
-local DB_SCHEMA_VERSION = 5
+local PROTOCOL_VERSION = 6
+local DB_SCHEMA_VERSION = 6
 local CHUNK_SIZE = 180
 local MAX_CHUNKS = 64
 local INCOMING_TIMEOUT = 30
@@ -397,7 +397,8 @@ local function NormalizeInstructionRecord(record, fallbackSeq)
     mobID = mobID,
     npcName = npcName,
     flightName = flightName,
-    npcReaction = npcReaction
+    npcReaction = npcReaction,
+    attemptOrdinal = tonumber(record.attemptOrdinal)
   }
 end
 
@@ -837,6 +838,7 @@ function Addon.RecordQuestJournalAction(actionType, quest, context)
   local previousEvent
   local previousSeq
   local attemptNumber
+  local ordinal = 0
   local eventType = actionType
 
   if not db or not quest or not sid or sid == ""
@@ -927,19 +929,29 @@ function Addon.RecordQuestJournalAction(actionType, quest, context)
     entry.nextAttempt = math.floor(tonumber(entry.nextAttempt) or 0) + 1
     attempt = entry.nextAttempt
     entry.active[key] = attempt
+    for attemptNumber, previousEvent in pairs(entry.attempts) do
+      if attemptNumber ~= attempt and type(previousEvent) == "table"
+        and (previousEvent.questKey == key
+          or (tonumber(previousEvent.questID) and tonumber(previousEvent.questID) == tonumber(quest.questID))
+          or (not previousEvent.questID and previousEvent.questTitle == quest.title)) then
+        ordinal = math.max(ordinal, tonumber(previousEvent.questOrdinal) or 0)
+      end
+    end
+    ordinal = ordinal + 1
     entry.attempts[attempt] = {
       questKey = key, questID = tonumber(quest.questID),
-      questTitle = SafeString(quest.title),
+      questTitle = SafeString(quest.title), questOrdinal = ordinal,
       startEvidence = eventType == "ACCEPT" and "LOG_APPEARANCE"
         or "PREEXISTING_UNOBSERVED_ACCEPT"
     }
   end
+  ordinal = tonumber(entry.attempts[attempt].questOrdinal) or 1
 
   seq = math.floor(tonumber(entry.nextSeq) or 0) + 1
   event = { seq = seq, evidenceId = evidenceId, actionType = eventType,
     questKey = key, questID = tonumber(quest.questID),
     questTitle = SafeString(quest.title), attempt = attempt,
-    questRevision = questState.revision, observedAt = time and time() or 0,
+    attemptOrdinal = ordinal, questRevision = questState.revision, observedAt = time and time() or 0,
     complete = quest.complete and true or false, objectives = {},
     evidence = eventType == "TURNIN" and "REWARD_DIALOG_AND_LOG_REMOVAL"
       or (eventType == "ABANDON" and "ABANDON_CALL_AND_LOG_REMOVAL"
@@ -962,6 +974,13 @@ function Addon.RecordQuestJournalAction(actionType, quest, context)
   entry.nextSeq = seq
   entry.lastEvidenceId = evidenceId
   entry.seenEvidence[evidenceId] = true
+  if type(context) == "table" then
+    context.journalAttemptOrdinal = ordinal
+    context.journalEventSeq = seq
+  end
+  if Addon.PublishQuestJournalEvent then
+    Addon.PublishQuestJournalEvent(sid, entry, event)
+  end
   if eventType == "TURNIN" or eventType == "ABANDON"
     or eventType == "DISAPPEAR" then
     entry.active[key] = nil
@@ -4233,7 +4252,8 @@ local function CopyInstruction(source)
     mobID = source.mobID,
     npcName = source.npcName,
     flightName = source.flightName,
-    npcReaction = source.npcReaction
+    npcReaction = source.npcReaction,
+    attemptOrdinal = source.attemptOrdinal
   }
 end
 
@@ -4272,7 +4292,8 @@ local function EncodeInstructionRecord(instruction)
     HexEncode(instruction.questTitle),
     HexEncode(instruction.npcName),
     HexEncode(instruction.flightName),
-    SafeString(instruction.npcReaction or 0)
+    SafeString(instruction.npcReaction or 0),
+    SafeString(instruction.attemptOrdinal or 0)
   }, ".")
 end
 
@@ -4323,6 +4344,10 @@ local function DecodeInstructionRecord(record)
   npcName = HexDecode(fields[7])
   flightName = HexDecode(fields[8] or "")
   npcReaction = tonumber(fields[9])
+  local attemptOrdinal = tonumber(fields[10])
+  if not attemptOrdinal or attemptOrdinal < 1 or attemptOrdinal ~= math.floor(attemptOrdinal) then
+    attemptOrdinal = nil
+  end
   if npcReaction == 4 then
     npcReaction = 4
   elseif npcReaction and npcReaction >= 5 and npcReaction <= 8 then
@@ -4358,7 +4383,8 @@ local function DecodeInstructionRecord(record)
     mobID = mobID,
     npcName = npcName,
     flightName = flightName,
-    npcReaction = npcReaction
+    npcReaction = npcReaction,
+    attemptOrdinal = attemptOrdinal
   }
 end
 
@@ -4622,6 +4648,9 @@ local function ReconcileTouristInstructions(sender)
   end
 
   touristPendingInstructions = nextPending
+  if Addon.ReconcileJournalInstructions then
+    Addon.ReconcileJournalInstructions()
+  end
   Addon.CacheTouristPendingInstructions(true)
   Emit("TOURIST_INSTRUCTIONS_CHANGED", CopyInstructionList(touristPendingInstructions))
   return true
@@ -5593,6 +5622,76 @@ local function CompleteTouristInstruction(seq)
   return true
 end
 
+-- Phase 4b consumes only live, eligible pending instructions. A journal event
+-- is one-shot evidence and cannot acknowledge a second instruction.
+function Addon.ReconcileJournalInstructions()
+  local session = Addon.db and Addon.db.session
+  local journal = Addon.db and Addon.db.questJournal
+  local participants = session and journal and journal.sessions
+    and journal.sessions[session.guideSessionId]
+  local entry = participants and participants.participants
+    and participants.participants[NormalizeName(playerName)]
+  local steps = {}
+  local seq
+  local step
+  local eventSeq
+  local event
+  local selected
+  local selectedSeq
+  local count = 0
+  local applied
+  if not session or session.mode ~= "TOURIST" or session.paused
+    or not session.guideSessionId or session.joinBaseline == nil
+    or not entry or entry.guide ~= NormalizeName(session.guideName)
+    or type(entry.events) ~= "table" then return 0 end
+  if type(entry.applied) ~= "table" then entry.applied = {} end
+  for seq in pairs(touristPendingInstructions) do
+    if type(seq) == "number" then table.insert(steps, seq) end
+  end
+  table.sort(steps)
+  for _, seq in ipairs(steps) do
+    step = touristPendingInstructions[seq]
+    selected = nil
+    selectedSeq = nil
+    if step and (step.actionType == "ACCEPT" or step.actionType == "TURNIN")
+      and not entry.applied[seq] then
+      for eventSeq, event in pairs(entry.events) do
+        if type(eventSeq) == "number" and type(event) == "table"
+          and event.actionType == step.actionType
+          and not event.appliedInstruction
+          and eventSeq > 0
+          and InstructionMatchesAction(step, event.actionType, nil,
+            {questID = event.questID, questTitle = event.questTitle})
+          and (not step.attemptOrdinal
+            or tonumber(step.attemptOrdinal) == tonumber(event.attemptOrdinal))
+          and (not selectedSeq or eventSeq < selectedSeq) then
+          selected, selectedSeq = event, eventSeq
+        end
+      end
+      -- A legacy instruction lacking ordinal is safe only when a single
+      -- candidate quest attempt can possibly satisfy it.
+      if selected and not step.attemptOrdinal then
+        local matches = 0
+        for eventSeq, event in pairs(entry.events) do
+          if type(event) == "table" and event.actionType == step.actionType
+            and not event.appliedInstruction
+            and InstructionMatchesAction(step, event.actionType, nil,
+              {questID = event.questID, questTitle = event.questTitle}) then
+            matches = matches + 1
+          end
+        end
+        if matches ~= 1 then selected = nil end
+      end
+      if selected and CompleteTouristInstruction(seq) then
+        selected.appliedInstruction = seq
+        entry.applied[seq] = selectedSeq
+        count = count + 1
+      end
+    end
+  end
+  return count
+end
+
 function Addon.CreateGuideInstruction(record)
   local session = Addon.db and Addon.db.session
   local store
@@ -5695,30 +5794,17 @@ local function HandleInstructionQuestAction(actionType, quest, context)
       questTitle = SafeString((context and context.questTitle) or (quest and quest.title)),
       mobID = tonumber(context and context.mobID),
       npcName = SafeString(context and context.npcName),
-      npcReaction = context and context.npcReaction
+      npcReaction = context and context.npcReaction,
+      attemptOrdinal = context and context.journalAttemptOrdinal
     })
     return
   end
 
-  if session.mode ~= "TOURIST" or not session.guideSessionId or session.joinBaseline == nil then
-    return
-  end
-
-  for candidateSeq, candidate in pairs(touristPendingInstructions) do
-    candidateSeq = tonumber(candidateSeq)
-    if candidateSeq and InstructionMatchesAction(candidate, actionType, quest, context) then
-      if not pendingSeq or candidateSeq < pendingSeq then
-        pendingSeq = candidateSeq
-        instruction = candidate
-      end
-    end
-  end
-
-  if not pendingSeq or not instruction then
-    return
-  end
-
-  CompleteTouristInstruction(pendingSeq)
+  if session.mode ~= "TOURIST" or not session.guideSessionId
+    or session.joinBaseline == nil or session.paused then return end
+  -- The verified local action has already reached the journal listener.
+  -- Reconcile through the same Phase 4b completion owner used on resync.
+  Addon.ReconcileJournalInstructions()
 end
 
 function Addon.HandleFlightAction(flightName)
