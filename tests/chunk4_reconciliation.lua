@@ -53,6 +53,7 @@ local function make()
   end
   e.Escape = loadProduction("local function Escape(value)", "local function Unescape(value)", "Escape")
   e.Unescape = loadProduction("local function Unescape(value)", "local function EncodeMap(values)", "Unescape")
+  e.loadProduction = loadProduction
   e.HexEncode = loadProduction("local function HexEncode(value)", "local function HexDecode(value)", "HexEncode")
   e.HexDecode = loadProduction("local function HexDecode(value)", "local function SplitPlain(value", "HexDecode")
   e.SplitPlain = loadProduction("local function SplitPlain(value, separator)", "local function Emit(eventName", "SplitPlain")
@@ -61,6 +62,7 @@ local function make()
   e.EncodeQuestRecord = loadProduction("local function EncodeQuestRecord(quest)", "local function EncodeQuestWire", "EncodeQuestRecord")
   e.DecodeQuestRecord = loadProduction("local function DecodeQuestRecord(record)", "local function DecodeQuestWire", "DecodeQuestRecord")
   e.InstructionMatchesAction = loadProduction("local function InstructionMatchesAction(instruction", "-- Phase 4b owns", "InstructionMatchesAction")
+  loadProduction("function Addon.NormalizeQuestJournal(journal)", "-- Called ONLY from Phase 2", nil)
   loadProduction("-- Chunk 4: journal uses the existing component", "local function InstructionSnapshot()", nil)
   loadProduction("local function CompleteTouristInstruction(seq)", "function Addon.CreateGuideInstruction", nil)
   return e
@@ -168,4 +170,89 @@ tourist.Addon.db.questJournal.sessions.A.participants.gaia.nextSeq = 0
 tour.pauseRanges = { { first = 3, last = 5 } }
 local pausedSnapshot = tourist.DecodeMap(tourist.Addon.JournalSnapshot())
 check(pausedSnapshot.ranges == "3-5", "Pause boundary omitted from summary")
-print("chunk4 retrospective and durable journal integration passed")
+-- Stage-1 journal upgrade is additive and idempotent, not a forced replay.
+local migrated = { schema = 1, sessions = { old = { participants = {
+  gaia = { attempts = {
+    [1] = { questTitle = "Repeat", questKey = "i:77" },
+    [2] = { questTitle = "Repeat", questKey = "i:77" }
+  }, events = {
+    [1] = { attempt = 1, actionType = "ACCEPT" },
+    [2] = { attempt = 2, actionType = "ACCEPT" }
+  } }
+} } }, quarantine = {} }
+check(tourist.Addon.NormalizeQuestJournal(migrated) == migrated
+  and migrated.schema == 2
+  and migrated.sessions.old.participants.gaia.events[1].attemptOrdinal == 1
+  and migrated.sessions.old.participants.gaia.events[2].attemptOrdinal == 2,
+  "stage-1 attempt ordinal migration failed")
+check(tourist.Addon.NormalizeQuestJournal(migrated) == migrated,
+  "repeated journal migration must be idempotent")
+-- Production pause controls: no session reset and no paused-range instruction replay.
+tourist.BroadcastSessionDelta = function() end
+tourist.ReconcileTouristInstructions = function() end
+tourist.loadProduction("function Addon.SetPaused(paused)", "function Addon.SetTouristSession", nil)
+tour.pauseRanges = {}
+tourist.peers.guide.session.guideActionSeq = 2
+check(tourist.Addon.SetPaused(true) and tour.paused
+  and tour.guideSessionId == "A" and tour.joinBaseline == 0
+  and tour.pauseRanges[1].first == 3,
+  "pause replaced same Guide session/baseline")
+tourist.peers.guide.session.guideActionSeq = 4
+check(tourist.Addon.SetPaused(false) and not tour.paused
+  and tour.pauseRanges[1].last == 4
+  and tourist.Addon.InstructionInPauseRange(tour, 3)
+  and not tourist.Addon.InstructionInPauseRange(tour, 2),
+  "resume did not preserve paused cursor interval")
+check(tourist.Addon.db.questJournal.sessions.A.participants.gaia.pauseRanges
+  == tour.pauseRanges, "pause boundary not retained in SavedVariables")
+tourist.peers.guide = nil
+check(tourist.Addon.SetPaused(true), "Guide-offline Pause failed")
+check(tourist.Addon.SetPaused(false), "Guide-offline Resume failed")
+local lastRange = tour.pauseRanges[table.getn(tour.pauseRanges)]
+check(lastRange.waiting == true and lastRange.last == nil,
+  "offline Pause incorrectly inferred remote cursor")
+tourist.Addon.ClosePendingPauseRange("Guide",
+  { mode = "GUIDE", guideSessionId = "A", guideActionSeq = 7 })
+check(lastRange.last == 7 and not lastRange.waiting,
+  "reconnect did not conservatively close paused interval")
+-- Guide eligibility and no-empty-set-completion remain independent.
+guide.loadProduction("function Addon.CaptureGuideInstructionEligibility(session, seq)",
+  "function Addon.RecordGuideInstructionCompletions", nil)
+guide.loadProduction("function Addon.RecomputeGuideCompletion()", "function Addon.SetMode", nil)
+guide.Addon.GetGuideInstructions = function() return {} end
+guide.Addon.db.session.guideActionSeq = 5
+guide.Addon.db.instructions.guideParticipants = { gaia = 0, may = 0 }
+guide.Addon.db.instructions.guideEligibilityKnown = {}
+guide.Addon.db.instructions.guideCompleted = {}
+guide.Addon.db.instructions.guideRemoved = {}
+guide.peers.gaia.session.paused = true
+guide.peers.may = { compatible = true, session = { mode = "TOURIST",
+  guideName = "Guide", guideSessionId = "A", joinBaseline = 0, paused = false } }
+guide.party = { gaia = {}, may = {} }
+check(guide.Addon.CaptureGuideInstructionEligibility(guide.Addon.db.session, 5),
+  "paused Tourist blocked active Tourist eligibility")
+check(not guide.Addon.db.instructions.guideEligible[5].gaia
+  and guide.Addon.db.instructions.guideEligible[5].may,
+  "paused Tourist included in new Guide instruction")
+guide.Addon.db.instructions.guideEligible[6] = { gaia = true, may = true }
+guide.Addon.db.instructions.guideEligibilityKnown[6] = true
+guide.Addon.db.instructions.guideAcknowledged[6] = { may = true }
+guide.Addon.db.instructions.guideRecords[6] = { seq = 6, actionType = "ACCEPT",
+  questID = 1235, questTitle = "Quest B" }
+guide.Addon.db.questJournal.sessions.A.participants.gaia.pauseRanges = {}
+guide.peers.gaia.session.paused = false
+guide.Addon.ApplyJournalFull("Gaia", guide.EncodeMap({
+  kind = "S", sid = "A", high = 2, paused = "0", ranges = "6-6" }))
+check(not guide.Addon.db.instructions.guideEligible[6].gaia
+  and guide.Addon.db.instructions.guideCompleted[6],
+  "late Pause boundary failed to re-evaluate other acknowledged Tourist")
+guide.Addon.db.instructions.guideEligible[7] = { gaia = true }
+guide.Addon.db.instructions.guideEligibilityKnown[7] = true
+guide.Addon.db.instructions.guideAcknowledged[7] = {}
+guide.Addon.db.instructions.guideRecords[7] = { seq = 7, actionType = "ACCEPT",
+  questID = 1235, questTitle = "Quest B" }
+guide.Addon.ApplyJournalFull("Gaia", guide.EncodeMap({
+  kind = "S", sid = "A", high = 2, paused = "0", ranges = "7-7" }))
+check(not guide.Addon.db.instructions.guideCompleted[7],
+  "empty Pause eligibility fabricated completion")
+print("chunk4 retrospective, migration, Pause and journal integration passed")
