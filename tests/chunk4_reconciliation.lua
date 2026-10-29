@@ -188,6 +188,7 @@ check(tourist.Addon.NormalizeQuestJournal(migrated) == migrated
 check(tourist.Addon.NormalizeQuestJournal(migrated) == migrated,
   "repeated journal migration must be idempotent")
 -- Production pause controls: no session reset and no paused-range instruction replay.
+tourist.Addon.GetSession = function() return tour end
 tourist.BroadcastSessionDelta = function() end
 tourist.ReconcileTouristInstructions = function() end
 tourist.loadProduction("function Addon.SetPaused(paused)", "function Addon.SetTouristSession", nil)
