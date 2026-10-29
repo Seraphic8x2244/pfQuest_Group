@@ -5565,6 +5565,21 @@ function Addon.GuideHasActiveTourist(session)
     end
   end
 
+  -- A Tourist confirmed earlier in this same Guide session can be offline
+  -- when the Guide performs the action. Phase 4b's frozen participant
+  -- baseline, NOT the display-only Offline List, is the authority.
+  local store = Addon.db and Addon.db.instructions
+  if store and store.guideSessionId == session.guideSessionId then
+    for normalized in pairs(store.guideParticipants or {}) do
+      peer = peers[normalized]
+      if not peer or not peer.session then
+        local js = Addon.db.questJournal and Addon.db.questJournal.sessions
+          and Addon.db.questJournal.sessions[session.guideSessionId]
+        local record = js and js.participants and js.participants[normalized]
+        if not (record and record.paused) then return true end
+      end
+    end
+  end
   return false
 end
 
