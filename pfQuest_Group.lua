@@ -4620,8 +4620,17 @@ function Addon.JournalSnapshot()
   if not session or session.mode ~= "TOURIST" or not entry then
     return EncodeMap({ kind = "N" })
   end
+  local boundaries = {}
+  local _, range
+  for _, range in ipairs(session.pauseRanges or {}) do
+    if tonumber(range.first) and tonumber(range.last)
+      and range.last >= range.first then
+      table.insert(boundaries, SafeString(range.first) .. "-" .. SafeString(range.last))
+    end
+  end
   return EncodeMap({ kind = "S", sid = session.guideSessionId,
-    high = entry.nextSeq or 0 })
+    high = entry.nextSeq or 0, paused = session.paused and "1" or "0",
+    ranges = table.concat(boundaries, ",") })
 end
 
 function Addon.JournalReceiveEntry(sender, sid)
@@ -4695,6 +4704,31 @@ function Addon.ApplyJournalFull(sender, payload)
   local high = tonumber(values.high)
   if not high or high < 0 or high ~= math.floor(high) then return end
   local peer = peers[NormalizeName(sender)]
+  entry.paused = values.paused == "1"
+  if values.ranges ~= nil then
+    local ranges = {}
+    local _, token
+    for _, token in ipairs(SplitPlain(values.ranges, ",")) do
+      local _, _, first, last = string.find(token, "^(%d+)%-(%d+)$")
+      first, last = tonumber(first), tonumber(last)
+      if first and last and first >= 1 and last >= first then
+        table.insert(ranges, { first = first, last = last })
+      end
+    end
+    entry.pauseRanges = ranges
+    local store = Addon.db.instructions
+    if store and store.guideSessionId == values.sid then
+      local seq, eligible
+      for seq, eligible in pairs(store.guideEligible or {}) do
+        for _, token in ipairs(ranges) do
+          if seq >= token.first and seq <= token.last then
+            eligible[NormalizeName(sender)] = nil
+            break
+          end
+        end
+      end
+    end
+  end
   peer.journalRemoteHigh = math.max(high, peer.journalRemoteHigh or 0)
   if high > (entry.receivedThrough or 0) then
     peer.journalSyncHigh = high
@@ -5131,6 +5165,7 @@ local function SessionSnapshot()
 
   return EncodeMap({
     mode = session.mode,
+    paused = session.paused and "1" or "0",
     revision = session.revision,
     guide = session.guideName,
     session = session.guideSessionId,
@@ -5223,6 +5258,7 @@ local function ApplyRemoteSession(sender, payload, checkInstructionSync)
   guideSessionId = values.session ~= "" and values.session or nil
   joinBaseline = tonumber(values.baseline)
   guideActionSeq = tonumber(values.action)
+  local paused = values.paused == "1"
 
   if joinBaseline and joinBaseline >= 0 then
     joinBaseline = math.floor(joinBaseline)
@@ -5267,9 +5303,13 @@ local function ApplyRemoteSession(sender, payload, checkInstructionSync)
     guideName = guideName,
     guideSessionId = guideSessionId,
     joinBaseline = joinBaseline,
-    guideActionSeq = guideActionSeq
+    guideActionSeq = guideActionSeq,
+    paused = paused
   }
 
+  if Addon.ClosePendingPauseRange then
+    Addon.ClosePendingPauseRange(sender, peer.session)
+  end
   Addon.UpdateGuideParticipant(sender, peer.session)
   Emit("REMOTE_SESSION_CHANGED", sender, peer.session)
   ReconcileTouristPairing(sender)
@@ -5443,6 +5483,7 @@ function Addon.GetSession()
     guideSessionId = source.guideSessionId,
     joinBaseline = source.joinBaseline,
     guideActionSeq = source.guideActionSeq,
+    paused = source.paused,
     hiddenDisparities = source.hiddenDisparities,
     dismissedObjectiveAlerts = source.dismissedObjectiveAlerts,
     acknowledgedObjectiveAlerts = source.acknowledgedObjectiveAlerts
@@ -5470,7 +5511,8 @@ function Addon.GuideHasActiveTourist(session)
       and remoteSession.mode == "TOURIST"
       and NormalizeName(remoteSession.guideName) == guideKey
       and remoteSession.guideSessionId == session.guideSessionId
-      and remoteSession.joinBaseline ~= nil then
+      and remoteSession.joinBaseline ~= nil
+      and not remoteSession.paused then
       return true
     end
   end
@@ -5577,7 +5619,16 @@ function Addon.CaptureGuideInstructionEligibility(session, seq)
   for name, baseline in pairs(store.guideParticipants or {}) do
     baseline = tonumber(baseline)
     if baseline and seq > baseline then
-      eligible[name] = true
+      local remote = peers[name] and peers[name].session
+      local recorded = Addon.db.questJournal
+        and Addon.db.questJournal.sessions
+        and Addon.db.questJournal.sessions[session.guideSessionId]
+      local participant = recorded and recorded.participants
+        and recorded.participants[name]
+      if not (remote and remote.mode == "TOURIST" and remote.paused)
+        and not (participant and participant.paused) then
+        eligible[name] = true
+      end
     end
   end
 
@@ -8221,6 +8272,9 @@ local function SessionStatusText()
   if not session or session.mode == "OFF" then
     return L.STATUS_OFF or "Mode: Off."
   end
+  if session.paused then
+    return L.STATUS_PAUSED or "Mode: Paused (same Guide session retained)."
+  end
 
   if session.mode == "GUIDE" then
     return L.STATUS_GUIDE or "Mode: Guide."
@@ -8431,6 +8485,14 @@ local function InitializeMinimapButton()
         PrintSessionText(SessionStatusText())
       end)
       add(L.MINIMAP_TOURIST or "Tourist", "TOURIST", mode == "TOURIST", true, nil)
+      if mode ~= "OFF" and Addon.db.session.guideSessionId then
+        add(Addon.db.session.paused and (L.MINIMAP_RESUME or "Resume")
+          or (L.MINIMAP_PAUSE or "Pause"), "PAUSE",
+          Addon.db.session.paused, nil, function()
+            Addon.SetPaused(not Addon.db.session.paused)
+            PrintSessionText(SessionStatusText())
+          end)
+      end
       add(L.MINIMAP_STATUS or "Status", "STATUS", false, nil, function()
         PrintSessionText(SessionStatusText())
       end)
@@ -8559,6 +8621,14 @@ local function HandleSlashCommand(message)
     else
       PrintSessionText(SessionStatusText())
     end
+  elseif command == "pause" then
+    if not Addon.SetPaused(true) then
+      PrintSessionText(L.PAUSE_UNAVAILABLE or "Pause requires an active Guide session.")
+    else PrintSessionText(SessionStatusText()) end
+  elseif command == "resume" then
+    if not Addon.SetPaused(false) then
+      PrintSessionText(L.PAUSE_UNAVAILABLE or "Resume requires an active Guide session.")
+    else PrintSessionText(SessionStatusText()) end
   elseif command == "status" then
     PrintSessionText(SessionStatusText())
   elseif command == "debug" then
@@ -8618,6 +8688,13 @@ Addon.RegisterListener("TOURIST_INSTRUCTIONS_CHANGED", RefreshGuideTouristWindow
 Addon.RegisterListener("GUIDE_INSTRUCTION_COMPLETED", HandleGuideInstructionCompleted)
 Addon.RegisterListener("TOURIST_INSTRUCTION_COMPLETED", HandleTouristInstructionCompleted)
 Addon.RegisterListener("REMOTE_INSTRUCTION_COMPLETIONS_CHANGED", RefreshGuideTouristWindow)
+Addon.RegisterListener("GUIDE_JOURNAL_CAUGHT_UP", function(sender, count)
+  local session = Addon.db and Addon.db.session
+  if session and session.mode == "GUIDE" and count and count > 0 then
+    PrintSessionText(string.format(L.JOURNAL_CAUGHT_UP
+      or "%s progressed on some quests. Records updated.", SafeString(sender)))
+  end
+end)
 
 
 SLASH_PFQUESTGROUP1 = "/pfqgroup"
