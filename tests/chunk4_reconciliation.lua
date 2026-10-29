@@ -244,9 +244,10 @@ guide.Addon.db.questJournal.sessions.A.participants.gaia.pauseRanges = {}
 guide.peers.gaia.session.paused = false
 guide.Addon.ApplyJournalFull("Gaia", guide.EncodeMap({
   kind = "S", sid = "A", high = 2, paused = "0", ranges = "6-6" }))
-check(not guide.Addon.db.instructions.guideEligible[6].gaia
-  and guide.Addon.db.instructions.guideCompleted[6],
-  "late Pause boundary failed to re-evaluate other acknowledged Tourist")
+check(not guide.Addon.db.instructions.guideEligible[6].gaia,
+  "late Pause interval did not remove Gaia eligibility")
+check(guide.Addon.db.instructions.guideCompleted[6],
+  "Guide completion did not recompute after confirmed Pause exclusion")
 guide.Addon.db.instructions.guideEligible[7] = { gaia = true }
 guide.Addon.db.instructions.guideEligibilityKnown[7] = true
 guide.Addon.db.instructions.guideAcknowledged[7] = {}
