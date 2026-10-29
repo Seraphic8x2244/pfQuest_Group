@@ -808,7 +808,7 @@ end
 -- Chunk 4 stage 1: a local durable evidence journal, not a competing quest state
 -- or instruction owner. Journal entries never become live S/D instructions.
 function Addon.NormalizeQuestJournal(journal)
-  if type(journal) ~= "table" or journal.schema ~= 1 then
+  if type(journal) ~= "table" or (journal.schema ~= 1 and journal.schema ~= 2) then
     local previous = journal
     journal = { schema = 1, sessions = {}, quarantine = {} }
     if previous ~= nil then journal.quarantine.previous = previous end
@@ -821,6 +821,50 @@ function Addon.NormalizeQuestJournal(journal)
   if type(journal.sessions) ~= "table" then
     journal.quarantine.invalidSessions = journal.sessions
     journal.sessions = {}
+  end
+  -- One-time additive migration of stage-1 journals (0.3.38-dev).
+  -- Old records remain immutable except for derived attempt ordinal metadata.
+  if journal.schema == 1 then
+    local sid, ss, participant, entry, attempt, id, event
+    local indices, count, questCounts, key, _, eventSeq
+    for sid, ss in pairs(journal.sessions) do
+      if type(ss) == "table" and type(ss.participants) == "table" then
+        for participant, entry in pairs(ss.participants) do
+          if type(entry) == "table" and type(entry.attempts) == "table" then
+            indices = {}
+            questCounts = {}
+            for id in pairs(entry.attempts) do
+              if type(id) == "number" and id >= 1 and id == math.floor(id) then
+                table.insert(indices, id)
+              end
+            end
+            table.sort(indices)
+            for _, id in ipairs(indices) do
+              attempt = entry.attempts[id]
+              if type(attempt) == "table" then
+                key = "t:" .. SafeString(attempt.questTitle)
+                count = (questCounts[key] or 0) + 1
+                questCounts[key] = count
+                if not tonumber(attempt.questOrdinal) then
+                  attempt.questOrdinal = count
+                end
+              end
+            end
+            if type(entry.events) == "table" then
+              for eventSeq, event in pairs(entry.events) do
+                if type(event) == "table" and not tonumber(event.attemptOrdinal) then
+                  attempt = entry.attempts[tonumber(event.attempt)]
+                  if type(attempt) == "table" then
+                    event.attemptOrdinal = attempt.questOrdinal
+                  end
+                end
+              end
+            end
+          end
+        end
+      end
+    end
+    journal.schema = 2
   end
   return journal
 end
@@ -4728,6 +4772,7 @@ function Addon.ApplyJournalFull(sender, payload)
         end
       end
     end
+    if Addon.RecomputeGuideCompletion then Addon.RecomputeGuideCompletion() end
   end
   peer.journalRemoteHigh = math.max(high, peer.journalRemoteHigh or 0)
   if high > (entry.receivedThrough or 0) then
@@ -4743,6 +4788,10 @@ function Addon.ApplyJournalDelta(sender, payload)
   local sid = values.sid
   if values.kind == "R" then
     Addon.SendJournalBatch(sender, sid, values.first)
+    return
+  end
+  if values.kind == "S" then
+    Addon.ApplyJournalFull(sender, payload)
     return
   end
   if values.kind ~= "B" or not Addon.JournalPeerIsTourist(sender, sid) then return end
@@ -4763,8 +4812,7 @@ function Addon.ApplyJournalDelta(sender, payload)
       entry.events[event.seq] = event
       entry.nextSeq = math.max(tonumber(entry.nextSeq) or 0, event.seq)
       changes = changes + 1
-    elseif entry.events[event.seq].actionType ~= event.actionType
-      or entry.events[event.seq].questKey ~= event.questKey then
+    elseif Addon.JournalEventWire(entry.events[event.seq]) ~= records[index] then
       -- Never overwrite previous evidence with conflicting out-of-order data.
       Addon.db.questJournal.quarantine["conflict:" .. sid .. ":"
         .. NormalizeName(sender) .. ":" .. event.seq] = records[index]
@@ -5708,6 +5756,37 @@ function Addon.RecordGuideInstructionCompletions(sender, sessionId, consumed)
   return changed
 end
 
+-- Reevaluate only actual non-empty frozen eligible sets after a verified
+-- Pause interval removes an obligation; empty eligibility is never Done.
+function Addon.RecomputeGuideCompletion()
+  local session = Addon.db and Addon.db.session
+  local store = Addon.db and Addon.db.instructions
+  if not session or session.mode ~= "GUIDE"
+    or not store or store.guideSessionId ~= session.guideSessionId then return false end
+  local changed = false
+  local seq, eligible, name, allDone
+  for seq, eligible in pairs(store.guideEligible or {}) do
+    if type(eligible) == "table" and next(eligible)
+      and store.guideEligibilityKnown and store.guideEligibilityKnown[seq]
+      and not (store.guideRemoved and store.guideRemoved[seq])
+      and not (store.guideCompleted and store.guideCompleted[seq]) then
+      allDone = true
+      for name in pairs(eligible) do
+        if not (store.guideAcknowledged and store.guideAcknowledged[seq]
+          and store.guideAcknowledged[seq][name]) then allDone = false end
+      end
+      if allDone then
+        store.guideCompleted[seq] = true
+        changed = true
+        local record = store.guideRecords and store.guideRecords[seq]
+        if record then Emit("GUIDE_INSTRUCTION_COMPLETED", CopyInstruction(record)) end
+      end
+    end
+  end
+  if changed then Emit("GUIDE_INSTRUCTIONS_CHANGED", Addon.GetGuideInstructions()) end
+  return changed
+end
+
 function Addon.SetMode(mode, guideName)
   local session
   local changed = false
@@ -5860,6 +5939,9 @@ function Addon.SetPaused(paused)
   entry.pauseRanges = session.pauseRanges
   session.revision = session.revision + 1
   BroadcastSessionDelta()
+  if session.mode == "TOURIST" then
+    Addon.SendDelta("journal", Addon.JournalSnapshot(), session.guideName)
+  end
   Emit("SESSION_CHANGED", Addon.GetSession())
   if not paused and session.mode == "TOURIST" then ReconcileTouristInstructions() end
   return true
