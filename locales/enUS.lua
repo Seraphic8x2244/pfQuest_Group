@@ -1,7 +1,7 @@
 pfQuest_Group_L = pfQuest_Group_L or {}
 local L = pfQuest_Group_L
 
-L.COMMAND_HELP = "Usage: /pfqg off | guide | tourist <player> | status | debug"
+L.COMMAND_HELP = "Usage: /pfqg off | guide | tourist <player> | pause | resume | status | debug"
 L.TOURIST_REQUIRES_GUIDE = "Tourist mode requires another player name."
 L.STATUS_OFF = "Mode: Off."
 L.STATUS_GUIDE = "Mode: Guide."
@@ -51,3 +51,9 @@ L.SHARE_NOT_IN_LOG = "Quest is no longer unambiguously in your quest log."
 L.SHARE_NOT_PUSHABLE = "This quest cannot be shared."
 L.SHARE_FAILED = "The native quest share attempt failed."
 L.SHARE_ATTEMPTED = "Quest share attempted with eligible party members; acceptance is not guaranteed."
+
+L.STATUS_PAUSED = "Mode: Paused (same Guide session retained)."
+L.MINIMAP_PAUSE = "Pause"
+L.MINIMAP_RESUME = "Resume"
+L.PAUSE_UNAVAILABLE = "Pause or Resume requires an active Guide session."
+L.JOURNAL_CAUGHT_UP = "%s progressed on some quests. Records updated."

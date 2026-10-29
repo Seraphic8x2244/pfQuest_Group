@@ -5841,11 +5841,23 @@ function Addon.SetPaused(paused)
     end
   end
   session.paused = paused
-  local entry = Addon.LocalJournalEntry(session)
-  if entry then
-    entry.paused = paused
-    entry.pauseRanges = session.pauseRanges
+  local journal = Addon.db.questJournal
+  local js = journal.sessions[session.guideSessionId]
+  if type(js) ~= "table" then
+    js = { participants = {} }
+    journal.sessions[session.guideSessionId] = js
   end
+  js.participants = js.participants or {}
+  local key = NormalizeName(playerName)
+  local entry = js.participants[key]
+  if not entry then
+    entry = { guide = session.mode == "GUIDE" and key
+      or NormalizeName(session.guideName), nextSeq = 0, nextAttempt = 0,
+      events = {}, attempts = {}, active = {} }
+    js.participants[key] = entry
+  end
+  entry.paused = paused
+  entry.pauseRanges = session.pauseRanges
   session.revision = session.revision + 1
   BroadcastSessionDelta()
   Emit("SESSION_CHANGED", Addon.GetSession())
