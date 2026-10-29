@@ -8480,7 +8480,7 @@ Addon.party = party
 Addon.RegisterStateComponent("session", SessionSnapshot, ApplyRemoteSessionFull, ApplyRemoteSessionDelta)
 Addon.RegisterStateComponent("quests", QuestSnapshot, ApplyRemoteQuestFull, ApplyRemoteQuestDelta)
 Addon.RegisterStateComponent("instructions", InstructionSnapshot, ApplyRemoteInstructionFull, ApplyRemoteInstructionDelta)
-Addon.RegisterStateComponent("journal", JournalSnapshot, ApplyJournalFull, ApplyJournalDelta)
+Addon.RegisterStateComponent("journal", Addon.JournalSnapshot, Addon.ApplyJournalFull, Addon.ApplyJournalDelta)
 
 Addon.RegisterListener("REMOTE_SESSION_CHANGED", Addon.HandleGroupHoldRemoteSession)
 Addon.RegisterListener("REMOTE_QUEST_STATE_CHANGED", Addon.HandleGroupHoldRemoteQuest)
