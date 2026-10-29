@@ -51,6 +51,8 @@ local function make()
     setfenv(chunk, e)
     return chunk()
   end
+  e.Escape = loadProduction("local function Escape(value)", "local function Unescape(value)", "Escape")
+  e.Unescape = loadProduction("local function Unescape(value)", "local function EncodeMap(values)", "Unescape")
   e.HexEncode = loadProduction("local function HexEncode(value)", "local function HexDecode(value)", "HexEncode")
   e.HexDecode = loadProduction("local function HexDecode(value)", "local function SplitPlain(value", "HexDecode")
   e.SplitPlain = loadProduction("local function SplitPlain(value, separator)", "local function Emit(eventName", "SplitPlain")
