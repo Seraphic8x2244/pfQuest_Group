@@ -805,6 +805,14 @@ local function NormalizeUIState(state)
   return state
 end
 
+local function QuestKey(questID, title)
+  if questID then
+    return "i:" .. SafeString(questID)
+  end
+
+  return "t:" .. SafeString(title)
+end
+
 -- Chunk 4 stage 1: a local durable evidence journal, not a competing quest state
 -- or instruction owner. Journal entries never become live S/D instructions.
 function Addon.NormalizeQuestJournal(journal)
@@ -1544,14 +1552,6 @@ local function ReadQuestLogTitle(index)
   end
 
   return GetQuestLogTitle(index)
-end
-
-local function QuestKey(questID, title)
-  if questID then
-    return "i:" .. SafeString(questID)
-  end
-
-  return "t:" .. SafeString(title)
 end
 
 local function ResolveQuestID(qlogIndex, title)

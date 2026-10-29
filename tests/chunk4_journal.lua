@@ -2,7 +2,10 @@
 local f = assert(io.open("pfQuest_Group.lua", "r"))
 local source = f:read("*a")
 f:close()
-local a = assert(string.find(source, "function Addon.NormalizeQuestJournal(journal)", 1, true))
+-- Include the production local helper in the same lexical chunk as the
+-- production journal action handler. A mock global QuestKey hid a real client
+-- nil-function regression in 0.3.42-dev.
+local a = assert(string.find(source, "local function QuestKey(questID, title)", 1, true))
 local b = assert(string.find(source, "local function InitializeDatabase()", a + 1, true))
 local env = {}
 setmetatable(env, { __index = _G })
@@ -12,13 +15,12 @@ env.bootId = "bootA"
 env.questState = { revision = 1 }
 env.SafeString = function(v) return v == nil and "" or tostring(v) end
 env.NormalizeName = function(v) return v and string.lower(v) or nil end
-env.QuestKey = function(id, title)
-  return id and ("i:" .. tostring(id)) or ("t:" .. tostring(title or ""))
-end
 local chunk = assert(loadstring(string.sub(source, a, b - 1)))
 setfenv(chunk, env)
 chunk()
 local function check(ok, why) assert(ok, why) end
+check(rawget(env, "QuestKey") == nil and rawget(_G, "QuestKey") == nil,
+  "journal must not rely on any global QuestKey")
 local accept = { questID = 1234, title = "A", complete = false, objectives = {} }
 local questB = { questID = 1235, title = "B", complete = false, objectives = {} }
 local session = { mode = "TOURIST", guideSessionId = "guide:session1",
