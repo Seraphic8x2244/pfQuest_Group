@@ -1216,6 +1216,10 @@ local function DispatchMessage(sender, protocolVersion, messageType, payload)
       peer.questState = nil
       peer.instructions = nil
       peer.instructionCompletions = nil
+      peer.journalRemoteHigh = nil
+      peer.journalRequested = nil
+      peer.journalSyncHigh = nil
+      peer.journalSyncChanges = nil
       incoming[senderKey] = nil
       if restarted then
         Emit("PEER_RESTARTED", sender)
@@ -4509,6 +4513,226 @@ local function DecodeInstructionCompletionWire(payload, expectedKind)
   end
 
   return decoded
+end
+
+-- Chunk 4: journal uses the existing component full/delta protocol. Full
+-- state contains only a cursor; missing immutable observations travel in
+-- bounded batches. No archive is interpreted as an instruction.
+local JOURNAL_BATCH_BUDGET = 2400
+
+local function LocalJournalEntry(session)
+  if not session or not session.guideSessionId or not Addon.db then return nil end
+  local j = Addon.db.questJournal
+  local ss = j and j.sessions and j.sessions[session.guideSessionId]
+  return ss and ss.participants and ss.participants[NormalizeName(playerName)]
+end
+
+local function JournalEventWire(event)
+  if type(event) ~= "table" or not tonumber(event.seq) then return nil end
+  local codes = { ACCEPT = "A", PROGRESS = "P", COMPLETE = "C",
+    TURNIN = "T", ABANDON = "B", DISAPPEAR = "X" }
+  local code = codes[event.actionType]
+  if not code then return nil end
+  local quest = { key = event.questKey, questID = event.questID,
+    title = event.questTitle, complete = event.complete,
+    objectives = event.objectives or {} }
+  return table.concat({ "J", SafeString(event.seq), code,
+    SafeString(event.attempt or 0), SafeString(event.attemptOrdinal or 0),
+    SafeString(event.questRevision or 0), SafeString(event.observedAt or 0),
+    EncodeQuestRecord(quest) }, ".")
+end
+
+local function DecodeJournalEvent(record)
+  local fields = SplitPlain(record, ".")
+  local types = { A = "ACCEPT", P = "PROGRESS", C = "COMPLETE",
+    T = "TURNIN", B = "ABANDON", X = "DISAPPEAR" }
+  if table.getn(fields) < 14 or fields[1] ~= "J"
+    or not types[fields[3]] then return nil end
+  local seq = tonumber(fields[2])
+  local attempt = tonumber(fields[4])
+  local ordinal = tonumber(fields[5])
+  local revision = tonumber(fields[6])
+  local stamp = tonumber(fields[7])
+  if not seq or seq < 1 or seq ~= math.floor(seq)
+    or not attempt or attempt < 1 or attempt ~= math.floor(attempt)
+    or not ordinal or ordinal < 1 or ordinal ~= math.floor(ordinal)
+    or not revision or revision < 0 or revision ~= math.floor(revision)
+    or not stamp or stamp < 0 then return nil end
+  local questWire = table.concat(fields, ".", 8)
+  local quest = DecodeQuestRecord(questWire)
+  if not quest or not quest.key or quest.key == ""
+    or (not quest.questID and quest.title == "") then return nil end
+  return { seq = seq, actionType = types[fields[3]],
+    attempt = attempt, attemptOrdinal = ordinal,
+    questRevision = revision, observedAt = stamp, questKey = quest.key,
+    questID = quest.questID, questTitle = quest.title,
+    objectives = quest.objectives or {}, complete = quest.complete,
+    evidence = types[fields[3]] == "TURNIN" and "REWARD_DIALOG_AND_LOG_REMOVAL"
+      or "REMOTE_OBSERVED" }
+end
+
+local function JournalPeerIsGuide(sender, sid)
+  local session = Addon.db and Addon.db.session
+  local peer = peers[NormalizeName(sender)]
+  return session and session.mode == "TOURIST"
+    and session.guideSessionId == sid and session.joinBaseline ~= nil
+    and NormalizeName(session.guideName) == NormalizeName(sender)
+    and peer and peer.compatible and peer.session
+    and peer.session.mode == "GUIDE" and peer.session.guideSessionId == sid
+end
+
+local function JournalPeerIsTourist(sender, sid)
+  local session = Addon.db and Addon.db.session
+  local peer = peers[NormalizeName(sender)]
+  return session and session.mode == "GUIDE"
+    and session.guideSessionId == sid and peer and peer.compatible
+    and peer.session and peer.session.mode == "TOURIST"
+    and NormalizeName(peer.session.guideName) == NormalizeName(playerName)
+    and peer.session.guideSessionId == sid
+    and peer.session.joinBaseline ~= nil
+end
+
+local function JournalSnapshot()
+  local session = Addon.db and Addon.db.session
+  local entry = LocalJournalEntry(session)
+  if not session or session.mode ~= "TOURIST" or not entry then
+    return EncodeMap({ kind = "N" })
+  end
+  return EncodeMap({ kind = "S", sid = session.guideSessionId,
+    high = entry.nextSeq or 0 })
+end
+
+local function JournalReceiveEntry(sender, sid)
+  local j = Addon.db and Addon.db.questJournal
+  local ss = j and j.sessions and j.sessions[sid]
+  if not ss then
+    ss = { participants = {} }
+    j.sessions[sid] = ss
+  end
+  if type(ss.participants) ~= "table" then return nil end
+  local key = NormalizeName(sender)
+  local entry = ss.participants[key]
+  if type(entry) ~= "table" then
+    entry = { guide = NormalizeName(playerName), nextSeq = 0,
+      receivedThrough = 0, events = {}, attempts = {}, active = {} }
+    ss.participants[key] = entry
+  end
+  if entry.guide ~= NormalizeName(playerName)
+    or type(entry.events) ~= "table" then return nil end
+  return entry
+end
+
+local function RequestJournalFrom(sender, sid, first)
+  local peer = peers[NormalizeName(sender)]
+  if not peer or peer.journalRequested == first then return end
+  if Addon.SendDelta("journal", EncodeMap({
+    kind = "R", sid = sid, first = first }), sender) then
+    peer.journalRequested = first
+  end
+end
+
+local function SendJournalBatch(sender, sid, first)
+  if not JournalPeerIsGuide(sender, sid) then return false end
+  local entry = LocalJournalEntry(Addon.db.session)
+  if not entry or type(entry.events) ~= "table" then return false end
+  first = tonumber(first)
+  if not first or first < 1 or first ~= math.floor(first) then return false end
+  local high = tonumber(entry.nextSeq) or 0
+  if first > high then return false end
+  local records = {}
+  local used = 0
+  local index
+  for index = first, math.min(high, first + 15) do
+    local encoded = JournalEventWire(entry.events[index])
+    if not encoded then break end
+    if table.getn(records) > 0 and used + string.len(encoded) > JOURNAL_BATCH_BUDGET then
+      break
+    end
+    table.insert(records, encoded)
+    used = used + string.len(encoded)
+  end
+  if table.getn(records) == 0 then return false end
+  return Addon.SendDelta("journal", EncodeMap({ kind = "B", sid = sid,
+    high = high, records = table.concat(records, "_") }), sender)
+end
+
+function Addon.PublishQuestJournalEvent(sid, entry, event)
+  local session = Addon.db and Addon.db.session
+  if not session or session.mode ~= "TOURIST"
+    or session.guideSessionId ~= sid or session.paused then return end
+  if Addon.HasCompatiblePeer(session.guideName) then
+    SendJournalBatch(session.guideName, sid, event.seq)
+  end
+end
+
+local function ApplyJournalFull(sender, payload)
+  local values = DecodeMap(payload)
+  if values.kind ~= "S" or not JournalPeerIsTourist(sender, values.sid) then return end
+  local entry = JournalReceiveEntry(sender, values.sid)
+  if not entry then return end
+  local high = tonumber(values.high)
+  if not high or high < 0 or high ~= math.floor(high) then return end
+  local peer = peers[NormalizeName(sender)]
+  peer.journalRemoteHigh = math.max(high, peer.journalRemoteHigh or 0)
+  if high > (entry.receivedThrough or 0) then
+    peer.journalSyncHigh = high
+    peer.journalSyncChanges = peer.journalSyncChanges or 0
+    peer.journalRequested = nil
+    RequestJournalFrom(sender, values.sid, (entry.receivedThrough or 0) + 1)
+  end
+end
+
+local function ApplyJournalDelta(sender, payload)
+  local values = DecodeMap(payload)
+  local sid = values.sid
+  if values.kind == "R" then
+    SendJournalBatch(sender, sid, values.first)
+    return
+  end
+  if values.kind ~= "B" or not JournalPeerIsTourist(sender, sid) then return end
+  local peer = peers[NormalizeName(sender)]
+  local entry = JournalReceiveEntry(sender, sid)
+  if not entry then return end
+  local high = tonumber(values.high)
+  if not high or high < 0 or high ~= math.floor(high) then return end
+  local records = SplitPlain(values.records or "", "_")
+  if table.getn(records) < 1 or table.getn(records) > 16 then return end
+  local changes = 0
+  local index
+  local event
+  for index = 1, table.getn(records) do
+    event = DecodeJournalEvent(records[index])
+    if not event or event.seq > high then return end
+    if not entry.events[event.seq] then
+      entry.events[event.seq] = event
+      entry.nextSeq = math.max(tonumber(entry.nextSeq) or 0, event.seq)
+      changes = changes + 1
+    elseif entry.events[event.seq].actionType ~= event.actionType
+      or entry.events[event.seq].questKey ~= event.questKey then
+      -- Never overwrite previous evidence with conflicting out-of-order data.
+      Addon.db.questJournal.quarantine["conflict:" .. sid .. ":"
+        .. NormalizeName(sender) .. ":" .. event.seq] = records[index]
+    end
+  end
+  local previousThrough = tonumber(entry.receivedThrough) or 0
+  while entry.events[previousThrough + 1] do
+    previousThrough = previousThrough + 1
+  end
+  entry.receivedThrough = previousThrough
+  peer.journalRemoteHigh = math.max(peer.journalRemoteHigh or 0, high)
+  if peer.journalSyncHigh then
+    peer.journalSyncChanges = (peer.journalSyncChanges or 0) + changes
+  end
+  peer.journalRequested = nil
+  if peer.journalSyncHigh and entry.receivedThrough >= peer.journalSyncHigh then
+    if (peer.journalSyncChanges or 0) > 0 then
+      Emit("GUIDE_JOURNAL_CAUGHT_UP", sender, peer.journalSyncChanges)
+    end
+    peer.journalSyncHigh = nil
+    peer.journalSyncChanges = 0
+  elseif entry.receivedThrough < peer.journalRemoteHigh then
+    RequestJournalFrom(sender, sid, entry.receivedThrough + 1)
+  end
 end
 
 local function InstructionSnapshot()
@@ -8256,6 +8480,7 @@ Addon.party = party
 Addon.RegisterStateComponent("session", SessionSnapshot, ApplyRemoteSessionFull, ApplyRemoteSessionDelta)
 Addon.RegisterStateComponent("quests", QuestSnapshot, ApplyRemoteQuestFull, ApplyRemoteQuestDelta)
 Addon.RegisterStateComponent("instructions", InstructionSnapshot, ApplyRemoteInstructionFull, ApplyRemoteInstructionDelta)
+Addon.RegisterStateComponent("journal", JournalSnapshot, ApplyJournalFull, ApplyJournalDelta)
 
 Addon.RegisterListener("REMOTE_SESSION_CHANGED", Addon.HandleGroupHoldRemoteSession)
 Addon.RegisterListener("REMOTE_QUEST_STATE_CHANGED", Addon.HandleGroupHoldRemoteQuest)
