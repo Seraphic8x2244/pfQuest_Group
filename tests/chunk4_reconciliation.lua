@@ -226,6 +226,7 @@ guide.Addon.db.instructions.guideParticipants = { gaia = 0, may = 0 }
 guide.Addon.db.instructions.guideEligibilityKnown = {}
 guide.Addon.db.instructions.guideCompleted = {}
 guide.Addon.db.instructions.guideRemoved = {}
+guide.peers.gaia.session.guideSessionId = "A"
 guide.peers.gaia.session.paused = true
 guide.peers.may = { compatible = true, session = { mode = "TOURIST",
   guideName = "Guide", guideSessionId = "A", joinBaseline = 0, paused = false } }
