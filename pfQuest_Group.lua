@@ -254,6 +254,8 @@ local function NormalizeSession(session)
     session.revision = math.floor(session.revision)
   end
 
+  session.paused = session.paused == true
+  if type(session.pauseRanges) ~= "table" then session.pauseRanges = {} end
   if type(session.hiddenDisparities) ~= "table" then
     session.hiddenDisparities = {}
   end
@@ -279,6 +281,8 @@ local function NormalizeSession(session)
     session.guideSessionId = nil
     session.joinBaseline = nil
     session.guideActionSeq = nil
+    session.paused = false
+    session.pauseRanges = {}
     session.hiddenDisparities = {}
     session.dismissedObjectiveAlerts = {}
     session.acknowledgedObjectiveAlerts = {}
@@ -290,6 +294,8 @@ local function NormalizeSession(session)
     if type(session.guideSessionId) ~= "string" or session.guideSessionId == "" then
       session.guideSessionId = NewSessionId()
       session.guideActionSeq = 0
+      session.paused = false
+      session.pauseRanges = {}
       session.dismissedObjectiveAlerts = {}
     end
   elseif session.mode == "TOURIST" then
@@ -316,6 +322,8 @@ local function NormalizeSession(session)
       session.joinBaseline = baseline
       if not session.guideSessionId then
         session.joinBaseline = nil
+        session.paused = false
+        session.pauseRanges = {}
         session.acknowledgedObjectiveAlerts = {}
       end
     end
@@ -884,6 +892,20 @@ function Addon.RecordQuestJournalAction(actionType, quest, context)
   if type(entry.active) ~= "table" then return false end
   if entry.guide and entry.guide ~= guide then return false end
   entry.guide = guide
+  if type(entry.pauseExcluded) ~= "table" then entry.pauseExcluded = {} end
+  if session.paused then
+    entry.pauseExcluded[key] = true
+    return false
+  end
+  if entry.pauseExcluded[key] then
+    if eventType == "ACCEPT" then
+      entry.pauseExcluded[key] = nil
+    else
+      if eventType == "TURNIN" or eventType == "ABANDON"
+        or eventType == "DISAPPEAR" then entry.pauseExcluded[key] = nil end
+      return false
+    end
+  end
 
   -- Restore monotonic high-water from actual saved entries once per client
   -- boot. Do not overwrite an older event or an existing attempt if saved
@@ -4866,7 +4888,8 @@ local function ReconcileTouristInstructions(sender)
 
   for seq, instruction in pairs(peer.instructions.instructions or {}) do
     seq = tonumber(seq)
-    if seq and seq > baseline and not store.consumed[seq] then
+    if seq and seq > baseline and not store.consumed[seq]
+      and not Addon.InstructionInPauseRange(session, seq) then
       nextPending[seq] = CopyInstruction(instruction)
     end
   end
@@ -5712,8 +5735,10 @@ function Addon.SetMode(mode, guideName)
   end
 
   if changed then
+    session.paused = false
+    session.pauseRanges = {}
     Addon.PreserveInstructionHistory(Addon.db, session)
-  Addon.db.instructions = NormalizeInstructionStore(Addon.db.instructions, session)
+    Addon.db.instructions = NormalizeInstructionStore(Addon.db.instructions, session)
     touristPendingInstructions = {}
     session.revision = session.revision + 1
     BroadcastSessionDelta()
@@ -5726,6 +5751,77 @@ function Addon.SetMode(mode, guideName)
   end
 
   return true
+end
+
+-- Pause suspends shared participation without changing the Guide session.
+function Addon.SetPaused(paused)
+  local session = Addon.db and Addon.db.session
+  if not session or not session.guideSessionId
+    or (session.mode ~= "GUIDE" and session.mode ~= "TOURIST") then
+    return false
+  end
+  paused = paused == true
+  if session.paused == paused then return true end
+  if session.mode == "TOURIST" then
+    local peer = peers[NormalizeName(session.guideName)]
+    local remote = peer and peer.session
+    if type(session.pauseRanges) ~= "table" then session.pauseRanges = {} end
+    if paused then
+      local cursor = tonumber(session.joinBaseline) or 0
+      if remote and remote.mode == "GUIDE"
+        and remote.guideSessionId == session.guideSessionId then
+        cursor = math.max(cursor, tonumber(remote.guideActionSeq) or 0)
+      end
+      if peer and peer.instructions and peer.instructions.sessionId == session.guideSessionId then
+        cursor = math.max(cursor, tonumber(peer.instructions.cursor) or 0)
+      end
+      table.insert(session.pauseRanges, { first = cursor + 1, open = true })
+    else
+      local range = session.pauseRanges[table.getn(session.pauseRanges)]
+      if range and range.open then
+        range.open = nil
+        if remote and remote.mode == "GUIDE"
+          and remote.guideSessionId == session.guideSessionId then
+          range.last = math.max(range.first - 1, tonumber(remote.guideActionSeq) or 0)
+        else
+          range.waiting = true
+        end
+      end
+    end
+  end
+  session.paused = paused
+  local entry = Addon.LocalJournalEntry(session)
+  if entry then
+    entry.paused = paused
+    entry.pauseRanges = session.pauseRanges
+  end
+  session.revision = session.revision + 1
+  BroadcastSessionDelta()
+  Emit("SESSION_CHANGED", Addon.GetSession())
+  if not paused and session.mode == "TOURIST" then ReconcileTouristInstructions() end
+  return true
+end
+
+function Addon.InstructionInPauseRange(session, seq)
+  for _, range in ipairs(session and session.pauseRanges or {}) do
+    if tonumber(range.first) and seq >= range.first
+      and (range.last == nil or seq <= range.last) then return true end
+  end
+  return false
+end
+
+function Addon.ClosePendingPauseRange(sender, remote)
+  local session = Addon.db and Addon.db.session
+  if not session or session.mode ~= "TOURIST" or session.paused
+    or not remote or remote.mode ~= "GUIDE"
+    or remote.guideSessionId ~= session.guideSessionId
+    or NormalizeName(sender) ~= NormalizeName(session.guideName) then return end
+  for _, range in ipairs(session.pauseRanges or {}) do
+    if range.waiting then
+      range.waiting = nil
+      range.last = math.max(range.first - 1, tonumber(remote.guideActionSeq) or 0)
+    end
+  end
 end
 
 function Addon.SetTouristSession(guideName, guideSessionId, joinBaseline)
@@ -5769,6 +5865,8 @@ function Addon.SetTouristSession(guideName, guideSessionId, joinBaseline)
   Addon.PreserveInstructionHistory(Addon.db, session)
   if session.guideSessionId ~= guideSessionId then
     session.acknowledgedObjectiveAlerts = {}
+    session.paused = false
+    session.pauseRanges = {}
   end
   session.guideSessionId = guideSessionId
   session.joinBaseline = baseline
@@ -5801,6 +5899,8 @@ function Addon.ClearTouristSession()
   Addon.PreserveInstructionHistory(Addon.db, session)
   session.guideSessionId = nil
   session.joinBaseline = nil
+  session.paused = false
+  session.pauseRanges = {}
   Addon.PreserveInstructionHistory(Addon.db, session)
   Addon.db.instructions = NormalizeInstructionStore(Addon.db.instructions, session)
   touristPendingInstructions = {}
@@ -5925,6 +6025,7 @@ function Addon.CreateGuideInstruction(record)
   if not session
     or session.mode ~= "GUIDE"
     or not session.guideSessionId
+    or session.paused
     or not Addon.GuideHasActiveTourist(session) then
     return false
   end
@@ -6001,7 +6102,8 @@ local function HandleInstructionQuestAction(actionType, quest, context)
   local candidateSeq
   local candidate
 
-  if not session or (actionType ~= "ACCEPT" and actionType ~= "TURNIN") then
+  if not session or session.paused
+    or (actionType ~= "ACCEPT" and actionType ~= "TURNIN") then
     return
   end
 
