@@ -216,6 +216,21 @@ tourist.Addon.ClosePendingPauseRange("Guide",
   { mode = "GUIDE", guideSessionId = "A", guideActionSeq = 7 })
 check(lastRange.last == 7 and not lastRange.waiting,
   "reconnect did not conservatively close paused interval")
+-- A Guide may issue instructions for a confirmed paired Tourist who has
+-- temporarily disconnected; missing peers are not unknown new members.
+guide.loadProduction("function Addon.GuideHasActiveTourist(session)",
+  "function Addon.UpdateGuideParticipant", nil)
+guide.Addon.db.instructions.guideParticipants = { gaia = 0 }
+guide.peers.gaia = nil
+guide.party = {}
+check(guide.Addon.GuideHasActiveTourist(guide.Addon.db.session),
+  "offline known Tourist stopped Guide instruction creation")
+guide.Addon.db.instructions.guideParticipants = {}
+check(not guide.Addon.GuideHasActiveTourist(guide.Addon.db.session),
+  "empty/unknown participant set authorized a Guide instruction")
+guide.peers.gaia = { compatible = true, session = {
+  mode = "TOURIST", guideName = "Guide", guideSessionId = "A",
+  joinBaseline = 0, paused = false } }
 -- Guide eligibility and no-empty-set-completion remain independent.
 guide.loadProduction("function Addon.CaptureGuideInstructionEligibility(session, seq)",
   "function Addon.RecordGuideInstructionCompletions", nil)
