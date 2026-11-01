@@ -7485,12 +7485,10 @@ local function RenderSingleObjectiveRows(alerts, startIndex, guideMode)
   return table.getn(alerts)
 end
 
-guideTouristUI.UpdateScrollContent = function(rowCount, reserveFooter)
+guideTouristUI.UpdateScrollContent = function(rowCount)
   local contentHeight
   local frameHeight
   local viewportHeight
-  local contentBottomInset
-  local scrollBottomInset
   local rightInset
   local needsScroll
 
@@ -7499,11 +7497,9 @@ guideTouristUI.UpdateScrollContent = function(rowCount, reserveFooter)
   end
 
   contentHeight = math.max(0, (tonumber(rowCount) or 0) * 20)
-  contentBottomInset = reserveFooter and 31 or 8
-  scrollBottomInset = reserveFooter and 31 or 24
   frameHeight = tonumber(guideTouristUI.frame and guideTouristUI.frame:GetHeight())
     or guideTouristUI.defaultHeight
-  viewportHeight = math.max(1, frameHeight - 28 - contentBottomInset)
+  viewportHeight = math.max(1, frameHeight - 28 - 8)
   needsScroll = contentHeight > viewportHeight
   rightInset = needsScroll and 26 or 8
 
@@ -7514,7 +7510,7 @@ guideTouristUI.UpdateScrollContent = function(rowCount, reserveFooter)
     guideTouristUI.frame,
     "BOTTOMRIGHT",
     -rightInset,
-    contentBottomInset
+    8
   )
 
   if guideTouristUI.scrollBar then
@@ -7525,7 +7521,7 @@ guideTouristUI.UpdateScrollContent = function(rowCount, reserveFooter)
       guideTouristUI.frame,
       "BOTTOMRIGHT",
       -7,
-      scrollBottomInset
+      24
     )
     if needsScroll then
       guideTouristUI.scrollBar:Show()
@@ -7576,6 +7572,24 @@ local function GuideTouristWindowTitle(session)
   ))
 end
 
+-- The title row owns the hidden-disparity control. An empty visible panel is
+-- subdued; content (not hidden-only disparity state) restores full opacity.
+guideTouristUI.UpdateHeaderAndAlpha = function(showHiddenControl, visibleRowCount)
+  if guideTouristUI.showHiddenButton then
+    if showHiddenControl then
+      guideTouristUI.showHiddenButton:Show()
+    else
+      guideTouristUI.showHiddenButton:Hide()
+    end
+  end
+
+  guideTouristUI.title:ClearAllPoints()
+  guideTouristUI.title:SetPoint("TOPLEFT", guideTouristUI.frame, "TOPLEFT", 10, -9)
+  guideTouristUI.title:SetPoint("TOPRIGHT", guideTouristUI.frame, "TOPRIGHT",
+    showHiddenControl and -128 or -10, -9)
+  guideTouristUI.frame:SetAlpha(visibleRowCount > 0 and 1 or 0.55)
+end
+
 local function RefreshTouristWindow(session)
   local display = BuildTouristDisplayRows()
   local alerts = BuildTouristSingleObjectiveAlerts(session)
@@ -7596,10 +7610,7 @@ local function RefreshTouristWindow(session)
     guideTouristUI.rows[index].frame:Hide()
   end
 
-  guideTouristUI.UpdateScrollContent(
-    table.getn(display) + table.getn(alerts),
-    false
-  )
+  guideTouristUI.UpdateScrollContent(table.getn(display) + table.getn(alerts))
   rowWidth = guideTouristUI.GetRowWidth()
   for index = 1, table.getn(display) do
     entry = display[index]
@@ -7637,6 +7648,7 @@ local function RefreshTouristWindow(session)
   end
 
   alertCount = RenderSingleObjectiveRows(alerts, table.getn(display), false)
+  guideTouristUI.UpdateHeaderAndAlpha(false, table.getn(display) + table.getn(alerts))
   guideTouristUI.frame:Show()
 end
 
@@ -8058,10 +8070,7 @@ local function RefreshGuideTouristWindow()
     guideTouristUI.showHidden = false
   end
 
-  guideTouristUI.UpdateScrollContent(
-    table.getn(display) + table.getn(alerts),
-    session.mode == "GUIDE" and hiddenCount > 0
-  )
+  guideTouristUI.UpdateScrollContent(table.getn(display) + table.getn(alerts))
   rowWidth = guideTouristUI.GetRowWidth()
   for index = 1, table.getn(display) do
     entry = display[index]
@@ -8169,13 +8178,10 @@ local function RefreshGuideTouristWindow()
     else
       guideTouristUI.showHiddenButton:SetText(string.format(L.DISPARITY_SHOW_HIDDEN or "Show Hidden (%d)", hiddenCount))
     end
-    guideTouristUI.showHiddenButton:Show()
-  else
-    if guideTouristUI.showHiddenButton then
-      guideTouristUI.showHiddenButton:Hide()
-    end
   end
 
+  guideTouristUI.UpdateHeaderAndAlpha(hiddenCount > 0,
+    table.getn(display) + table.getn(alerts))
   guideTouristUI.frame:Show()
 end
 
@@ -8323,7 +8329,7 @@ local function InitializeGuideTouristWindow()
   end)
 
   guideTouristUI.showHiddenButton = CreateFrame("Button", nil, guideTouristUI.frame, "UIPanelButtonTemplate")
-  guideTouristUI.showHiddenButton:SetPoint("BOTTOMLEFT", guideTouristUI.frame, "BOTTOMLEFT", 8, 7)
+  guideTouristUI.showHiddenButton:SetPoint("TOPRIGHT", guideTouristUI.frame, "TOPRIGHT", -8, -6)
   guideTouristUI.showHiddenButton:SetWidth(112)
   guideTouristUI.showHiddenButton:SetHeight(18)
   guideTouristUI.showHiddenButton:SetScript("OnClick", function()

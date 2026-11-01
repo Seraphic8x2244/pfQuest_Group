@@ -246,4 +246,59 @@ env.tooltipPeers={}
 assert(not appendTooltip(itemNode,tip) and table.getn(tip.lines)==0,
   "unshared quest incorrectly gained group objective rows")
 
+
+-- The production header/layout owners must free the old footer space and
+-- visibly fade only empty Guide/Tourist panels. Execute them under Lua 5.0.3.
+local function frameProbe()
+  return {
+    points = {},
+    ClearAllPoints = function(self) self.points = {} end,
+    SetPoint = function(self, name, parent, relative, x, y)
+      table.insert(self.points, {name=name, relative=relative, x=x, y=y})
+    end,
+    SetAlpha = function(self, alpha) self.alpha=alpha end,
+    SetHeight = function(self, height) self.height=height end,
+    GetHeight = function(self) return self.height or 154 end,
+    Hide = function(self) self.shown=false end,
+    Show = function(self) self.shown=true end,
+    SetValue = function(self, value) self.value=value end
+  }
+end
+local ui = {frame=frameProbe(), title=frameProbe(),
+  showHiddenButton=frameProbe(), scrollFrame=frameProbe(),
+  scrollBar=frameProbe(), scrollChild=frameProbe(),
+  defaultHeight=154, GetRowWidth=function() end}
+env.guideTouristUI = ui
+local updateHeader = extract("guideTouristUI.UpdateHeaderAndAlpha = function(",
+  "local function RefreshTouristWindow(", "guideTouristUI.UpdateHeaderAndAlpha", env)
+updateHeader(true, 0)
+assert(ui.showHiddenButton.shown and ui.title.points[2].x == -128
+  and ui.frame.alpha == 0.55, "hidden-only Guide header or idle alpha incorrect")
+updateHeader(false, 1)
+assert(ui.showHiddenButton.shown == false and ui.title.points[2].x == -10
+  and ui.frame.alpha == 1, "visible content must restore full alpha/title width")
+updateHeader(false, 0)
+assert(ui.frame.alpha == 0.55, "empty Tourist must be translucent")
+assert(string.find(source,
+  'guideTouristUI.showHiddenButton:SetPoint("TOPRIGHT"', 1, true),
+  "Show Hidden control is not in the title row")
+assert(not string.find(source,
+  'guideTouristUI.showHiddenButton:SetPoint("BOTTOMLEFT"', 1, true),
+  "obsolete footer control remains")
+local updateScroll = extract("guideTouristUI.UpdateScrollContent = function(rowCount)",
+  "local function HideTouristRows()", "guideTouristUI.UpdateScrollContent", env)
+updateScroll(0)
+assert(ui.scrollFrame.points[2].y == 8 and ui.scrollFrame.points[2].x == -8
+  and ui.scrollBar.shown == false, "empty viewport must use full bottom space")
+updateScroll(12)
+assert(ui.scrollFrame.points[2].y == 8 and ui.scrollFrame.points[2].x == -26
+  and ui.scrollBar.shown and ui.scrollBar.points[2].y == 24,
+  "overflow scroll must use bottom space without covering resize grip")
+assert(not string.find(source, "reserveFooter", 1, true),
+  "footer reservation still reduces content viewport")
+assert(string.find(source, "guideTouristUI.UpdateHeaderAndAlpha(false, table.getn(display) + table.getn(alerts))",1,true),
+  "Tourist render does not update idle alpha")
+assert(string.find(source, "guideTouristUI.UpdateHeaderAndAlpha(hiddenCount > 0,",1,true),
+  "Guide render does not update header and idle alpha")
+
 print("three targeted production regressions passed")
