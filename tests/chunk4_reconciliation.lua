@@ -234,7 +234,7 @@ guide.peers.gaia = { compatible = true, session = {
   mode = "TOURIST", guideName = "Guide", guideSessionId = "A",
   joinBaseline = 0, paused = false } }
 -- Guide eligibility and no-empty-set-completion remain independent.
-guide.loadProduction("function Addon.CaptureGuideInstructionEligibility(session, seq)",
+guide.loadProduction("function Addon.CaptureGuideInstructionEligibility(session, seq, requiredClass)",
   "function Addon.RecordGuideInstructionCompletions", nil)
 guide.loadProduction("function Addon.RecomputeGuideCompletion()", "function Addon.SetMode", nil)
 guide.Addon.GetGuideInstructions = function() return {} end
