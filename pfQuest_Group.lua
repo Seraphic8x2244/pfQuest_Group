@@ -7,7 +7,7 @@ local L = pfQuest_Group_L or {}
 Addon.groupContextKey = nil
 
 local PROTOCOL_PREFIX = "PFQGROUP"
-local PROTOCOL_VERSION = 7
+local PROTOCOL_VERSION = 8
 local DB_SCHEMA_VERSION = 6
 local CHUNK_SIZE = 180
 local MAX_CHUNKS = 64
@@ -341,6 +341,7 @@ local function NormalizeInstructionRecord(record, fallbackSeq)
   local npcName
   local flightName
   local npcReaction
+  local classToken
 
   if type(record) ~= "table" then
     return nil
@@ -364,6 +365,7 @@ local function NormalizeInstructionRecord(record, fallbackSeq)
   npcName = SafeString(record.npcName)
   flightName = Trim(SafeString(record.flightName))
   npcReaction = tonumber(record.npcReaction)
+  classToken = Addon.ValidClassQuestToken(record.classToken)
   if npcReaction == 4 then
     npcReaction = 4
   elseif npcReaction and npcReaction >= 5 and npcReaction <= 8 then
@@ -407,7 +409,8 @@ local function NormalizeInstructionRecord(record, fallbackSeq)
     npcName = npcName,
     flightName = flightName,
     npcReaction = npcReaction,
-    attemptOrdinal = tonumber(record.attemptOrdinal)
+    attemptOrdinal = tonumber(record.attemptOrdinal),
+    classToken = classToken
   }
 end
 
@@ -576,6 +579,7 @@ end
 local function NormalizeInstructionStore(store, session)
   local guideRecords = {}
   local guideParticipants = {}
+  local guideParticipantClasses = {}
   local guideEligible = {}
   local guideAcknowledged = {}
   local guideCompleted = {}
@@ -622,6 +626,15 @@ local function NormalizeInstructionStore(store, session)
         participantBaseline = tonumber(participantBaseline)
         if normalizedName and participantBaseline and participantBaseline >= 0 and participantBaseline <= guideCursor then
           guideParticipants[normalizedName] = math.floor(participantBaseline)
+        end
+      end
+    end
+
+    if sameGuideSession and type(store.guideParticipantClasses) == "table" then
+      for name, record in pairs(store.guideParticipantClasses) do
+        normalizedName = NormalizeName(name)
+        if normalizedName and guideParticipants[normalizedName] then
+          guideParticipantClasses[normalizedName] = Addon.ValidClassQuestToken(record)
         end
       end
     end
@@ -710,6 +723,7 @@ local function NormalizeInstructionStore(store, session)
     store.guideSessionId = session.guideSessionId
     store.guideRecords = guideRecords
     store.guideParticipants = guideParticipants
+    store.guideParticipantClasses = guideParticipantClasses
     store.guideEligible = guideEligible
     store.guideAcknowledged = guideAcknowledged
     store.guideCompleted = guideCompleted
@@ -719,6 +733,7 @@ local function NormalizeInstructionStore(store, session)
     store.guideSessionId = nil
     store.guideRecords = {}
     store.guideParticipants = {}
+    store.guideParticipantClasses = {}
     store.guideEligible = {}
     store.guideAcknowledged = {}
     store.guideCompleted = {}
@@ -1547,6 +1562,38 @@ local function RefreshParty()
   Addon.AnnounceOwnGroupContext()
 end
 
+-- Use exact quest-log class subgroups, never quest-title heuristics or DB IDs.
+Addon.classHeaderNames = {
+  WARRIOR = "Warrior", PALADIN = "Paladin", HUNTER = "Hunter",
+  ROGUE = "Rogue", PRIEST = "Priest", SHAMAN = "Shaman",
+  MAGE = "Mage", WARLOCK = "Warlock", DRUID = "Druid"
+}
+
+function Addon.ClassQuestHeaderToken(title)
+  local heading = string.lower(Trim(SafeString(title)))
+  local token
+  local name
+  local male
+  local female
+  if heading == "" then return nil end
+  for token, name in pairs(Addon.classHeaderNames) do
+    male = LOCALIZED_CLASS_NAMES_MALE and LOCALIZED_CLASS_NAMES_MALE[token]
+    female = LOCALIZED_CLASS_NAMES_FEMALE and LOCALIZED_CLASS_NAMES_FEMALE[token]
+    if heading == string.lower(name)
+      or (male and heading == string.lower(male))
+      or (female and heading == string.lower(female)) then return token end
+  end
+  return nil
+end
+
+function Addon.ValidClassQuestToken(token)
+  return type(token) == "string" and Addon.classHeaderNames[token] and token or nil
+end
+
+function Addon.ClassQuestForPlayer(questClass, playerClass)
+  return not questClass or questClass == playerClass
+end
+
 local function ReadQuestLogTitle(index)
   if pfQuestCompat and pfQuestCompat.GetQuestLogTitle then
     return pfQuestCompat.GetQuestLogTitle(index)
@@ -1629,7 +1676,7 @@ local function NormalizeObjective(index, text, objectiveType, done)
   }
 end
 
-local function BuildQuest(qlogIndex)
+local function BuildQuest(qlogIndex, classToken)
   local title, _, _, header, _, complete = ReadQuestLogTitle(qlogIndex)
   local questID
   local objectiveCount
@@ -1654,6 +1701,7 @@ local function BuildQuest(qlogIndex)
     title = title,
     complete = complete == true or complete == 1,
     qlogIndex = qlogIndex,
+    classToken = Addon.ValidClassQuestToken(classToken),
     objectives = objectives
   }
 end
@@ -1676,6 +1724,7 @@ local function CopyQuest(source)
     title = source.title,
     complete = source.complete,
     qlogIndex = source.qlogIndex,
+    classToken = source.classToken,
     objectives = {}
   }
   local index
@@ -1725,7 +1774,8 @@ local function EncodeQuestRecord(quest)
     table.insert(fields, HexEncode(objective.objectiveType))
     table.insert(fields, HexEncode(objective.text))
   end
-
+  -- Protocol 8 appends an optional class-header token after objective data.
+  table.insert(fields, SafeString(Addon.ValidClassQuestToken(quest.classToken)))
   return table.concat(fields, ".")
 end
 
@@ -1808,6 +1858,7 @@ local function DecodeQuestRecord(record)
     })
     fieldIndex = fieldIndex + 6
   end
+  quest.classToken = Addon.ValidClassQuestToken(fields[fieldIndex])
 
   return quest
 end
@@ -1866,14 +1917,21 @@ local function ScanCurrentQuests()
   local found = 0
   local qlogIndex
   local quest
+  local title
+  local isHeader
+  local classToken
 
   for qlogIndex = 1, 40 do
-    quest = BuildQuest(qlogIndex)
-    if quest then
-      quests[quest.key] = quest
-      found = found + 1
-      if numQuests and found >= numQuests then
-        break
+    title, _, _, isHeader = ReadQuestLogTitle(qlogIndex)
+    if not title then break end
+    if isHeader then
+      classToken = Addon.ClassQuestHeaderToken(title)
+    else
+      quest = BuildQuest(qlogIndex, classToken)
+      if quest then
+        quests[quest.key] = quest
+        found = found + 1
+        if numQuests and found >= numQuests then break end
       end
     end
   end
@@ -4324,7 +4382,8 @@ local function CopyInstruction(source)
     npcName = source.npcName,
     flightName = source.flightName,
     npcReaction = source.npcReaction,
-    attemptOrdinal = source.attemptOrdinal
+    attemptOrdinal = source.attemptOrdinal,
+    classToken = source.classToken
   }
 end
 
@@ -4365,7 +4424,8 @@ local function EncodeInstructionRecord(instruction)
     HexEncode(instruction.npcName),
     HexEncode(instruction.flightName),
     SafeString(instruction.npcReaction or 0),
-    SafeString(instruction.attemptOrdinal or 0)
+    SafeString(instruction.attemptOrdinal or 0),
+    SafeString(Addon.ValidClassQuestToken(instruction.classToken))
   }, ".")
 end
 
@@ -4458,7 +4518,8 @@ local function DecodeInstructionRecord(record)
     npcName = npcName,
     flightName = flightName,
     npcReaction = npcReaction,
-    attemptOrdinal = attemptOrdinal
+    attemptOrdinal = attemptOrdinal,
+    classToken = Addon.ValidClassQuestToken(fields[11])
   }
 end
 
@@ -4975,7 +5036,9 @@ local function ReconcileTouristInstructions(sender)
   for seq, instruction in pairs(peer.instructions.instructions or {}) do
     seq = tonumber(seq)
     if seq and seq > baseline and not store.consumed[seq]
-      and not Addon.InstructionInPauseRange(session, seq) then
+      and not Addon.InstructionInPauseRange(session, seq)
+      and Addon.ClassQuestForPlayer(instruction.classToken,
+        select(2, UnitClass("player"))) then
       nextPending[seq] = CopyInstruction(instruction)
     end
   end
@@ -5587,6 +5650,43 @@ function Addon.GuideHasActiveTourist(session)
   return false
 end
 
+-- Preserve known classes for already-paired offline Tourists in this session.
+-- An unknown class cannot authorize a class-only instruction.
+function Addon.GuideHasMatchingClassTourist(session, requiredClass)
+  local store = Addon.db and Addon.db.instructions
+  local guideKey = NormalizeName(playerName)
+  local name
+  local member
+  local peer
+  local remote
+  local journal
+  local participant
+  if not requiredClass then return true end
+  for name, member in pairs(party) do
+    peer = peers[name]
+    remote = peer and peer.session
+    if member.classToken == requiredClass and peer and peer.compatible
+      and remote and remote.mode == "TOURIST"
+      and NormalizeName(remote.guideName) == guideKey
+      and remote.guideSessionId == session.guideSessionId
+      and remote.joinBaseline ~= nil and not remote.paused then return true end
+  end
+  if store and store.guideSessionId == session.guideSessionId then
+    for name in pairs(store.guideParticipants or {}) do
+      peer = peers[name]
+      if not peer or not peer.session then
+        journal = Addon.db.questJournal and Addon.db.questJournal.sessions
+          and Addon.db.questJournal.sessions[session.guideSessionId]
+        participant = journal and journal.participants and journal.participants[name]
+        if store.guideParticipantClasses
+          and store.guideParticipantClasses[name] == requiredClass
+          and not (participant and participant.paused) then return true end
+      end
+    end
+  end
+  return false
+end
+
 function Addon.UpdateGuideParticipant(sender, remoteSession)
   local session = Addon.db and Addon.db.session
   local store = Addon.db and Addon.db.instructions
@@ -5620,6 +5720,10 @@ function Addon.UpdateGuideParticipant(sender, remoteSession)
       store.guideParticipants[senderKey] = baseline
       changed = true
     end
+    store.guideParticipantClasses = store.guideParticipantClasses or {}
+    if party[senderKey] and Addon.ValidClassQuestToken(party[senderKey].classToken) then
+      store.guideParticipantClasses[senderKey] = party[senderKey].classToken
+    end
 
     -- Schema-1 sessions have no authoritative historical roster. Recover
     -- provable legacy eligibility from fixed baselines, but leave those
@@ -5641,13 +5745,14 @@ function Addon.UpdateGuideParticipant(sender, remoteSession)
     -- Explicit unpairing affects future instructions only. Existing
     -- per-instruction eligibility snapshots remain immutable.
     store.guideParticipants[senderKey] = nil
+    if store.guideParticipantClasses then store.guideParticipantClasses[senderKey] = nil end
     changed = true
   end
 
   return changed
 end
 
-function Addon.CaptureGuideInstructionEligibility(session, seq)
+function Addon.CaptureGuideInstructionEligibility(session, seq, requiredClass)
   local store = Addon.db and Addon.db.instructions
   local guideKey
   local normalized
@@ -5669,6 +5774,7 @@ function Addon.CaptureGuideInstructionEligibility(session, seq)
   seq = math.floor(seq)
 
   guideKey = NormalizeName(playerName)
+  store.guideParticipantClasses = store.guideParticipantClasses or {}
   for normalized in pairs(party) do
     peer = peers[normalized]
     remoteSession = peer and peer.session
@@ -5680,12 +5786,17 @@ function Addon.CaptureGuideInstructionEligibility(session, seq)
       and remoteSession.guideSessionId == session.guideSessionId
       and remoteSession.joinBaseline ~= nil then
       store.guideParticipants[normalized] = math.floor(tonumber(remoteSession.joinBaseline) or 0)
+      if Addon.ValidClassQuestToken(party[normalized].classToken) then
+        store.guideParticipantClasses[normalized] = party[normalized].classToken
+      end
     end
   end
 
   for name, baseline in pairs(store.guideParticipants or {}) do
     baseline = tonumber(baseline)
-    if baseline and seq > baseline then
+    if baseline and seq > baseline
+      and Addon.ClassQuestForPlayer(requiredClass,
+        (party[name] and party[name].classToken) or store.guideParticipantClasses[name]) then
       local remote = peers[name] and peers[name].session
       local recorded = Addon.db.questJournal
         and Addon.db.questJournal.sessions
@@ -6197,8 +6308,12 @@ function Addon.CreateGuideInstruction(record)
     return false
   end
 
-  seq = (tonumber(session.guideActionSeq) or 0) + 1
   record = record or {}
+  record.classToken = Addon.ValidClassQuestToken(record.classToken)
+  if record.classToken and not Addon.GuideHasMatchingClassTourist(session, record.classToken) then
+    return false
+  end
+  seq = (tonumber(session.guideActionSeq) or 0) + 1
   record.seq = seq
   instruction = NormalizeInstructionRecord(record, seq)
   if not instruction then
@@ -6212,7 +6327,7 @@ function Addon.CreateGuideInstruction(record)
   store.guideSessionId = session.guideSessionId
   store.guideRecords[seq] = instruction
   store.guideRemoved[seq] = nil
-  Addon.CaptureGuideInstructionEligibility(session, seq)
+  Addon.CaptureGuideInstructionEligibility(session, seq, instruction.classToken)
   session.revision = session.revision + 1
   Addon.SendDelta("instructions", EncodeInstructionWire("D", session.guideSessionId, seq, {
     [seq] = instruction
@@ -6294,7 +6409,8 @@ local function HandleInstructionQuestAction(actionType, quest, context)
       mobID = tonumber(context and context.mobID),
       npcName = SafeString(context and context.npcName),
       npcReaction = context and context.npcReaction,
-      attemptOrdinal = context and context.journalAttemptOrdinal
+      attemptOrdinal = context and context.journalAttemptOrdinal,
+      classToken = quest and quest.classToken
     })
     return
   end
@@ -6611,7 +6727,8 @@ local function BuildGuideDisparities(session)
         and peer.questState
         and peer.questState.ready then
         for questKey, quest in pairs(questState.quests or {}) do
-          if not FindRemoteTrackerQuest(peer.questState, quest)
+          if Addon.ClassQuestForPlayer(quest.classToken, member.classToken)
+            and not FindRemoteTrackerQuest(peer.questState, quest)
             and not (guideQuestDisparityGrace[session.guideSessionId .. "|" .. SafeString(quest.key or QuestKey(quest.questID, quest.title))]
               and now < guideQuestDisparityGrace[session.guideSessionId .. "|" .. SafeString(quest.key or QuestKey(quest.questID, quest.title))]) then
             disparityKey = GuideDisparityKey(peer.name or member.name or name, quest)
@@ -6738,7 +6855,8 @@ local function BuildGuideSingleObjectiveAlerts(session)
               and remoteSession.guideSessionId == session.guideSessionId
               and remoteSession.joinBaseline ~= nil
               and peer.questState
-              and peer.questState.ready then
+              and peer.questState.ready
+              and Addon.ClassQuestForPlayer(quest.classToken, member.classToken) then
               remoteQuest = FindRemoteTrackerQuest(peer.questState, quest)
               remoteObjective = remoteQuest and FindQuestObjective(remoteQuest, objective.index or objectiveIndex)
               if remoteObjective and SharedSingleObjectiveKind(remoteQuest, remoteObjective) == kind then
@@ -6821,7 +6939,8 @@ local function BuildTouristSingleObjectiveAlerts(session)
 
   for questKey, guideQuest in pairs(peer.questState.quests or {}) do
     localQuest = FindRemoteTrackerQuest(questState, guideQuest)
-    if localQuest then
+    if localQuest and Addon.ClassQuestForPlayer(guideQuest.classToken,
+      select(2, UnitClass("player"))) then
       for objectiveIndex = 1, table.getn(guideQuest.objectives or {}) do
         guideObjective = guideQuest.objectives[objectiveIndex]
         localObjective = FindQuestObjective(localQuest, guideObjective and (guideObjective.index or objectiveIndex))

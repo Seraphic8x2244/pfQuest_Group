@@ -54,6 +54,8 @@ local function make()
   e.Escape = loadProduction("local function Escape(value)", "local function Unescape(value)", "Escape")
   e.Unescape = loadProduction("local function Unescape(value)", "local function EncodeMap(values)", "Unescape")
   e.loadProduction = loadProduction
+  loadProduction("Addon.classHeaderNames = {",
+    "local function ReadQuestLogTitle(index)", nil)
   e.HexEncode = loadProduction("local function HexEncode(value)", "local function HexDecode(value)", "HexEncode")
   e.HexDecode = loadProduction("local function HexDecode(value)", "local function SplitPlain(value", "HexDecode")
   e.SplitPlain = loadProduction("local function SplitPlain(value, separator)", "local function Emit(eventName", "SplitPlain")
@@ -367,4 +369,102 @@ check(abandonTourist.Addon.ReconcileJournalInstructions()==1
   "verified ABANDON did not exclusively acknowledge abandon row")
 check(abandonTourist.Addon.ReconcileJournalInstructions()==0,
   "duplicate abandon event replayed an acknowledgement")
+
+-- Class-specific Guide instructions/abandon notices are relevant only to
+-- matching Tourist classes; ordinary quests remain universal.
+local classEnv = make()
+check(classEnv.Addon.ClassQuestHeaderToken("Paladin")=="PALADIN"
+  and classEnv.Addon.ClassQuestHeaderToken("Priest")=="PRIEST"
+  and not classEnv.Addon.ClassQuestHeaderToken("Redridge Mountains"),
+  "class-header classifier returned wrong subgroup")
+check(classEnv.Addon.ClassQuestForPlayer("PALADIN","PALADIN")
+  and not classEnv.Addon.ClassQuestForPlayer("PALADIN","PRIEST")
+  and classEnv.Addon.ClassQuestForPlayer(nil,"PRIEST"),
+  "quest class relevance error")
+local headerRows={
+  [1]={"Redridge Mountains",true},[2]={"Ordinary Quest",false},
+  [3]={"Paladin",true},[4]={"Paladin Quest",false},
+  [5]={"Priest",true},[6]={"Priest Quest",false},
+  [7]={"Westfall",true},[8]={"Last Normal Quest",false}}
+classEnv.ReadQuestLogTitle=function(i)
+  local r=headerRows[i]
+  if r then return r[1],1,nil,r[2],false,false end
+end
+classEnv.GetNumQuestLogEntries=function() return 8,4 end
+classEnv.BuildQuest=function(i,token)
+  return {key="i:"..i,questID=i,title=headerRows[i][1],classToken=token}
+end
+local scan=classEnv.loadProduction("local function ScanCurrentQuests()",
+  "local function FindFallbackMatch(", "ScanCurrentQuests")
+local mapped=scan()
+check(mapped["i:2"] and not mapped["i:2"].classToken
+  and mapped["i:4"].classToken=="PALADIN"
+  and mapped["i:6"].classToken=="PRIEST"
+  and mapped["i:8"] and not mapped["i:8"].classToken,
+  "scanner did not scope class category by header")
+local guideClass=make()
+guideClass.playerName="Guide"
+guideClass.party={gaia={classToken="PRIEST"},may={classToken="PALADIN"}}
+guideClass.peers={
+ gaia={compatible=true,session={mode="TOURIST",guideName="Guide",
+   guideSessionId="A",joinBaseline=0,paused=false}},
+ may={compatible=true,session={mode="TOURIST",guideName="Guide",
+   guideSessionId="A",joinBaseline=0,paused=false}}
+}
+guideClass.Addon.db={
+ session={mode="GUIDE",guideSessionId="A",guideActionSeq=0},
+ instructions={guideSessionId="A",guideParticipants={},guideParticipantClasses={},
+  guideRecords={},guideEligible={},guideAcknowledged={},guideEligibilityKnown={},
+  guideCompleted={},guideRemoved={}},
+ questJournal={sessions={}}
+}
+guideClass.loadProduction("function Addon.GuideHasMatchingClassTourist(",
+  "function Addon.UpdateGuideParticipant", nil)
+guideClass.loadProduction("function Addon.CaptureGuideInstructionEligibility(",
+  "function Addon.RecordGuideInstructionCompletions",nil)
+check(guideClass.Addon.GuideHasMatchingClassTourist(guideClass.Addon.db.session,"PALADIN"),
+  "same-class Tourist not eligible")
+check(not guideClass.Addon.GuideHasMatchingClassTourist(guideClass.Addon.db.session,"MAGE"),
+  "wrong-class Tourist authorizes Mage instruction")
+check(guideClass.Addon.CaptureGuideInstructionEligibility(
+  guideClass.Addon.db.session,1,"PALADIN"),
+  "Paladin target cohort empty")
+check(guideClass.Addon.db.instructions.guideEligible[1].may
+  and not guideClass.Addon.db.instructions.guideEligible[1].gaia,
+  "Paladin instruction targeted Priest")
+check(guideClass.Addon.CaptureGuideInstructionEligibility(
+  guideClass.Addon.db.session,2,nil)
+  and guideClass.Addon.db.instructions.guideEligible[2].may
+  and guideClass.Addon.db.instructions.guideEligible[2].gaia,
+  "normal quest excluded tourists")
+guideClass.party={}
+guideClass.peers={}
+check(guideClass.Addon.GuideHasMatchingClassTourist(
+  guideClass.Addon.db.session,"PALADIN"),
+  "known paired offline Paladin lost class")
+guideClass.Addon.db.instructions.guideParticipants.gaia=nil
+guideClass.Addon.db.instructions.guideParticipantClasses.gaia=nil
+check(not guideClass.Addon.GuideHasMatchingClassTourist(
+  guideClass.Addon.db.session,"PRIEST"),
+  "mismatched offline class authorized")
+local normalizeClass=classEnv.loadProduction("local function NormalizeInstructionRecord(",
+  "-- Durable schema-v4 archive.", "NormalizeInstructionRecord")
+local classRecord=normalizeClass({seq=25,actionType="ABANDON",
+  questID=77,questTitle="Paladin Task",classToken="PALADIN"},25)
+check(classRecord and classRecord.classToken=="PALADIN",
+  "abandon class not persisted")
+local iEncode,iDecode,iWireEncode,iWireDecode=classEnv.loadProduction(
+  "local function EncodeInstructionRecord(",
+  "local function EncodeInstructionCompletionWire(",
+  "EncodeInstructionRecord, DecodeInstructionRecord, EncodeInstructionWire, DecodeInstructionWire")
+local decoded=iWireDecode(iWireEncode("D","A",25,{[25]=classRecord}),"D")
+check(decoded and decoded.instructions[25].classToken=="PALADIN",
+  "class quest instruction lost class on wire")
+local qEncode=classEnv.loadProduction("local function EncodeQuestRecord(quest)",
+  "local function EncodeQuestWire", "EncodeQuestRecord")
+local qDecode=classEnv.loadProduction("local function DecodeQuestRecord(record)",
+  "local function DecodeQuestWire", "DecodeQuestRecord")
+check(qDecode(qEncode({key="i:77",questID=77,title="Paladin Task",
+  classToken="PALADIN",objectives={}})).classToken=="PALADIN",
+  "quest-state wire lost class")
 print("chunk4 retrospective, migration, Pause and journal integration passed")
