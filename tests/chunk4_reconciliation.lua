@@ -273,4 +273,97 @@ guide.Addon.ApplyJournalFull("Gaia", guide.EncodeMap({
   kind = "S", sid = "A", high = 2, paused = "0", ranges = "7-7" }))
 check(not guide.Addon.db.instructions.guideCompleted[7],
   "empty Pause eligibility fabricated completion")
+
+-- Guide abandon notices use the existing durable instruction wire and
+-- only a verified local AbandonQuest + removal may create them.
+local noticeGuide = make()
+noticeGuide.Addon.db = {session={mode="GUIDE",guideSessionId="A",paused=false}}
+local created = {}
+noticeGuide.Addon.CreateGuideInstruction = function(record)
+  table.insert(created,record)
+  return true
+end
+local handleGuide = noticeGuide.loadProduction(
+  "local function HandleInstructionQuestAction(",
+  "function Addon.HandleFlightAction", "HandleInstructionQuestAction")
+handleGuide("REMOVE",{questID=77,title="Old Quest"},
+  {reason="UNKNOWN",questID=77,questTitle="Old Quest"})
+check(table.getn(created)==0,"unknown disappearance created abandon notice")
+handleGuide("REMOVE",{questID=77,title="Old Quest"},
+  {reason="ABANDON",questID=77,questTitle="Old Quest",journalAttemptOrdinal=3})
+check(table.getn(created)==1 and created[1].actionType=="ABANDON"
+  and created[1].questID==77 and created[1].questTitle=="Old Quest"
+  and created[1].attemptOrdinal==3,"verified Guide abandon did not emit instruction")
+noticeGuide.Addon.db.session.paused=true
+handleGuide("REMOVE",{questID=77,title="Old Quest"},
+  {reason="ABANDON",questID=77,questTitle="Old Quest"})
+check(table.getn(created)==1,"paused Guide emitted abandon notice")
+noticeGuide.Addon.db.session.paused=false
+local normalize = noticeGuide.loadProduction(
+  "local function NormalizeInstructionRecord(",
+  "-- Durable schema-v4 archive.", "NormalizeInstructionRecord")
+local normalized = normalize(created[1],12)
+check(normalized and normalized.actionType=="ABANDON"
+  and normalized.questTitle=="Old Quest","abandon instruction rejected by persistence")
+local wireEncode, wireDecode, wireEncodeList, wireDecodeList =
+  noticeGuide.loadProduction("local function EncodeInstructionRecord(",
+  "local function EncodeInstructionCompletionWire(",
+  "EncodeInstructionRecord, DecodeInstructionRecord, EncodeInstructionWire, DecodeInstructionWire")
+local wire = wireEncode(normalized)
+check(wireDecode(wire).actionType=="ABANDON"
+  and wireDecode(wire).questTitle=="Old Quest","abandon instruction wire did not roundtrip")
+local decoded = wireDecodeList(wireEncodeList("D","A",12,{[12]=normalized}),"D")
+check(decoded and decoded.instructions[12]
+  and decoded.instructions[12].actionType=="ABANDON",
+  "Guide abandon notice not transferred through existing instruction protocol")
+local displayAbandon = noticeGuide.loadProduction(
+  "local function GuideTouristInstructionText(",
+  "local function GuideInstructionAllTouristsComplete(",
+  "GuideTouristInstructionText")
+local textAbandon = displayAbandon(normalized)
+check(string.find(textAbandon,"Abandon",1,true)
+  and string.find(textAbandon,"Old Quest",1,true),
+  "Tourist abandon message lacks instruction label/quest title")
+check(string.find(source,'row.questIcon:SetTexture(abandon',1,true),
+  "abandon message missing chained Guide/Tourist icon treatment")
+local noticeTourist = make()
+noticeTourist.Addon.db={session={mode="TOURIST",guideName="Guide",
+  guideSessionId="A",joinBaseline=0,paused=false}}
+local reconciliation=0
+noticeTourist.Addon.ReconcileJournalInstructions=function()
+  reconciliation=reconciliation+1
+end
+local handleTourist=noticeTourist.loadProduction(
+  "local function HandleInstructionQuestAction(",
+  "function Addon.HandleFlightAction", "HandleInstructionQuestAction")
+handleTourist("REMOVE",{questID=77,title="Old Quest"},{reason="UNKNOWN"})
+check(reconciliation==0,"Tourist unrelated disappearance fired reconciliation")
+handleTourist("REMOVE",{questID=77,title="Old Quest"},{reason="ABANDON"})
+check(reconciliation==1,"Tourist verified abandon did not invoke journal reconciliation")
+
+-- ABANDON evidence may satisfy ABANDON only, never TURNIN or vice versa.
+local abandonTourist=make()
+abandonTourist.peers.guide={compatible=true,session={mode="GUIDE",
+  guideSessionId="A",guideActionSeq=3}}
+abandonTourist.Addon.db={session={mode="TOURIST",guideSessionId="A",
+  guideName="Guide",joinBaseline=0,paused=false},
+  instructions={touristSessionId="A",consumed={}},
+  questJournal={schema=2,sessions={A={participants={gaia={
+    guide="guide",nextSeq=2,events={
+      [1]={seq=1,actionType="DISAPPEAR",questID=77,questTitle="Old Quest",
+        attemptOrdinal=3},
+      [2]={seq=2,actionType="ABANDON",questID=77,questTitle="Old Quest",
+        attemptOrdinal=3}},
+    attempts={},active={},applied={}}}}},quarantine={}}}
+abandonTourist.touristPendingInstructions={
+  [3]={seq=3,actionType="ABANDON",questID=77,
+    questTitle="Old Quest",attemptOrdinal=3},
+  [4]={seq=4,actionType="TURNIN",questID=77,
+    questTitle="Old Quest",attemptOrdinal=3}}
+check(abandonTourist.Addon.ReconcileJournalInstructions()==1
+  and abandonTourist.Addon.db.instructions.consumed[3]
+  and not abandonTourist.Addon.db.instructions.consumed[4],
+  "verified ABANDON did not exclusively acknowledge abandon row")
+check(abandonTourist.Addon.ReconcileJournalInstructions()==0,
+  "duplicate abandon event replayed an acknowledgement")
 print("chunk4 retrospective, migration, Pause and journal integration passed")

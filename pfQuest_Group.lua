@@ -7,7 +7,7 @@ local L = pfQuest_Group_L or {}
 Addon.groupContextKey = nil
 
 local PROTOCOL_PREFIX = "PFQGROUP"
-local PROTOCOL_VERSION = 6
+local PROTOCOL_VERSION = 7
 local DB_SCHEMA_VERSION = 6
 local CHUNK_SIZE = 180
 local MAX_CHUNKS = 64
@@ -353,7 +353,8 @@ local function NormalizeInstructionRecord(record, fallbackSeq)
   seq = math.floor(seq)
 
   actionType = string.upper(SafeString(record.actionType))
-  if actionType ~= "ACCEPT" and actionType ~= "TURNIN" and actionType ~= "FLIGHT" and actionType ~= "GOSSIP" then
+  if actionType ~= "ACCEPT" and actionType ~= "TURNIN" and actionType ~= "ABANDON"
+    and actionType ~= "FLIGHT" and actionType ~= "GOSSIP" then
     return nil
   end
 
@@ -4351,7 +4352,8 @@ local function EncodeInstructionRecord(instruction)
   local actionCode = instruction.actionType == "ACCEPT"
     and "A"
     or (instruction.actionType == "TURNIN" and "T"
-      or (instruction.actionType == "GOSSIP" and "G" or "F"))
+      or (instruction.actionType == "ABANDON" and "B"
+        or (instruction.actionType == "GOSSIP" and "G" or "F")))
 
   return table.concat({
     "I",
@@ -4392,6 +4394,8 @@ local function DecodeInstructionRecord(record)
     actionType = "ACCEPT"
   elseif fields[3] == "T" then
     actionType = "TURNIN"
+  elseif fields[3] == "B" then
+    actionType = "ABANDON"
   elseif fields[3] == "F" then
     actionType = "FLIGHT"
   elseif fields[3] == "G" then
@@ -6137,7 +6141,10 @@ function Addon.ReconcileJournalInstructions()
     step = touristPendingInstructions[seq]
     selected = nil
     selectedSeq = nil
-    if step and (step.actionType == "ACCEPT" or step.actionType == "TURNIN")
+    -- A verified ABANDON is evidence for an abandon instruction only.
+    -- DISAPPEAR/REMOVE never prove turn-in or intentional abandonment.
+    if step and (step.actionType == "ACCEPT" or step.actionType == "TURNIN"
+      or step.actionType == "ABANDON")
       and not entry.applied[seq] then
       for eventSeq, event in pairs(entry.events) do
         if type(eventSeq) == "number" and type(event) == "table"
@@ -6263,9 +6270,15 @@ local function HandleInstructionQuestAction(actionType, quest, context)
   local candidate
 
   if not session or session.paused
-    or (actionType ~= "ACCEPT" and actionType ~= "TURNIN") then
+    or (actionType ~= "ACCEPT" and actionType ~= "TURNIN"
+      and not (actionType == "REMOVE"
+        and context and context.reason == "ABANDON")) then
     return
   end
+
+  -- Phase 2 supplies REMOVE only after the quest is gone. A matching
+  -- AbandonQuest hook distinguishes intentional abandon from disappearance.
+  if actionType == "REMOVE" then actionType = "ABANDON" end
 
   if session.mode == "GUIDE" and session.guideSessionId then
     if actionType == "ACCEPT" then
@@ -6446,6 +6459,10 @@ local function GuideTouristInstructionText(instruction)
     text = instruction.questTitle
   else
     text = string.format(L.QUEST_ID_FALLBACK or "Quest %d", tonumber(instruction and instruction.questID) or 0)
+  end
+
+  if instruction and instruction.actionType == "ABANDON" then
+    return string.format(L.INSTRUCTION_ABANDON or "|cffffd100Abandon|r %s", text)
   end
 
   if npcName ~= "" then
@@ -7216,7 +7233,8 @@ local function RenderChainedInstructionRow(row, instruction, width, controlWidth
   local full, prefix, marker = GuideTouristInstructionText(instruction)
   local flight = instruction and instruction.actionType == "FLIGHT"
   local gossip = instruction and instruction.actionType == "GOSSIP"
-  local npcName = (flight or gossip) and "" or Trim(SafeString(instruction and instruction.npcName))
+  local abandon = instruction and instruction.actionType == "ABANDON"
+  local npcName = (flight or gossip or abandon) and "" or Trim(SafeString(instruction and instruction.npcName))
   local primary = gossip and Trim(SafeString(instruction.npcName))
     or SafeString(instruction and instruction.questTitle)
   local gap = 4
@@ -7242,6 +7260,8 @@ local function RenderChainedInstructionRow(row, instruction, width, controlWidth
     primary = full
   elseif gossip then
     primary = GuideTouristNpcDisplayName(instruction, primary)
+  elseif abandon then
+    primary = full
   end
 
   row.inlineMarker:Hide()
@@ -7262,9 +7282,11 @@ local function RenderChainedInstructionRow(row, instruction, width, controlWidth
   elseif flight then
     row.flightIcon:Show()
   else
-    row.questIcon:SetTexture(instruction and instruction.actionType == "ACCEPT"
-      and "Interface\\GossipFrame\\AvailableQuestIcon"
-      or "Interface\\GossipFrame\\ActiveQuestIcon")
+    row.questIcon:SetTexture(abandon
+      and "Interface\\AddOns\\pfQuest_Group\\assets\\trash-2"
+      or (instruction and instruction.actionType == "ACCEPT"
+        and "Interface\\GossipFrame\\AvailableQuestIcon"
+        or "Interface\\GossipFrame\\ActiveQuestIcon"))
     row.questIcon:SetTexCoord(0, 1, 0, 1)
     row.questIcon:Show()
   end
