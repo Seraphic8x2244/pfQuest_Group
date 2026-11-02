@@ -277,6 +277,7 @@ check(not guide.Addon.db.instructions.guideCompleted[7],
 -- Guide abandon notices use the existing durable instruction wire and
 -- only a verified local AbandonQuest + removal may create them.
 local noticeGuide = make()
+noticeGuide.L = {}
 noticeGuide.Addon.db = {session={mode="GUIDE",guideSessionId="A",paused=false}}
 local created = {}
 noticeGuide.Addon.CreateGuideInstruction = function(record)
