@@ -1590,6 +1590,12 @@ function Addon.ValidClassQuestToken(token)
   return type(token) == "string" and Addon.classHeaderNames[token] and token or nil
 end
 
+function Addon.PlayerClassToken()
+  if type(UnitClass) ~= "function" then return nil end
+  local localized, token = UnitClass("player")
+  return token
+end
+
 function Addon.ClassQuestForPlayer(questClass, playerClass)
   return not questClass or questClass == playerClass
 end
@@ -5039,7 +5045,7 @@ local function ReconcileTouristInstructions(sender)
       and not Addon.InstructionInPauseRange(session, seq)
       and (not instruction.classToken or (UnitClass
         and Addon.ClassQuestForPlayer(instruction.classToken,
-          select(2, UnitClass("player"))))) then
+          Addon.PlayerClassToken()))) then
       nextPending[seq] = CopyInstruction(instruction)
     end
   end
@@ -6942,7 +6948,7 @@ local function BuildTouristSingleObjectiveAlerts(session)
     localQuest = FindRemoteTrackerQuest(questState, guideQuest)
     if localQuest and (not guideQuest.classToken or (UnitClass
       and Addon.ClassQuestForPlayer(guideQuest.classToken,
-        select(2, UnitClass("player"))))) then
+        Addon.PlayerClassToken()))) then
       for objectiveIndex = 1, table.getn(guideQuest.objectives or {}) do
         guideObjective = guideQuest.objectives[objectiveIndex]
         localObjective = FindQuestObjective(localQuest, guideObjective and (guideObjective.index or objectiveIndex))
