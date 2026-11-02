@@ -5037,8 +5037,9 @@ local function ReconcileTouristInstructions(sender)
     seq = tonumber(seq)
     if seq and seq > baseline and not store.consumed[seq]
       and not Addon.InstructionInPauseRange(session, seq)
-      and Addon.ClassQuestForPlayer(instruction.classToken,
-        select(2, UnitClass("player"))) then
+      and (not instruction.classToken or (UnitClass
+        and Addon.ClassQuestForPlayer(instruction.classToken,
+          select(2, UnitClass("player"))))) then
       nextPending[seq] = CopyInstruction(instruction)
     end
   end
@@ -6939,8 +6940,9 @@ local function BuildTouristSingleObjectiveAlerts(session)
 
   for questKey, guideQuest in pairs(peer.questState.quests or {}) do
     localQuest = FindRemoteTrackerQuest(questState, guideQuest)
-    if localQuest and Addon.ClassQuestForPlayer(guideQuest.classToken,
-      select(2, UnitClass("player"))) then
+    if localQuest and (not guideQuest.classToken or (UnitClass
+      and Addon.ClassQuestForPlayer(guideQuest.classToken,
+        select(2, UnitClass("player"))))) then
       for objectiveIndex = 1, table.getn(guideQuest.objectives or {}) do
         guideObjective = guideQuest.objectives[objectiveIndex]
         localObjective = FindQuestObjective(localQuest, guideObjective and (guideObjective.index or objectiveIndex))

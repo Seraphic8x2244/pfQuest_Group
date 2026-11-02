@@ -51,6 +51,8 @@ local function loadProduction(startText, endText, returnText)
   return chunk()
 end
 local function check(value, message) assert(value, message) end
+loadProduction("Addon.classHeaderNames = {",
+  "local function ReadQuestLogTitle(index)", "Addon.ClassQuestHeaderToken")
 local normalizeSession = loadProduction("local function NormalizeSession(session)", "local function NormalizeInstructionRecord", "NormalizeSession")
 env.NormalizeInstructionRecord = loadProduction("local function NormalizeInstructionRecord(record, fallbackSeq)", "-- Durable schema-v4 archive.", "NormalizeInstructionRecord")
 loadProduction("function Addon.PreserveInstructionHistory(db, sourceSession)", "local function NormalizeInstructionStore", "Addon.PreserveInstructionHistory")
@@ -167,3 +169,22 @@ check(env.Addon.SetMode("OFF"), "explicit OFF refused")
 check(tourist.session.mode == "OFF", "explicit OFF did not close local projection")
 check(tourist.history.touristSessions.guide.A.joinBaseline == 8, "explicit OFF deleted history")
 print("production normalization/reconnect regressions passed")
+
+-- Guide-origin class metadata filters Tourist projections before display,
+-- including ABANDON notices, with no fabricated consumed/Done record.
+env.UnitClass = function() return "Priest", "PRIEST" end
+local classGuideRecord = { seq=14, actionType="ABANDON", questID=300,
+  questTitle="Paladin Quest", classToken="PALADIN" }
+local classNormalRecord = { seq=15, actionType="ACCEPT", questID=301,
+  questTitle="Ordinary Quest" }
+env.peers.guide.instructions = { sessionId="A", cursor=15, instructions={
+  [14]=classGuideRecord, [15]=classNormalRecord } }
+check(env.ReconcileTouristInstructions("Guide"), "class-filter reconcile did not run")
+check(not env.touristPendingInstructions[14] and env.touristPendingInstructions[15],
+  "Priest received mismatched Paladin obligation or lost ordinary quest")
+check(not tourist.instructions.consumed[14],
+  "class-filter projected a fake completion")
+env.UnitClass = function() return "Paladin", "PALADIN" end
+check(env.ReconcileTouristInstructions("Guide")
+  and env.touristPendingInstructions[14],
+  "Paladin did not receive matching class abandon notice")
