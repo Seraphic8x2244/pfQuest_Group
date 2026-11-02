@@ -177,6 +177,14 @@ local classGuideRecord = { seq=14, actionType="ABANDON", questID=300,
   questTitle="Paladin Quest", classToken="PALADIN" }
 local classNormalRecord = { seq=15, actionType="ACCEPT", questID=301,
   questTitle="Ordinary Quest" }
+-- The preceding regression deliberately ended in OFF mode and session B;
+-- a live projection needs a separate paired Tourist session and Guide peer.
+tourist.session.mode="TOURIST"
+tourist.session.guideName="Guide"
+tourist.session.guideSessionId="A"
+tourist.session.joinBaseline=0
+tourist.instructions={touristSessionId="A",consumed={}}
+env.peers.guide.session={mode="GUIDE",guideSessionId="A",guideActionSeq=15}
 env.peers.guide.instructions = { sessionId="A", cursor=15, instructions={
   [14]=classGuideRecord, [15]=classNormalRecord } }
 check(env.ReconcileTouristInstructions("Guide"), "class-filter reconcile did not run")
