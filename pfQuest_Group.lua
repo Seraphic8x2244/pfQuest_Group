@@ -7803,17 +7803,19 @@ end
 
 local function TryNativeShareGuideQuest(quest)
   local session = Addon.db and Addon.db.session
-  local count
   local previous
+  local selected
+  local matches
+  local count
   local index
   local title
   local header
+  local collapsed
   local resolved
-  local selected
-  local matches = 0
   local ok
   local outcome
   local message
+  local expanded = {}
 
   if not session or session.mode ~= "GUIDE" or not quest then return false end
   if type(GetNumQuestLogEntries) ~= "function"
@@ -7825,36 +7827,60 @@ local function TryNativeShareGuideQuest(quest)
   elseif GetNumPartyMembers() == 0 then
     message = L.SHARE_NO_PARTY or "Join a party before sharing quests."
   else
-    count = GetNumQuestLogEntries() or 0
-    for index = 1, count do
-      title, _, _, header = ReadQuestLogTitle(index)
-      if title == quest.title and not header then
-        resolved = ResolveQuestID(index, title)
-        if not quest.questID or not resolved or tonumber(quest.questID) == resolved then
-          matches = matches + 1
-          selected = index
-          if quest.questID and resolved == tonumber(quest.questID) then
-            matches = 1
-            break
+    previous = GetQuestLogSelection()
+
+    -- Resolve a LIVE log entry. Quest IDs may be unavailable, but two
+    -- potentially matching titles must never be shared ambiguously.
+    local function FindShareEntry()
+      local found
+      local candidates = 0
+      local qlogCount = GetNumQuestLogEntries() or 0
+      local qlogTitle
+      local qlogHeader
+      local qlogID
+      for index = 1, qlogCount do
+        qlogTitle, _, _, qlogHeader = ReadQuestLogTitle(index)
+        if qlogTitle == quest.title and not qlogHeader then
+          qlogID = ResolveQuestID(index, qlogTitle)
+          if not quest.questID or not qlogID or tonumber(quest.questID) == qlogID then
+            candidates = candidates + 1
+            found = index
           end
         end
       end
+      return found, candidates
     end
+
+    selected, matches = FindShareEntry()
+    -- The Guide panel can still show a disparity from the last quest scan
+    -- after a quest-log category has been collapsed. Expand only if lookup
+    -- fails, then collapse exactly the headers expanded here, in reverse
+    -- index order so the player's original category layout is preserved.
+    if matches ~= 1 and type(ExpandQuestHeader) == "function"
+      and type(CollapseQuestHeader) == "function" then
+      index = 1
+      while index <= (GetNumQuestLogEntries() or 0) do
+        title, _, _, header, collapsed = ReadQuestLogTitle(index)
+        if header and collapsed then
+          ok = pcall(ExpandQuestHeader, index)
+          if ok then table.insert(expanded, index) end
+        end
+        index = index + 1
+      end
+      if table.getn(expanded) > 0 then
+        selected, matches = FindShareEntry()
+      end
+    end
+
     if not selected or matches ~= 1 then
       message = L.SHARE_NOT_IN_LOG or "Quest is no longer unambiguously in your quest log."
     else
-      previous = GetQuestLogSelection()
       ok, outcome = pcall(function()
         SelectQuestLogEntry(selected)
         if not GetQuestLogPushable() then return "not_pushable" end
         QuestLogPushQuest()
         return "attempted"
       end)
-      -- Quest sharing uses a temporarily selected native log entry. Restore
-      -- the user's selection even when the push API raises an exception.
-      if previous and previous > 0 and previous <= (GetNumQuestLogEntries() or 0) then
-        pcall(SelectQuestLogEntry, previous)
-      end
       if not ok then
         message = L.SHARE_FAILED or "The native quest share attempt failed."
       elseif outcome == "not_pushable" then
@@ -7862,6 +7888,15 @@ local function TryNativeShareGuideQuest(quest)
       else
         message = L.SHARE_ATTEMPTED or "Quest share attempted with eligible party members; acceptance is not guaranteed."
       end
+    end
+
+    -- Restore both view and selection even when GetQuestLogPushable/Push
+    -- throws. The original quest index is meaningful again after collapsing.
+    for index = table.getn(expanded), 1, -1 do
+      pcall(CollapseQuestHeader, expanded[index])
+    end
+    if previous and previous > 0 and previous <= (GetNumQuestLogEntries() or 0) then
+      pcall(SelectQuestLogEntry, previous)
     end
   end
   if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then

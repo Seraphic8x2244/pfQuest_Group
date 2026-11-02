@@ -126,6 +126,51 @@ env.QuestLogPushQuest=function() pushCount=pushCount+1 end
 guideRow.disparityQuest={title="A real quest",questID=123}
 guideRow.share.scripts.OnClick()
 assert(pushCount==2 and selected==4, "Guide name click failed native share/selection restoration")
+
+-- Production regression: previously visible Guide disparity remains shareable
+-- after its quest-log category is collapsed; temporary expansion is restored.
+local wasCollapsed = true
+local expandedCount = 0
+local collapsedCount = 0
+selected = 3
+canPush = true
+env.Addon.db.session.mode = "GUIDE"
+env.GetNumQuestLogEntries = function() return wasCollapsed and 3 or 4 end
+env.ReadQuestLogTitle = function(n)
+  if n == 1 then return "Paladin", nil, nil, true, wasCollapsed end
+  if not wasCollapsed and n == 2 then return "A real quest", nil, nil, false end
+  return "Other", nil, nil, false
+end
+env.ExpandQuestHeader = function(n)
+  assert(n==1 and wasCollapsed)
+  wasCollapsed = false
+  expandedCount = expandedCount+1
+end
+env.CollapseQuestHeader = function(n)
+  assert(n==1 and not wasCollapsed)
+  wasCollapsed = true
+  collapsedCount = collapsedCount+1
+end
+env.ResolveQuestID = function(n) if n==2 then return 123 end end
+env.QuestLogPushQuest = function()
+  assert(not wasCollapsed and selected==2, "sharing wrong quest/selection")
+  pushCount=pushCount+1
+end
+assert(share({title="A real quest",questID=123}),
+  "collapsed-header share failed")
+assert(wasCollapsed and selected==3 and expandedCount==1
+  and collapsedCount==1, "sharing altered quest-log layout/selection")
+-- A native push exception cannot leave a temporary header expansion behind.
+env.QuestLogPushQuest = function() error("Turtle native push error") end
+assert(not share({title="A real quest",questID=123}))
+assert(wasCollapsed and selected==3 and expandedCount==2
+  and collapsedCount==2, "native error left quest-log headers expanded")
+-- Missing quests still fail safely; neither quest state nor Guide journal is
+-- rewritten as a side effect of the share lookup.
+assert(not share({title="Not actually in log",questID=987}))
+assert(wasCollapsed and selected==3 and expandedCount==3
+  and collapsedCount==3, "not-in-log lookup altered category state")
+
 assert(string.find(source, "SetGuideDisparityHidden(row.disparityKey", 1, true))
 
 local remoteQuest={questID=123,title="A real quest",objectives={{index=1,current=1,required=1}}}
